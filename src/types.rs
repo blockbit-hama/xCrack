@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use rust_decimal::Decimal;
-use ethers::types::{H160, H256, U256};
+use alloy::primitives::{Address, B256, U256};
 use chrono::{DateTime, Utc};
 
 /// Transaction representation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
-    pub hash: H256,
-    pub from: H160,
-    pub to: Option<H160>,
+    pub hash: B256,
+    pub from: Address,
+    pub to: Option<Address>,
     pub value: U256,
     pub gas_price: U256,
     pub gas_limit: U256,
@@ -22,25 +22,35 @@ pub struct Transaction {
 /// Strategy types
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum StrategyType {
-    Arbitrage,
     Sandwich,
     Liquidation,
+    MicroArbitrage, // 초고속 거래소간 마이크로 아비트래지
     // TODO: 향후 구현 예정
     // Frontrun,
     // Backrun,
 }
 
+impl std::fmt::Display for StrategyType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StrategyType::Sandwich => write!(f, "Sandwich"),
+            StrategyType::Liquidation => write!(f, "Liquidation"),
+            StrategyType::MicroArbitrage => write!(f, "MicroArbitrage"),
+        }
+    }
+}
+
 /// Opportunity types  
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OpportunityType {
-    Arbitrage,
     Sandwich,
     Liquidation,
+    MicroArbitrage,
     MevBoost,
 }
 
 /// MEV Opportunity
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Opportunity {
     pub id: String,
     pub opportunity_type: OpportunityType,
@@ -54,7 +64,8 @@ pub struct Opportunity {
     pub details: OpportunityDetails,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     Low,
     Medium,
@@ -62,45 +73,181 @@ pub enum Priority {
     Urgent,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OpportunityDetails {
     Arbitrage(ArbitrageDetails),
     Sandwich(SandwichDetails),
     Liquidation(LiquidationDetails),
+    MicroArbitrage(MicroArbitrageDetails),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ArbitrageDetails {
-    pub token_in: H160,
-    pub token_out: H160,
+    pub token_in: Address,
+    pub token_out: Address,
     pub amount_in: U256,
     pub amount_out: U256,
     pub dex_path: Vec<String>,
     pub price_impact: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SandwichDetails {
     pub victim_transaction: Transaction,
     pub frontrun_amount: U256,
     pub backrun_amount: U256,
     pub target_slippage: f64,
-    pub pool_address: H160,
+    pub pool_address: Address,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LiquidationDetails {
     pub protocol: String,
-    pub user: H160,
-    pub collateral_asset: H160,
-    pub debt_asset: H160,
+    pub user: Address,
+    pub collateral_asset: Address,
+    pub debt_asset: Address,
     pub collateral_amount: U256,
     pub debt_amount: U256,
     pub health_factor: Decimal,
 }
 
+/// 마이크로 아비트래지 세부 정보
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MicroArbitrageDetails {
+    pub token_symbol: String,
+    pub buy_exchange: ExchangeInfo,
+    pub sell_exchange: ExchangeInfo,
+    pub amount: U256,
+    pub buy_price: Decimal,
+    pub sell_price: Decimal,
+    pub price_diff: Decimal,
+    pub profit_percentage: f64,
+    pub execution_time_ms: u64,
+    pub order_books: Vec<OrderBookSnapshot>,
+}
+
+/// 거래소 정보
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExchangeInfo {
+    pub name: String,
+    pub exchange_type: ExchangeType,
+    pub api_endpoint: String,
+    pub trading_pairs: Vec<String>,
+    pub fee_percentage: f64,
+    pub min_order_size: U256,
+    pub max_order_size: U256,
+    pub latency_ms: u64,
+}
+
+/// 거래소 타입
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ExchangeType {
+    DEX, // 탈중앙화 거래소
+    CEX, // 중앙화 거래소
+}
+
+/// 실시간 가격 데이터
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PriceData {
+    pub symbol: String,
+    pub exchange: String,
+    pub bid: Decimal,
+    pub ask: Decimal,
+    pub last_price: Decimal,
+    pub volume_24h: U256,
+    pub timestamp: DateTime<Utc>,
+    pub sequence: u64, // 순서 보장을 위한 시퀀스 번호
+}
+
+/// 오더북 스냅샷
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrderBookSnapshot {
+    pub exchange: String,
+    pub symbol: String,
+    pub bids: Vec<OrderBookLevel>,
+    pub asks: Vec<OrderBookLevel>,
+    pub timestamp: DateTime<Utc>,
+    pub sequence: u64,
+}
+
+/// 오더북 레벨 (가격, 수량)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrderBookLevel {
+    pub price: Decimal,
+    pub quantity: U256,
+}
+
+/// 마이크로 아비트래지 기회
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MicroArbitrageOpportunity {
+    pub token_symbol: String,
+    pub buy_exchange: String,
+    pub sell_exchange: String,
+    pub buy_price: Decimal,
+    pub sell_price: Decimal,
+    pub price_spread: Decimal,
+    pub profit_percentage: f64,
+    pub max_amount: U256,
+    pub execution_window_ms: u64,
+    pub confidence_score: f64,
+}
+
+/// 주문 실행 결과
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrderExecutionResult {
+    pub order_id: String,
+    pub exchange: String,
+    pub symbol: String,
+    pub side: OrderSide,
+    pub amount: U256,
+    pub price: Decimal,
+    pub filled_amount: U256,
+    pub filled_price: Decimal,
+    pub status: OrderStatus,
+    pub execution_time: DateTime<Utc>,
+    pub latency_ms: u64,
+    pub fees: U256,
+}
+
+/// 주문 방향
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum OrderSide {
+    Buy,
+    Sell,
+}
+
+/// 주문 상태
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum OrderStatus {
+    Pending,
+    PartiallyFilled,
+    Filled,
+    Cancelled,
+    Rejected,
+    Expired,
+}
+
+/// 마이크로 아비트래지 통계
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MicroArbitrageStats {
+    pub total_opportunities: u64,
+    pub executed_trades: u64,
+    pub successful_trades: u64,
+    pub failed_trades: u64,
+    pub total_volume: U256,
+    pub total_profit: U256,
+    pub total_fees: U256,
+    pub avg_profit_per_trade: U256,
+    pub avg_execution_time_ms: f64,
+    pub success_rate: f64,
+    pub profit_rate: f64,
+    pub uptime_percentage: f64,
+    pub exchanges_monitored: u32,
+    pub pairs_monitored: u32,
+}
+
 /// Bundle representation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Bundle {
     pub id: String,
     pub transactions: Vec<Transaction>,
@@ -111,7 +258,7 @@ pub struct Bundle {
     pub max_priority_fee_per_gas: Option<U256>,
     pub priority: Priority,
     pub strategy: StrategyType,
-    pub hash: Option<H256>,
+    pub hash: Option<B256>,
     pub timestamp: DateTime<Utc>,
     pub expiry_time: DateTime<Utc>,
 }
@@ -129,10 +276,10 @@ pub enum BundleStatus {
 }
 
 /// Bundle result
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BundleResult {
     pub bundle_id: String,
-    pub bundle_hash: H256,
+    pub bundle_hash: B256,
     pub status: BundleStatus,
     pub block_number: Option<u64>,
     pub actual_profit: Option<U256>,
@@ -142,11 +289,11 @@ pub struct BundleResult {
 }
 
 /// Pool state for AMM calculations
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PoolState {
-    pub pair_address: H160,
-    pub token0: H160,
-    pub token1: H160,
+    pub pair_address: Address,
+    pub token0: Address,
+    pub token1: Address,
     pub reserve0: U256,
     pub reserve1: U256,
     pub fee: u32, // Fee in basis points (300 = 0.3%)
@@ -156,18 +303,18 @@ pub struct PoolState {
 }
 
 /// Token information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TokenInfo {
-    pub address: H160,
+    pub address: Address,
     pub symbol: String,
     pub decimals: u8,
     pub name: String,
 }
 
 /// Price information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PriceInfo {
-    pub token: H160,
+    pub token: Address,
     pub price: Decimal,
     pub dex: String,
     pub timestamp: DateTime<Utc>,
@@ -175,7 +322,7 @@ pub struct PriceInfo {
 }
 
 /// Simulation result
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SimulationResult {
     pub success: bool,
     pub profit: U256,
@@ -188,7 +335,7 @@ pub struct SimulationResult {
 }
 
 /// Gas estimation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GasEstimate {
     pub gas_limit: u64,
     pub gas_price: U256,
@@ -198,7 +345,7 @@ pub struct GasEstimate {
 }
 
 /// Fee data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FeeData {
     pub gas_price: U256,
     pub max_fee_per_gas: U256,
@@ -207,7 +354,7 @@ pub struct FeeData {
 }
 
 /// Performance metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PerformanceMetrics {
     pub transactions_processed: u64,
     pub opportunities_found: u64,
@@ -222,7 +369,7 @@ pub struct PerformanceMetrics {
 }
 
 /// Alert types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Alert {
     pub id: String,
     pub alert_type: AlertType,
@@ -233,7 +380,7 @@ pub struct Alert {
     pub acknowledged: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AlertType {
     Profit,
     Error,
@@ -242,7 +389,7 @@ pub enum AlertType {
 }
 
 /// Profit report
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProfitReport {
     pub date: String,
     pub total_profit: U256,
@@ -254,7 +401,7 @@ pub struct ProfitReport {
     pub strategies: HashMap<StrategyType, StrategyStats>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StrategyStats {
     pub profit: U256,
     pub count: u64,
@@ -349,7 +496,7 @@ impl Opportunity {
         if self.gas_estimate == 0 {
             return 0.0;
         }
-        self.expected_profit.as_u128() as f64 / self.gas_estimate as f64
+        self.expected_profit.to::<u128>() as f64 / self.gas_estimate as f64
     }
 }
 
@@ -398,7 +545,7 @@ impl Bundle {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use ethers::types::{H160, H256, U256};
+    use alloy::primitives::{Address, B256, U256};
     use std::str::FromStr;
 
     #[test]
@@ -422,8 +569,8 @@ mod tests {
     #[test]
     fn test_opportunity_creation() {
         let details = OpportunityDetails::Arbitrage(ArbitrageDetails {
-            token_in: H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-            token_out: H160::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
+            token_in: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+            token_out: Address::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
             amount_in: U256::from(1000000000000000000u64), // 1 ETH
             amount_out: U256::from(2000000000u64), // 2000 USDC
             dex_path: vec!["uniswap_v2".to_string(), "sushiswap".to_string()],
@@ -431,9 +578,9 @@ mod tests {
         });
         
         let opportunity = Opportunity::new(
-            OpportunityType::Arbitrage,
-            StrategyType::Arbitrage,
-            U256::from(50000000000000000u64), // 0.05 ETH profit
+            OpportunityType::MicroArbitrage,
+            StrategyType::MicroArbitrage,
+            U256::from(60000000000000000u64), // 0.06 ETH profit
             0.8,
             200_000,
             1000,
@@ -442,9 +589,9 @@ mod tests {
         
         // Test basic fields
         assert!(!opportunity.id.is_empty());
-        assert!(matches!(opportunity.opportunity_type, OpportunityType::Arbitrage));
-        assert!(matches!(opportunity.strategy, StrategyType::Arbitrage));
-        assert_eq!(opportunity.expected_profit, U256::from(50000000000000000u64));
+        assert!(matches!(opportunity.opportunity_type, OpportunityType::MicroArbitrage));
+        assert!(matches!(opportunity.strategy, StrategyType::MicroArbitrage));
+        assert_eq!(opportunity.expected_profit, U256::from(60000000000000000u64));
         assert_eq!(opportunity.confidence, 0.8);
         assert_eq!(opportunity.gas_estimate, 200_000);
         assert_eq!(opportunity.expiry_block, 1000);
@@ -458,22 +605,22 @@ mod tests {
         // Test profit per gas calculation
         let profit_per_gas = opportunity.profit_per_gas();
         assert!(profit_per_gas > 0.0);
-        assert_eq!(profit_per_gas, 50000000000000000.0 / 200_000.0);
+        assert_eq!(profit_per_gas, 60000000000000000.0 / 200_000.0);
     }
 
     #[test]
     fn test_opportunity_priority_calculation() {
         // High priority opportunity (> 0.1 ETH profit)
         let high_profit_opp = Opportunity::new(
-            OpportunityType::Arbitrage,
-            StrategyType::Arbitrage,
+            OpportunityType::MicroArbitrage,
+            StrategyType::MicroArbitrage,
             U256::from(200000000000000000u64), // 0.2 ETH profit
             0.9,
             300_000,
             1000,
             OpportunityDetails::Arbitrage(ArbitrageDetails {
-                token_in: H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                token_out: H160::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
+                token_in: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                token_out: Address::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
                 amount_in: U256::from(1000000000000000000u64),
                 amount_out: U256::from(2000000000000000000u64),
                 dex_path: vec!["uniswap_v2".to_string()],
@@ -484,15 +631,15 @@ mod tests {
         
         // Medium priority opportunity (0.05-0.1 ETH profit)
         let medium_profit_opp = Opportunity::new(
-            OpportunityType::Arbitrage,
-            StrategyType::Arbitrage,
+            OpportunityType::MicroArbitrage,
+            StrategyType::MicroArbitrage,
             U256::from(80000000000000000u64), // 0.08 ETH profit
             0.8,
             250_000,
             1000,
             OpportunityDetails::Arbitrage(ArbitrageDetails {
-                token_in: H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                token_out: H160::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
+                token_in: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                token_out: Address::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
                 amount_in: U256::from(1000000000000000000u64),
                 amount_out: U256::from(1800000000000000000u64),
                 dex_path: vec!["uniswap_v2".to_string()],
@@ -503,15 +650,15 @@ mod tests {
         
         // Low priority opportunity (< 0.05 ETH profit)
         let low_profit_opp = Opportunity::new(
-            OpportunityType::Arbitrage,
-            StrategyType::Arbitrage,
+            OpportunityType::MicroArbitrage,
+            StrategyType::MicroArbitrage,
             U256::from(10000000000000000u64), // 0.01 ETH profit
             0.7,
             200_000,
             1000,
             OpportunityDetails::Arbitrage(ArbitrageDetails {
-                token_in: H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                token_out: H160::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
+                token_in: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                token_out: Address::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
                 amount_in: U256::from(1000000000000000000u64),
                 amount_out: U256::from(1100000000000000000u64),
                 dex_path: vec!["uniswap_v2".to_string()],
@@ -525,9 +672,9 @@ mod tests {
     fn test_bundle_creation() {
         let transactions = vec![
             Transaction {
-                hash: H256::from_str("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").unwrap(),
-                from: H160::from_str("0x742d35Cc6570000000000000000000000000004").unwrap(),
-                to: Some(H160::from_str("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D").unwrap()),
+                hash: B256::from_str("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").unwrap(),
+                from: Address::from_str("0x742d35Cc65700000000000000000000000000004").unwrap(),
+                to: Some(Address::from_str("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D").unwrap()),
                 value: U256::from(1000000000000000000u64), // 1 ETH
                 gas_price: U256::from(20000000000u64), // 20 gwei
                 gas_limit: U256::from(200000u64),
@@ -541,19 +688,19 @@ mod tests {
         let bundle = Bundle::new(
             transactions.clone(),
             1000,
-            U256::from(50000000000000000u64), // 0.05 ETH
+            U256::from(60000000000000000u64), // 0.06 ETH
             200_000,
-            StrategyType::Arbitrage,
+            StrategyType::MicroArbitrage,
         );
         
         // Test basic fields
         assert!(!bundle.id.is_empty());
         assert_eq!(bundle.transactions.len(), 1);
         assert_eq!(bundle.target_block, 1000);
-        assert_eq!(bundle.expected_profit, U256::from(50000000000000000u64));
+        assert_eq!(bundle.expected_profit, U256::from(60000000000000000u64));
         assert_eq!(bundle.gas_estimate, 200_000);
-        assert!(matches!(bundle.strategy, StrategyType::Arbitrage));
-        assert!(matches!(bundle.priority, Priority::Medium)); // 0.05 ETH 
+        assert!(matches!(bundle.strategy, StrategyType::MicroArbitrage));
+        assert!(matches!(bundle.priority, Priority::Medium)); // 0.06 ETH 
         assert!(bundle.hash.is_none());
         assert!(bundle.max_fee_per_gas.is_none());
         assert!(bundle.max_priority_fee_per_gas.is_none());
@@ -575,15 +722,15 @@ mod tests {
     #[test]
     fn test_constants() {
         // Test token addresses
-        assert_eq!(crate::constants::get_token_address("WETH").unwrap(), H160::from_str(crate::constants::WETH).unwrap());
-        assert_eq!(crate::constants::get_token_address("USDC").unwrap(), H160::from_str(crate::constants::USDC).unwrap());
-        assert_eq!(crate::constants::get_token_address("USDT").unwrap(), H160::from_str(crate::constants::USDT).unwrap());
-        assert_eq!(crate::constants::get_token_address("DAI").unwrap(), H160::from_str(crate::constants::DAI).unwrap());
-        assert_eq!(crate::constants::get_token_address("WBTC").unwrap(), H160::from_str(crate::constants::WBTC).unwrap());
+        assert_eq!(crate::constants::get_token_address("WETH").unwrap(), Address::from_str(crate::constants::WETH).unwrap());
+        assert_eq!(crate::constants::get_token_address("USDC").unwrap(), Address::from_str(crate::constants::USDC).unwrap());
+        assert_eq!(crate::constants::get_token_address("USDT").unwrap(), Address::from_str(crate::constants::USDT).unwrap());
+        assert_eq!(crate::constants::get_token_address("DAI").unwrap(), Address::from_str(crate::constants::DAI).unwrap());
+        assert_eq!(crate::constants::get_token_address("WBTC").unwrap(), Address::from_str(crate::constants::WBTC).unwrap());
         
         // Test case insensitivity
-        assert_eq!(crate::constants::get_token_address("weth").unwrap(), H160::from_str(crate::constants::WETH).unwrap());
-        assert_eq!(crate::constants::get_token_address("usdc").unwrap(), H160::from_str(crate::constants::USDC).unwrap());
+        assert_eq!(crate::constants::get_token_address("weth").unwrap(), Address::from_str(crate::constants::WETH).unwrap());
+        assert_eq!(crate::constants::get_token_address("usdc").unwrap(), Address::from_str(crate::constants::USDC).unwrap());
         
         // Test non-existent token
         assert!(crate::constants::get_token_address("NONEXISTENT").is_none());
@@ -603,15 +750,15 @@ mod tests {
     fn test_profit_per_gas_edge_cases() {
         // Test zero gas estimate
         let opportunity = Opportunity::new(
-            OpportunityType::Arbitrage,
-            StrategyType::Arbitrage,
+            OpportunityType::MicroArbitrage,
+            StrategyType::MicroArbitrage,
             U256::from(1000000000000000000u64),
             0.8,
             0, // Zero gas
             1000,
             OpportunityDetails::Arbitrage(ArbitrageDetails {
-                token_in: H160::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
-                token_out: H160::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
+                token_in: Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2").unwrap(),
+                token_out: Address::from_str("0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46").unwrap(),
                 amount_in: U256::from(1000000000000000000u64),
                 amount_out: U256::from(2000000000000000000u64),
                 dex_path: vec!["uniswap_v2".to_string()],

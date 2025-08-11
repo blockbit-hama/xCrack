@@ -2,17 +2,19 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::Mutex;
 use tracing::{info, debug, error, warn};
-use std::collections::{HashMap, BinaryHeap};
-use std::cmp::Ordering;
-use std::time::{Instant, Duration};
+use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::config::Config;
-use crate::types::{Bundle, Opportunity, Priority, StrategyType, U256};
+use crate::types::{Bundle, Opportunity, Priority, StrategyType};
+use alloy::primitives::{Address, B256, U256};
 use crate::flashbots::FlashbotsClient;
+use crate::mocks::{is_mock_mode, MockFlashbotsClient};
 
 pub struct BundleManager {
     config: Arc<Config>,
-    flashbots_client: Arc<FlashbotsClient>,
+    flashbots_client: Option<Arc<FlashbotsClient>>,
+    mock_flashbots_client: Option<Arc<MockFlashbotsClient>>,
     pending_bundles: Arc<Mutex<HashMap<String, Bundle>>>,
     submitted_bundles: Arc<Mutex<HashMap<String, Bundle>>>,
     bundle_stats: Arc<Mutex<BundleStats>>,
@@ -32,22 +34,31 @@ pub struct BundleStats {
 
 impl BundleManager {
     pub async fn new(config: Arc<Config>) -> Result<Self> {
-        let flashbots_client = FlashbotsClient::new(Arc::clone(&config)).await?;
-        
         let bundle_stats = BundleStats {
             total_created: 0,
             total_submitted: 0,
             total_included: 0,
             total_failed: 0,
-            total_profit: U256::zero(),
-            total_gas_spent: U256::zero(),
+            total_profit: U256::ZERO,
+            total_gas_spent: U256::ZERO,
             avg_submission_time_ms: 0.0,
             success_rate: 0.0,
         };
         
+        let (flashbots_client, mock_flashbots_client) = if is_mock_mode() {
+            info!("🎭 BundleManager initialized with mock Flashbots client");
+            let mock_client = MockFlashbotsClient::new(Arc::clone(&config)).await?;
+            (None, Some(Arc::new(mock_client)))
+        } else {
+            info!("🌐 BundleManager initialized with real Flashbots client");
+            let real_client = FlashbotsClient::new(Arc::clone(&config)).await?;
+            (Some(Arc::new(real_client)), None)
+        };
+        
         Ok(Self {
             config,
-            flashbots_client: Arc::new(flashbots_client),
+            flashbots_client,
+            mock_flashbots_client,
             pending_bundles: Arc::new(Mutex::new(HashMap::new())),
             submitted_bundles: Arc::new(Mutex::new(HashMap::new())),
             bundle_stats: Arc::new(Mutex::new(bundle_stats)),
@@ -62,19 +73,22 @@ impl BundleManager {
 
         info!("🎯 {}개 기회로 최적 번들 생성 중...", opportunities.len());
         
-        // 기회들을 수익성 순으로 정렬
-        let mut sorted_opportunities: BinaryHeap<Opportunity> = opportunities.into_iter().collect();
+        // 기회들을 수익성 순으로 정렬 (수익 높은 순)
+        let mut sorted_opportunities = opportunities;
+        sorted_opportunities.sort_by(|a, b| {
+            b.expected_profit.cmp(&a.expected_profit)
+                .then_with(|| b.priority.cmp(&a.priority))
+                .then_with(|| a.timestamp.cmp(&b.timestamp))
+        });
         
         // 번들 크기 제한 확인
         let max_bundle_size = self.config.safety.max_concurrent_bundles;
         let mut selected_opportunities = Vec::new();
         
-        while selected_opportunities.len() < max_bundle_size && !sorted_opportunities.is_empty() {
-            if let Some(opportunity) = sorted_opportunities.pop() {
-                // 기회 검증
-                if self.validate_opportunity_for_bundle(&opportunity).await? {
-                    selected_opportunities.push(opportunity);
-                }
+        for opportunity in sorted_opportunities.into_iter().take(max_bundle_size) {
+            // 기회 검증
+            if self.validate_opportunity_for_bundle(&opportunity).await? {
+                selected_opportunities.push(opportunity);
             }
         }
         
@@ -90,7 +104,10 @@ impl BundleManager {
         
         info!("📦 최적 번들 생성됨: {} (기회: {}개, 예상 수익: {} ETH)", 
               bundle.id, bundle.transactions.len(), 
-              ethers::utils::format_ether(bundle.expected_profit));
+              ethers::utils::format_ether({
+                  let ethers_profit = ethers::types::U256::from_big_endian(&bundle.expected_profit.to_be_bytes::<32>());
+                  ethers_profit
+              }));
         
         Ok(Some(bundle))
     }
@@ -98,7 +115,12 @@ impl BundleManager {
     /// 기회가 번들에 포함될 수 있는지 검증
     async fn validate_opportunity_for_bundle(&self, opportunity: &Opportunity) -> Result<bool> {
         // 최소 수익 임계값 확인
-        let min_profit = ethers::utils::parse_ether(&self.config.strategies.arbitrage.min_profit_threshold)?;
+        let min_profit_ethers = ethers::utils::parse_ether(&self.config.strategies.sandwich.min_profit_eth)?;
+        let min_profit = {
+            let mut bytes = [0u8; 32];
+            min_profit_ethers.to_big_endian(&mut bytes);
+            alloy::primitives::U256::from_be_bytes(bytes)
+        };
         if opportunity.expected_profit < min_profit {
             return Ok(false);
         }
@@ -120,7 +142,7 @@ impl BundleManager {
     /// 기회들로부터 번들 생성
     async fn create_bundle_from_opportunities(&self, opportunities: Vec<Opportunity>) -> Result<Bundle> {
         let mut all_transactions = Vec::new();
-        let mut total_profit = U256::zero();
+        let mut total_profit = U256::ZERO;
         let mut total_gas = 0u64;
         let mut target_block = 0u64;
         
@@ -147,7 +169,7 @@ impl BundleManager {
             target_block,
             total_profit,
             total_gas,
-            StrategyType::Arbitrage, // 기본값, 실제로는 혼합 전략
+            StrategyType::Sandwich, // 기본값, 실제로는 혼합 전략
         );
         
         Ok(bundle)
@@ -157,10 +179,10 @@ impl BundleManager {
     async fn create_dummy_transaction_for_opportunity(&self, _opportunity: &Opportunity) -> Result<crate::types::Transaction> {
         // 실제 구현에서는 전략별로 적절한 트랜잭션 생성
         Ok(crate::types::Transaction {
-            hash: ethers::types::H256::zero(),
-            from: ethers::types::H160::zero(),
-            to: Some(ethers::types::H160::zero()),
-            value: U256::zero(),
+            hash: B256::ZERO,
+            from: Address::ZERO,
+            to: Some(Address::ZERO),
+            value: U256::ZERO,
             gas_price: U256::from(20_000_000_000u64),
             gas_limit: U256::from(200_000u64),
             data: vec![],
@@ -183,8 +205,16 @@ impl BundleManager {
             return Ok(true);
         }
         
-        // Flashbots에 번들 제출
-        match self.flashbots_client.submit_bundle(&bundle).await {
+        // Flashbots에 번들 제출 (mock 또는 real 클라이언트 사용)
+        let submit_result = if let Some(mock_client) = &self.mock_flashbots_client {
+            mock_client.submit_bundle(&bundle).await
+        } else if let Some(real_client) = &self.flashbots_client {
+            real_client.submit_bundle(&bundle).await
+        } else {
+            return Err(anyhow::anyhow!("No Flashbots client available"));
+        };
+        
+        match submit_result {
             Ok(success) => {
                 let submission_duration = submission_start.elapsed();
                 
@@ -345,8 +375,9 @@ impl std::fmt::Debug for BundleManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Opportunity, OpportunityType, StrategyType, Priority, U256};
-    use chrono::Utc;
+    use crate::types::{Opportunity, OpportunityType, StrategyType, Priority};
+    use alloy::primitives::U256;
+    // use chrono::Utc;
 
     #[tokio::test]
     async fn test_bundle_manager_creation() {
@@ -363,17 +394,17 @@ mod tests {
         // 테스트 기회들 생성
         let opportunities = vec![
             Opportunity::new(
-                OpportunityType::Arbitrage,
-                StrategyType::Arbitrage,
+                OpportunityType::Sandwich,
+                StrategyType::Sandwich,
                 U256::from(1000000000000000000u128), // 1 ETH
                 0.8,
                 150_000,
                 1000,
                 crate::types::OpportunityDetails::Arbitrage(crate::types::ArbitrageDetails {
-                    token_in: ethers::types::H160::zero(),
-                    token_out: ethers::types::H160::zero(),
-                    amount_in: U256::zero(),
-                    amount_out: U256::zero(),
+                    token_in: Address::ZERO,
+                    token_out: Address::ZERO,
+                    amount_in: U256::ZERO,
+                    amount_out: U256::ZERO,
                     dex_path: vec![],
                     price_impact: 0.0,
                 }),
@@ -381,6 +412,6 @@ mod tests {
         ];
         
         let priority = manager.calculate_bundle_priority(&opportunities);
-        assert_eq!(priority, Priority::Low); // 기본 우선순위
+        assert_eq!(priority, Priority::High); // 1 ETH는 높은 우선순위
     }
 } 

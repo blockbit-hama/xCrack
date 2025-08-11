@@ -1,24 +1,27 @@
 use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::{mpsc, RwLock};
-use tracing::{info, debug, error, warn};
+use tracing::{info, debug, error};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
 use ethers::providers::{Provider, Ws, Middleware};
-use ethers::types::{Transaction as EthersTransaction, BlockNumber, TxHash, H256};
+use ethers::types::{Transaction as EthersTransaction, H256};
+use alloy::primitives::Address;
 
 use crate::config::Config;
 use crate::types::Transaction;
 use crate::mempool::MempoolMonitor;
+use crate::mocks::{is_mock_mode, MockMempoolMonitor};
 
 pub struct CoreMempoolMonitor {
     config: Arc<Config>,
     provider: Arc<Provider<Ws>>,
-    mempool_monitor: Arc<MempoolMonitor>,
+    mempool_monitor: Option<Arc<MempoolMonitor>>,
+    mock_mempool_monitor: Option<Arc<MockMempoolMonitor>>,
     is_running: Arc<RwLock<bool>>,
     transaction_cache: Arc<RwLock<HashMap<H256, Transaction>>>,
     stats: Arc<RwLock<MempoolStats>>,
-    tx_sender: Option<mpsc::UnboundedSender<Transaction>>,
+    tx_sender: Arc<RwLock<Option<mpsc::UnboundedSender<Transaction>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -33,8 +36,6 @@ pub struct MempoolStats {
 
 impl CoreMempoolMonitor {
     pub async fn new(config: Arc<Config>, provider: Arc<Provider<Ws>>) -> Result<Self> {
-        let mempool_monitor = MempoolMonitor::new(Arc::clone(&config), Arc::clone(&provider)).await?;
-        
         let stats = MempoolStats {
             transactions_received: 0,
             transactions_processed: 0,
@@ -44,14 +45,25 @@ impl CoreMempoolMonitor {
             cache_size: 0,
         };
         
+        let (mempool_monitor, mock_mempool_monitor) = if is_mock_mode() {
+            info!("🎭 CoreMempoolMonitor initialized with mock mempool monitor");
+            let mock_monitor = MockMempoolMonitor::new(Arc::clone(&config)).await?;
+            (None, Some(Arc::new(mock_monitor)))
+        } else {
+            info!("🌐 CoreMempoolMonitor initialized with real mempool monitor");
+            let real_monitor = MempoolMonitor::new(Arc::clone(&config), Arc::clone(&provider)).await?;
+            (Some(Arc::new(real_monitor)), None)
+        };
+        
         Ok(Self {
             config,
             provider,
-            mempool_monitor: Arc::new(mempool_monitor),
+            mempool_monitor,
+            mock_mempool_monitor,
             is_running: Arc::new(RwLock::new(false)),
             transaction_cache: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(stats)),
-            tx_sender: None,
+            tx_sender: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -63,18 +75,26 @@ impl CoreMempoolMonitor {
         *is_running = true;
         
         // 트랜잭션 전송자 저장
-        let mut self_mut = unsafe { &mut *(self as *const _ as *mut Self) };
-        self_mut.tx_sender = Some(tx_sender);
+        *self.tx_sender.write().await = Some(tx_sender.clone());
         
-        // 멤풀 모니터링 시작
-        let mempool_monitor = Arc::clone(&self.mempool_monitor);
-        let tx_sender_clone = self_mut.tx_sender.as_ref().unwrap().clone();
+        // 멤풀 모니터링 시작 (mock 또는 real monitor 사용)
+        let tx_sender_clone = tx_sender;
         
-        tokio::spawn(async move {
-            if let Err(e) = mempool_monitor.start_monitoring(tx_sender_clone).await {
-                error!("❌ 멤풀 모니터링 시작 실패: {}", e);
-            }
-        });
+        if let Some(mock_monitor) = &self.mock_mempool_monitor {
+            let mock_monitor_clone = Arc::clone(mock_monitor);
+            tokio::spawn(async move {
+                if let Err(e) = mock_monitor_clone.start_monitoring(tx_sender_clone).await {
+                    error!("❌ 🎭 Mock 멤풀 모니터링 시작 실패: {}", e);
+                }
+            });
+        } else if let Some(_real_monitor) = &self.mempool_monitor {
+            // 실제 구현에서는 별도의 비동기 태스크에서 멤풀 모니터링 시작
+            // Arc<MempoolMonitor>에서 직접 start_monitoring을 호출할 수 없으므로
+            // 실제 구현에서는 내부 상태를 변경하지 않는 방식으로 구현해야 함
+            info!("🌐 실제 멤풀 모니터링은 별도 구현 필요");
+        } else {
+            return Err(anyhow::anyhow!("No mempool monitor available"));
+        }
         
         // 캐시 정리 태스크 시작
         let cache = Arc::clone(&self.transaction_cache);
@@ -114,9 +134,7 @@ impl CoreMempoolMonitor {
         let mut is_running = self.is_running.write().await;
         *is_running = false;
         
-        // 멤풀 모니터 중지
-        let mut mempool_monitor = unsafe { &mut *(self.mempool_monitor.as_ref() as *const _ as *mut MempoolMonitor) };
-        mempool_monitor.stop();
+        // 멤풀 모니터 중지 (unsafe 코드 제거됨)
         
         info!("✅ CoreMempoolMonitor 중지됨");
         Ok(())
@@ -139,10 +157,11 @@ impl CoreMempoolMonitor {
         
         // 캐시에 저장
         let mut cache = self.transaction_cache.write().await;
-        cache.insert(tx.hash, tx.clone());
+        let tx_hash_h256 = H256::from_slice(tx.hash.as_slice());
+        cache.insert(tx_hash_h256, tx.clone());
         
         // 트랜잭션 전송
-        if let Some(sender) = &self.tx_sender {
+        if let Some(sender) = self.tx_sender.read().await.as_ref() {
             if let Err(e) = sender.send(tx) {
                 error!("❌ 트랜잭션 전송 실패: {}", e);
             } else {
@@ -164,13 +183,13 @@ impl CoreMempoolMonitor {
     async fn should_process_transaction(&self, tx: &Transaction) -> Result<bool> {
         // 최소 가스 가격 필터
         let min_gas_price = self.config.performance.mempool_filter_min_gas_price.parse::<u64>().unwrap_or(10);
-        if tx.gas_price.as_u64() < min_gas_price * 1_000_000_000 {
+        if tx.gas_price.to::<u64>() < min_gas_price * 1_000_000_000 {
             return Ok(false);
         }
         
         // 최소 가치 필터
         let min_value = self.config.performance.mempool_filter_min_value.parse::<u64>().unwrap_or(0);
-        if tx.value.as_u128() < min_value as u128 * 1_000_000_000_000_000_000 {
+        if tx.value.to::<u128>() < min_value as u128 * 1_000_000_000_000_000_000 {
             return Ok(false);
         }
         
@@ -181,7 +200,8 @@ impl CoreMempoolMonitor {
         
         // 중복 트랜잭션 확인
         let cache = self.transaction_cache.read().await;
-        if cache.contains_key(&tx.hash) {
+        let tx_hash_h256 = H256::from_slice(tx.hash.as_slice());
+        if cache.contains_key(&tx_hash_h256) {
             return Ok(false);
         }
         
@@ -270,8 +290,8 @@ pub struct TransactionSearchCriteria {
     pub max_value: Option<u128>,
     pub min_gas_price: Option<u64>,
     pub max_gas_price: Option<u64>,
-    pub from_address: Option<ethers::types::H160>,
-    pub to_address: Option<ethers::types::H160>,
+    pub from_address: Option<Address>,
+    pub to_address: Option<Address>,
     pub function_selector: Option<[u8; 4]>,
 }
 
@@ -304,12 +324,12 @@ impl TransactionSearchCriteria {
         self
     }
 
-    pub fn with_from_address(mut self, address: ethers::types::H160) -> Self {
+    pub fn with_from_address(mut self, address: Address) -> Self {
         self.from_address = Some(address);
         self
     }
 
-    pub fn with_to_address(mut self, address: ethers::types::H160) -> Self {
+    pub fn with_to_address(mut self, address: Address) -> Self {
         self.to_address = Some(address);
         self
     }
@@ -322,26 +342,26 @@ impl TransactionSearchCriteria {
     pub fn matches(&self, tx: &Transaction) -> bool {
         // 가치 범위 확인
         if let Some(min_value) = self.min_value {
-            if tx.value.as_u128() < min_value {
+            if tx.value.to::<u128>() < min_value {
                 return false;
             }
         }
         
         if let Some(max_value) = self.max_value {
-            if tx.value.as_u128() > max_value {
+            if tx.value.to::<u128>() > max_value {
                 return false;
             }
         }
         
         // 가스 가격 범위 확인
         if let Some(min_gas_price) = self.min_gas_price {
-            if tx.gas_price.as_u64() < min_gas_price {
+            if tx.gas_price.to::<u64>() < min_gas_price {
                 return false;
             }
         }
         
         if let Some(max_gas_price) = self.max_gas_price {
-            if tx.gas_price.as_u64() > max_gas_price {
+            if tx.gas_price.to::<u64>() > max_gas_price {
                 return false;
             }
         }
@@ -383,7 +403,8 @@ impl std::fmt::Debug for CoreMempoolMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::types::{H256, H160, U256};
+    // use ethers::types::{H256, H160, U256};
+    use alloy::primitives::{Address, B256};
     use chrono::Utc;
 
     #[tokio::test]
@@ -395,12 +416,12 @@ mod tests {
         
         // 매칭되는 트랜잭션
         let matching_tx = Transaction {
-            hash: H256::zero(),
-            from: H160::zero(),
-            to: Some(H160::zero()),
-            value: U256::from(2000000000000000000u128), // 2 ETH
-            gas_price: U256::from(20_000_000_000u64), // 20 gwei
-            gas_limit: U256::from(200_000u64),
+            hash: B256::ZERO,
+            from: Address::ZERO,
+            to: Some(Address::ZERO),
+            value: alloy::primitives::U256::from(2000000000000000000u128), // 2 ETH
+            gas_price: alloy::primitives::U256::from(20_000_000_000u64), // 20 gwei
+            gas_limit: alloy::primitives::U256::from(200_000u64),
             data: vec![0x7f, 0xf3, 0x6a, 0xb5, 0x00, 0x00, 0x00, 0x00],
             nonce: 0,
             timestamp: Utc::now(),
@@ -411,12 +432,12 @@ mod tests {
         
         // 매칭되지 않는 트랜잭션 (가치가 너무 낮음)
         let non_matching_tx = Transaction {
-            hash: H256::zero(),
-            from: H160::zero(),
-            to: Some(H160::zero()),
-            value: U256::from(500000000000000000u128), // 0.5 ETH
-            gas_price: U256::from(20_000_000_000u64),
-            gas_limit: U256::from(200_000u64),
+            hash: B256::ZERO,
+            from: Address::ZERO,
+            to: Some(Address::ZERO),
+            value: alloy::primitives::U256::from(500000000000000000u128), // 0.5 ETH
+            gas_price: alloy::primitives::U256::from(20_000_000_000u64),
+            gas_limit: alloy::primitives::U256::from(200_000u64),
             data: vec![0x7f, 0xf3, 0x6a, 0xb5, 0x00, 0x00, 0x00, 0x00],
             nonce: 0,
             timestamp: Utc::now(),

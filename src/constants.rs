@@ -1,4 +1,4 @@
-use ethers::types::{H160, U256};
+use alloy::primitives::{Address, U256};
 use std::str::FromStr;
 
 // Gas limits
@@ -25,13 +25,13 @@ pub const DAI: &str = "0x6B175474E89094C44Da98b954EedeAC495271d0F";
 pub const WBTC: &str = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599";
 
 // Helper function to get token addresses
-pub fn get_token_address(symbol: &str) -> Option<H160> {
+pub fn get_token_address(symbol: &str) -> Option<Address> {
     match symbol.to_uppercase().as_str() {
-        "WETH" => Some(H160::from_str(WETH).unwrap()),
-        "USDC" => Some(H160::from_str(USDC).unwrap()),
-        "USDT" => Some(H160::from_str(USDT).unwrap()),
-        "DAI" => Some(H160::from_str(DAI).unwrap()),
-        "WBTC" => Some(H160::from_str(WBTC).unwrap()),
+        "WETH" => Some(Address::from_str(WETH).unwrap()),
+        "USDC" => Some(Address::from_str(USDC).unwrap()),
+        "USDT" => Some(Address::from_str(USDT).unwrap()),
+        "DAI" => Some(Address::from_str(DAI).unwrap()),
+        "WBTC" => Some(Address::from_str(WBTC).unwrap()),
         _ => None,
     }
 }
@@ -64,7 +64,7 @@ pub const LIQUIDATE_BORROW_COMPOUND: &str = "0xf5e3c462";
 pub const BITE_MAKERDAO: &str = "0x7c025200";
 
 // Utility functions
-pub fn is_known_dex_router(address: H160) -> bool {
+pub fn is_known_dex_router(address: Address) -> bool {
     let known_routers = [
         UNISWAP_V2_ROUTER,
         UNISWAP_V3_ROUTER,
@@ -73,7 +73,7 @@ pub fn is_known_dex_router(address: H160) -> bool {
     ];
     
     known_routers.iter().any(|&router| {
-        router.parse::<H160>().unwrap_or_default() == address
+        router.parse::<Address>().unwrap_or_default() == address
     })
 }
 
@@ -100,7 +100,7 @@ pub fn is_liquidation_function(selector: &str) -> bool {
 
 // Helper to format ETH amounts
 pub fn format_eth_amount(wei: U256) -> String {
-    let eth = wei.as_u128() as f64 / 1e18;
+    let eth = wei.to::<u128>() as f64 / 1e18;
     format!("{:.6} ETH", eth)
 }
 
@@ -131,10 +131,10 @@ mod tests {
     
     #[test]
     fn test_dex_router_detection() {
-        let uniswap_v2 = H160::from_str(UNISWAP_V2_ROUTER).unwrap();
-        let uniswap_v3 = H160::from_str(UNISWAP_V3_ROUTER).unwrap();
-        let sushiswap = H160::from_str(SUSHISWAP_ROUTER).unwrap();
-        let unknown = H160::from_str("0x1234567890123456789012345678901234567890").unwrap();
+        let uniswap_v2 = Address::from_str(UNISWAP_V2_ROUTER).unwrap();
+        let uniswap_v3 = Address::from_str(UNISWAP_V3_ROUTER).unwrap();
+        let sushiswap = Address::from_str(SUSHISWAP_ROUTER).unwrap();
+        let unknown = Address::from_str("0x1234567890123456789012345678901234567890").unwrap();
         
         assert!(is_known_dex_router(uniswap_v2));
         assert!(is_known_dex_router(uniswap_v3));

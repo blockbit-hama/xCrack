@@ -9,11 +9,12 @@
 
 - **🔥 순수 Rust 성능**: 오버헤드 제로, 최고의 속도
 - **📡 실시간 멤풀 모니터링**: WebSocket 기반 트랜잭션 감지
-- **🎯 다중 전략**: 차익 거래, 샌드위치 공격, 청산
+- **🎯 안전한 전략**: 샌드위치 공격, 경쟁적 청산
 - **⚡ Flashbots 통합**: 네이티브 번들 제출 및 모니터링
 - **🛡️ 안전 우선**: 내장된 리스크 관리 및 긴급 정지 기능
 - **📊 포괄적인 모니터링**: 메트릭, 알림 및 성능 추적
 - **🔧 높은 설정 유연성**: TOML 기반 설정 시스템
+- **🎭 Mock 모드**: 테스트를 위한 완전한 시뮬레이션 환경
 
 ## 🏗️ 아키텍처
 
@@ -22,11 +23,21 @@
 │   멤풀          │    │   전략          │    │   Flashbots     │
 │   감시자        │───▶│   엔진          │───▶│   클라이언트    │
 │                 │    │                 │    │                 │
-│ • WebSocket     │    │ • 차익 거래     │    │ • 번들 제출     │
-│ • 필터링        │    │ • 샌드위치      │    │ • 상태 확인     │
-│ • 실시간        │    │ • 청산          │    │ • 모니터링      │
+│ • WebSocket     │    │ • 샌드위치      │    │ • 번들 제출     │
+│ • 필터링        │    │ • 청산          │    │ • 상태 확인     │
+│ • 실시간        │    │ • 성능 추적     │    │ • 모니터링      │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
+
+                    ┌─────────────────┐
+                    │   SearcherCore  │
+                    │                 │
+                    │ • 채널 관리     │
+                    │ • 작업 조정     │
+                    │ • 성능 모니터링 │
+                    └─────────────────┘
 ```
+
+자세한 아키텍처 정보는 [ARCHITECTURE.md](docs/ARCHITECTURE.md)를 참조하세요.
 
 ## 📦 설치
 
@@ -40,8 +51,7 @@
 ```bash
 # 레포지토리 클론
 git clone <repository-url>
-cd xCrackRust
-cd xCrack
+cd xCrackRust/xCrack
 
 # 릴리즈 모드로 빌드
 cargo build --release
@@ -72,13 +82,15 @@ discord_webhook_url = "https://discord.com/api/webhooks/..."
 
 3. **전략 구성:**
 ```toml
-[strategies.arbitrage]
-enabled = true
-min_profit_threshold = "0.01"  # 최소 수익 0.01 ETH
-
 [strategies.sandwich]
 enabled = true
 min_target_value = "0.5"       # 최소 타겟 가치 0.5 ETH
+min_profit_eth = "0.05"        # 최소 수익 0.05 ETH
+
+[strategies.liquidation]
+enabled = true
+protocols = ["aave", "compound", "makerdao"]
+min_health_factor = 1.05
 ```
 
 ## 🚀 사용법
@@ -95,47 +107,49 @@ min_target_value = "0.5"       # 최소 타겟 가치 0.5 ETH
 # 시뮬레이션 모드로 실행 (실제 번들 제출 안 함)
 ./target/release/searcher --simulation
 
+# Mock 모드로 테스트 (실제 네트워크 연결 없이)
+API_MODE=mock ./target/release/searcher
+
 # 디버그 로깅 활성화
 ./target/release/searcher --log-level debug
+
+# 특정 전략만 활성화
+./target/release/searcher --strategies sandwich,liquidation
 ```
 
 ### 커맨드 라인 옵션
 
 ```bash
-xcrack-rust-searcher [OPTIONS]
+xcrack [OPTIONS]
 
 OPTIONS:
-    -c, --config <FILE>     설정 파일 경로 [기본값: config/default.toml]
-    -l, --log-level <LEVEL> 로그 레벨 [기본값: info]
-        --simulation        시뮬레이션 모드 (실제 번들을 제출하지 않음)
-        --dev               개발 모드 활성화
-    -h, --help              도움말 정보 출력
-    -V, --version           버전 정보 출력
+    -c, --config <FILE>         설정 파일 경로 [기본값: config/default.toml]
+    -l, --log-level <LEVEL>     로그 레벨 [기본값: info]
+    -s, --strategies <LIST>     활성화할 전략들 [기본값: sandwich,liquidation]
+        --simulation            시뮬레이션 모드 (실제 번들을 제출하지 않음)
+        --dev                   개발 모드 활성화
+    -h, --help                  도움말 정보 출력
+    -V, --version               버전 정보 출력
+```
+
+### 환경 변수
+
+```bash
+# API 모드 설정
+export API_MODE=mock          # Mock 모드 (테스트용)
+export API_MODE=real          # 실제 API 모드
+
+# 실제 API 모드용 설정
+export PRIVATE_KEY="your_private_key_here"
+export ETH_RPC_URL="your_rpc_url_here"
+export ETH_WS_URL="your_websocket_url_here"
+export FLASHBOTS_RELAY_URL="https://relay.flashbots.net"
+export DISCORD_WEBHOOK_URL="your_discord_webhook"
 ```
 
 ## 🎯 전략
 
-### 1. 차익 거래 전략
-
-DEX 간의 가격 차이를 감지하고 수익성 있는 거래를 실행합니다.
-
-**구성:**
-```toml
-[strategies.arbitrage]
-enabled = true
-min_profit_threshold = "0.01"     # ETH 단위 최소 수익
-max_trade_size = "10.0"           # ETH 단위 최대 거래 규모
-max_price_impact = 0.05           # 최대 5% 가격 영향
-supported_dexes = ["uniswap_v2", "sushiswap", "uniswap_v3"]
-```
-
-**작동 방식:**
-1. 토큰 가격에 영향을 미치는 트랜잭션 모니터링
-2. 여러 DEX에 걸쳐 가격 계산
-3. 차익 거래 기회 식별
-4. 수익성이 있을 때 거래 실행
-
-### 2. 샌드위치 전략
+### 1. 샌드위치 전략
 
 MEV를 추출하기 위해 대규모 트랜잭션을 프론트런 및 백런합니다.
 
@@ -146,6 +160,10 @@ enabled = true
 min_target_value = "0.5"          # 최소 피해 트랜잭션 가치
 max_slippage = 0.03               # 유발할 최대 슬리피지 3%
 max_frontrun_size = "5.0"         # 최대 프론트런 규모
+min_profit_eth = "0.05"           # 최소 수익
+min_profit_percentage = 0.01      # 최소 수익률 1%
+gas_multiplier = 1.5              # 가스 가격 배수
+max_gas_price_gwei = "200"        # 최대 가스 가격
 ```
 
 **작동 방식:**
@@ -153,7 +171,7 @@ max_frontrun_size = "5.0"         # 최대 프론트런 규모
 2. 최적의 프론트런/백런 양 계산
 3. Flashbots에 샌드위치 번들 제출
 
-### 3. 청산 전략
+### 2. 청산 전략
 
 청산 기회를 위해 DeFi 프로토콜을 모니터링합니다.
 
@@ -164,7 +182,16 @@ enabled = true
 protocols = ["aave", "compound", "makerdao"]
 min_health_factor = 1.05          # 이 임계값 이하에서 청산
 max_liquidation_amount = "50.0"   # 최대 청산 규모
+min_profit_eth = "0.05"           # 최소 수익
+min_liquidation_amount = "1.0"    # 최소 청산 규모
+gas_multiplier = 1.5              # 가스 가격 배수
+health_factor_threshold = 1.0     # 건강도 임계값
 ```
+
+**작동 방식:**
+1. DeFi 프로토콜의 건강도 모니터링
+2. 청산 가능한 포지션 식별
+3. 경쟁적 청산 실행
 
 ## 🛡️ 안전 기능
 
@@ -193,21 +220,23 @@ enable_emergency_stop = true
 - 손익 추적
 - 가스 효율성 메트릭
 
+### 실시간 성능 리포트
+```
+📊 성능 리포트:
+  🔄 트랜잭션 처리: 1,234
+  🎯 기회 발견: 56
+  📦 번들 제출: 23
+  ✅ 번들 포함: 18
+  💰 총 수익: 0.456 ETH
+  📈 성공률: 78.26%
+  ⏱️ 평균 분석 시간: 8.5ms
+  🚀 평균 제출 시간: 45.2ms
+```
+
 ### 알림
 - **Discord**: 웹훅을 통한 실시간 알림
 - **Telegram**: 모바일 알림
 - **수익 보고서**: 일일/주간 수익 요약
-
-### 알림 구성 예시
-```toml
-[monitoring]
-enable_discord_alerts = true
-discord_webhook_url = "https://discord.com/api/webhooks/..."
-enable_telegram_alerts = true
-telegram_bot_token = "your_bot_token"
-telegram_chat_id = "your_chat_id"
-profit_report_interval = "0 8 * * *"  # 매일 오전 8시
-```
 
 ## 🔧 개발
 
@@ -220,8 +249,11 @@ cargo build
 # 테스트 실행
 cargo test
 
-# 로깅과 함께 실행
-RUST_LOG=debug cargo run
+# Mock 모드로 실행
+API_MODE=mock cargo run
+
+# 특정 전략으로 테스트
+API_MODE=mock cargo run -- --strategies sandwich
 
 # 코드 포맷팅
 cargo fmt
@@ -237,12 +269,43 @@ src/
 ├── main.rs                 # 애플리케이션 진입점
 ├── config.rs              # 설정 관리
 ├── types.rs               # 핵심 데이터 타입
+├── constants.rs           # 상수 정의
 ├── core/                  # 핵심 서쳐 엔진
+│   ├── searcher_core.rs   # 메인 SearcherCore
+│   ├── bundle_manager.rs  # 번들 관리
+│   ├── mempool_monitor.rs # 멤풀 모니터링
+│   └── performance_tracker.rs # 성능 추적
 ├── mempool/               # 멤풀 모니터링
+│   ├── mod.rs
+│   ├── monitor.rs         # 멤풀 모니터
+│   └── filters.rs         # 트랜잭션 필터
 ├── strategies/            # 거래 전략
+│   ├── mod.rs
+│   ├── sandwich.rs        # 샌드위치 전략
+│   ├── liquidation.rs     # 청산 전략
+│   ├── manager.rs         # 전략 매니저
+│   ├── traits.rs          # 전략 트레이트
+│   └── utils.rs           # 전략 유틸리티
 ├── flashbots/             # Flashbots 통합
+│   ├── mod.rs
+│   └── client.rs          # Flashbots 클라이언트
 ├── monitoring/            # 메트릭 및 알림
+│   ├── mod.rs
+│   └── manager.rs         # 모니터링 매니저
+├── mocks/                 # 테스트용 Mock 구현
+│   ├── mod.rs
+│   ├── provider_mock.rs   # Mock WebSocket 프로바이더
+│   ├── flashbots_mock.rs  # Mock Flashbots 클라이언트
+│   ├── mempool_mock.rs    # Mock 멤풀 모니터
+│   └── rpc_mock.rs        # Mock RPC 프로바이더
 └── utils/                 # 유틸리티 함수
+    ├── mod.rs
+    ├── crypto.rs          # 암호화 유틸리티
+    ├── formatting.rs      # 포맷팅 유틸리티
+    ├── math.rs            # 수학 계산
+    ├── network.rs         # 네트워크 유틸리티
+    ├── time.rs            # 시간 유틸리티
+    └── validation.rs      # 검증 유틸리티
 ```
 
 ## 📈 성능
@@ -255,7 +318,7 @@ src/
 
 ### 최적화 팁
 1. **동시 분석 증가**: `max_concurrent_analysis = 20`
-2. **필터 최적화**: `mempool_filter_min_value` 감소
+2. **필터 최적화**: `mempool_filter_min_value` 조정
 3. **메트릭 활성화**: 성능 병목 현상 모니터링
 4. **SSD 스토리지 사용**: 더 나은 I/O 성능을 위해
 
@@ -281,17 +344,27 @@ curl -X POST -H "Content-Type: application/json" \
 - 지갑 잔액 확인
 - Flashbots 상태 모니터링
 
+**Mock 모드 문제:**
+```bash
+# Mock 모드 상태 확인
+API_MODE=mock cargo run -- --log-level debug
+
+# Mock 서버 연결 확인
+netstat -an | grep 127.0.0.1
+```
+
 ### 로그
 
 ```bash
-# 실시간 로그 보기
-tail -f logs/searcher.log
+# 실시간 로그 보기 (표준 출력)
+API_MODE=mock cargo run 2>&1 | tee logs/searcher.log
 
 # 오류 검색
 grep ERROR logs/searcher.log
 
 # 전략별 필터링
-grep "Arbitrage" logs/searcher.log
+grep "Sandwich" logs/searcher.log
+grep "Liquidation" logs/searcher.log
 ```
 
 ## 🔐 보안
@@ -302,14 +375,13 @@ grep "Arbitrage" logs/searcher.log
 3. **접근 제어**: API 접근 및 모니터링 엔드포인트 제한
 4. **정기적인 업데이트**: 의존성 최신 상태 유지
 
-### 환경 변수
+### Mock 모드 보안
 ```bash
-# 안전한 개인 키 관리
-export PRIVATE_KEY="your_private_key_here"
-export RPC_URL="your_rpc_url_here"
+# Mock 모드는 개발/테스트 전용
+export API_MODE=mock
 
-# 환경 변수로 실행
-./target/release/searcher
+# 실제 키 없이 테스트 가능
+# Mock 모드는 네트워크 연결 없음
 ```
 
 ## 📊 메트릭 대시보드
@@ -342,7 +414,6 @@ mev_profit_eth_total 1.23
 ## 💰 수익성
 
 ### 예상 수익
-- **차익 거래**: 기회당 0.5-2%
 - **샌드위치**: 피해 트랜잭션당 0.1-1%
 - **청산**: 5-15% 청산 보너스
 
@@ -353,10 +424,10 @@ mev_profit_eth_total 1.23
 
 ### 손익분기점 분석
 ```
-일일 예상 수익: 0.1-1 ETH
-일일 가스 비용: 0.01-0.1 ETH
-순수익: 0.09-0.9 ETH/일
-월간 ROI: 10-50%
+일일 예상 수익: 0.05-0.5 ETH
+일일 가스 비용: 0.005-0.05 ETH
+순수익: 0.045-0.45 ETH/일
+월간 ROI: 5-30%
 ```
 
 ## 🤝 기여하기
@@ -389,8 +460,11 @@ mev_profit_eth_total 1.23
 - 적절한 키 관리 및 보안
 - 메인넷 배포 전 철저한 테스트
 
+**중요**: 복잡하고 공격적인 멤풀 기반 차익거래 전략은 의도적으로 제거되었습니다. 이 프로젝트는 더 안전하고 윤리적인 MEV 전략에 중점을 둡니다.
+
 ## 🔗 관련 자료
 
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - 상세한 아키텍처 가이드
 - [Flashbots 문서](https://docs.flashbots.net/)
 - [MEV 리서치](https://github.com/flashbots/mev-research)
 - [Rust 문서](https://doc.rust-lang.org/)

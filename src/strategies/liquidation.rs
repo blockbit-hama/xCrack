@@ -1,18 +1,20 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
 use tokio::sync::Mutex;
-use tracing::{info, debug, error, warn};
+use tracing::{info, debug};
 use ethers::{
-    providers::{Provider, Ws},
-    types::{H160, H256, U256, Bytes, TransactionRequest},
-    utils::keccak256,
+    providers::{Provider, Ws, Middleware},
+    types::{H160, U256, Bytes, TransactionRequest},
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::time::{Instant, Duration};
+use std::time::Instant;
+use rust_decimal::prelude::FromPrimitive;
 
 use crate::config::Config;
-use crate::types::{Transaction, Opportunity, StrategyType, Bundle, ArbitrageDetails};
+use crate::types::{Transaction, Opportunity, StrategyType, Bundle};
+use alloy::primitives::{U256 as AlloyU256};
 use crate::strategies::Strategy;
 
 /// 경쟁적 청산 프론트런 전략
@@ -22,7 +24,7 @@ use crate::strategies::Strategy;
 pub struct CompetitiveLiquidationStrategy {
     config: Arc<Config>,
     provider: Arc<Provider<Ws>>,
-    enabled: bool,
+    enabled: Arc<AtomicBool>,
     
     // 청산 대상 프로토콜 정보
     lending_protocols: HashMap<H160, LendingProtocolInfo>,
@@ -177,7 +179,7 @@ impl CompetitiveLiquidationStrategy {
         Ok(Self {
             config,
             provider,
-            enabled: true,
+            enabled: Arc::new(AtomicBool::new(true)),
             lending_protocols,
             min_profit_eth,
             min_liquidation_amount,
@@ -200,7 +202,8 @@ impl CompetitiveLiquidationStrategy {
     fn is_liquidation_related(&self, tx: &Transaction) -> bool {
         // 1. 대출 프로토콜로의 호출인지 확인
         if let Some(to) = tx.to {
-            if !self.lending_protocols.contains_key(&to) {
+            let to_h160 = H160::from_slice(to.as_slice()); 
+            if !self.lending_protocols.contains_key(&to_h160) {
                 return false;
             }
         } else {
@@ -219,7 +222,7 @@ impl CompetitiveLiquidationStrategy {
             vec![0x1d, 0x26, 0x3b, 0x3c], // MakerDAO bite
         ];
         
-        if !liquidation_functions.contains(function_selector) {
+        if !liquidation_functions.iter().any(|f| f.as_slice() == function_selector) {
             return false;
         }
         
@@ -229,7 +232,9 @@ impl CompetitiveLiquidationStrategy {
     /// 청산 기회 분석
     async fn analyze_liquidation_opportunity(&self, tx: &Transaction) -> Result<Option<LiquidationOpportunity>> {
         let protocol_info = if let Some(to) = tx.to {
-            self.lending_protocols.get(&to).cloned()
+            // Convert Address to H160
+            let to_h160 = H160::from_slice(to.as_slice());
+            self.lending_protocols.get(&to_h160).cloned()
         } else {
             return Ok(None);
         };
@@ -384,7 +389,7 @@ impl CompetitiveLiquidationStrategy {
         // 여러 요인을 고려한 성공 확률 계산
         
         // 1. 가스 가격 경쟁
-        let gas_competition_factor = if competing_tx.gas_price < U256::from(50_000_000_000u64) {
+        let gas_competition_factor = if competing_tx.gas_price < AlloyU256::from(50_000_000_000u64) {
             0.8 // 낮은 가스 가격 = 낮은 경쟁
         } else {
             0.3 // 높은 가스 가격 = 높은 경쟁
@@ -432,10 +437,13 @@ impl CompetitiveLiquidationStrategy {
         
         // 실제 구현에서는 ABI 인코딩을 사용
         // 여기서는 간단한 예시
-        data.extend_from_slice(&opportunity.target_user.to_fixed_bytes());
-        data.extend_from_slice(&opportunity.collateral_token.to_fixed_bytes());
-        data.extend_from_slice(&opportunity.debt_token.to_fixed_bytes());
-        data.extend_from_slice(&opportunity.liquidation_amount.to_be_bytes());
+        data.extend_from_slice(opportunity.target_user.as_bytes());
+        data.extend_from_slice(opportunity.collateral_token.as_bytes());
+        data.extend_from_slice(opportunity.debt_token.as_bytes());
+        // Convert ethers U256 to bytes
+        let mut amount_bytes = [0u8; 32];
+        opportunity.liquidation_amount.to_big_endian(&mut amount_bytes);
+        data.extend_from_slice(&amount_bytes);
         data.extend_from_slice(&[0u8; 32]); // receiveAToken flag
         
         Ok(TransactionRequest::new()
@@ -467,17 +475,17 @@ impl Strategy for CompetitiveLiquidationStrategy {
     }
     
     fn is_enabled(&self) -> bool {
-        self.enabled
+        self.enabled.load(Ordering::SeqCst)
     }
     
-    async fn start(&mut self) -> Result<()> {
-        self.enabled = true;
+    async fn start(&self) -> Result<()> {
+        self.enabled.store(true, Ordering::SeqCst);
         info!("🚀 청산 전략 시작됨");
         Ok(())
     }
     
-    async fn stop(&mut self) -> Result<()> {
-        self.enabled = false;
+    async fn stop(&self) -> Result<()> {
+        self.enabled.store(false, Ordering::SeqCst);
         info!("⏹️ 청산 전략 중지됨");
         Ok(())
     }
@@ -497,26 +505,35 @@ impl Strategy for CompetitiveLiquidationStrategy {
         
         // 청산 기회 분석
         if let Some(liquidation_opp) = self.analyze_liquidation_opportunity(transaction).await? {
-            let opportunity = Opportunity {
-                id: format!("liquidation_{}", transaction.hash),
-                strategy: StrategyType::Liquidation,
-                transaction_hash: transaction.hash,
-                expected_profit: liquidation_opp.net_profit,
-                gas_cost: liquidation_opp.gas_cost,
-                net_profit: liquidation_opp.net_profit,
-                success_probability: liquidation_opp.success_probability,
-                details: ArbitrageDetails {
-                    token_in: liquidation_opp.collateral_token,
-                    token_out: liquidation_opp.debt_token,
-                    amount_in: liquidation_opp.liquidation_amount,
-                    amount_out: liquidation_opp.expected_reward,
-                    dex_a: "Liquidation".to_string(),
-                    dex_b: "Liquidation".to_string(),
-                    price_a: U256::zero(),
-                    price_b: U256::zero(),
+            let opportunity = Opportunity::new(
+                crate::types::OpportunityType::Liquidation,
+                StrategyType::Liquidation,
+                {
+                    let mut bytes = [0u8; 32];
+                    liquidation_opp.net_profit.to_big_endian(&mut bytes);
+                    alloy::primitives::U256::from_be_bytes(bytes)
                 },
-                timestamp: chrono::Utc::now(),
-            };
+                liquidation_opp.success_probability,
+                500_000, // Gas estimate for liquidation
+                0, // Current block + some offset
+                crate::types::OpportunityDetails::Liquidation(crate::types::LiquidationDetails {
+                    protocol: "Compound".to_string(), // Should be dynamic
+                    user: alloy::primitives::Address::from_slice(liquidation_opp.target_user.as_bytes()),
+                    collateral_asset: alloy::primitives::Address::from_slice(liquidation_opp.collateral_token.as_bytes()),
+                    debt_asset: alloy::primitives::Address::from_slice(liquidation_opp.debt_token.as_bytes()),
+                    collateral_amount: {
+                        let mut bytes = [0u8; 32];
+                        liquidation_opp.liquidation_amount.to_big_endian(&mut bytes);
+                        alloy::primitives::U256::from_be_bytes(bytes)
+                    },
+                    debt_amount: {
+                        let mut bytes = [0u8; 32];
+                        liquidation_opp.debt_amount.to_big_endian(&mut bytes);
+                        alloy::primitives::U256::from_be_bytes(bytes)
+                    },
+                    health_factor: rust_decimal::Decimal::from_f64(liquidation_opp.health_factor).unwrap_or_default(),
+                }),
+            );
             
             opportunities.push(opportunity);
         }
@@ -536,8 +553,13 @@ impl Strategy for CompetitiveLiquidationStrategy {
             return Ok(false);
         }
         
-        // 수익성 재검증
-        if opportunity.net_profit < self.min_profit_eth {
+        // 수익성 재검증 - convert alloy U256 to ethers U256 for comparison
+        let opportunity_profit_ethers = {
+            let mut bytes = [0u8; 32];
+            opportunity.expected_profit.to_be_bytes_vec().into_iter().zip(bytes.iter_mut().rev()).for_each(|(src, dst)| *dst = src);
+            U256::from_big_endian(&bytes)
+        };
+        if opportunity_profit_ethers < self.min_profit_eth {
             return Ok(false);
         }
         
@@ -548,7 +570,7 @@ impl Strategy for CompetitiveLiquidationStrategy {
         }
         
         // 성공 확률 검증
-        if opportunity.success_probability < 0.4 {
+        if opportunity.confidence < 0.4 {
             return Ok(false);
         }
         
@@ -559,16 +581,13 @@ impl Strategy for CompetitiveLiquidationStrategy {
         // 청산 번들 생성
         // 실제 구현에서는 청산 트랜잭션을 포함한 번들 생성
         
-        let bundle = Bundle {
-            id: format!("liquidation_bundle_{}", opportunity.id),
-            transactions: vec![], // 실제 트랜잭션들로 채워야 함
-            target_block: 0, // 실제 타겟 블록으로 설정
-            max_gas_price: self.max_gas_price,
-            min_timestamp: 0,
-            max_timestamp: 0,
-            refund_recipient: H160::zero(),
-            refund_percentage: 0,
-        };
+        let bundle = Bundle::new(
+            vec![], // 실제 트랜잭션들로 채워야 함
+            0, // 실제 타겟 블록으로 설정
+            opportunity.expected_profit,
+            150_000, // 기본 가스 추정값
+            StrategyType::Liquidation,
+        );
         
         Ok(bundle)
     }
@@ -588,12 +607,14 @@ impl std::fmt::Debug for CompetitiveLiquidationStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Transaction, H256, H160, U256};
+    use crate::types::Transaction;
+    use alloy::primitives::{Address, B256, U256};
+    // use ethers::types::{H160, H256};
     use chrono::Utc;
 
     #[tokio::test]
     async fn test_liquidation_strategy_creation() {
-        let config = Arc::new(Config::default());
+        let _config = Arc::new(Config::default());
         // 실제 테스트에서는 더미 프로바이더가 필요
         // let provider = Arc::new(Provider::new(Ws::connect("wss://dummy").await.unwrap()));
         // let strategy = CompetitiveLiquidationStrategy::new(config, provider).await;
@@ -602,17 +623,17 @@ mod tests {
 
     #[test]
     fn test_liquidation_target_detection() {
-        let config = Arc::new(Config::default());
+        let _config = Arc::new(Config::default());
         // 실제 테스트에서는 더미 프로바이더가 필요
         // let provider = Arc::new(Provider::new(Ws::connect("wss://dummy").await.unwrap()));
         // let strategy = CompetitiveLiquidationStrategy::new(config, provider).await.unwrap();
         
         // 청산 관련 트랜잭션
-        let liquidation_tx = Transaction {
-            hash: H256::zero(),
-            from: H160::zero(),
+        let _liquidation_tx = Transaction {
+            hash: B256::ZERO,
+            from: Address::ZERO,
             to: Some("0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9".parse().unwrap()), // Aave V2
-            value: U256::zero(),
+            value: U256::ZERO,
             gas_price: U256::from(100_000_000_000u64), // 100 gwei
             gas_limit: U256::from(500_000u64),
             data: vec![0xe8, 0xed, 0xa9, 0xdf, 0x00, 0x00, 0x00, 0x00], // liquidationCall

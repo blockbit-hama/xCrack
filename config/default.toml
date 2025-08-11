@@ -21,12 +21,93 @@ enabled = true
 min_target_value = "0.5"       # Minimum 0.5 ETH victim transaction
 max_slippage = 0.03           # Maximum 3% slippage to cause
 max_frontrun_size = "5.0"     # Maximum 5 ETH frontrun
+min_profit_eth = "0.01"       # Minimum 0.01 ETH profit
+min_profit_percentage = 0.02  # Minimum 2% profit
+gas_multiplier = 1.2          # 20% gas price increase
+max_gas_price_gwei = "100"    # Maximum 100 gwei
 
 [strategies.liquidation]
 enabled = true
 protocols = ["aave", "compound", "makerdao"]
 min_health_factor = 1.05      # Liquidate below 1.05 health factor
 max_liquidation_amount = "50.0"  # Maximum 50 ETH liquidation
+min_profit_eth = "0.01"       # Minimum 0.01 ETH profit
+min_liquidation_amount = "0.1"  # Minimum 0.1 ETH liquidation
+gas_multiplier = 1.5          # 50% gas price increase for competitive liquidation
+max_gas_price_gwei = "200"    # Maximum 200 gwei for liquidation
+health_factor_threshold = 1.0 # Health factor threshold for liquidation
+max_liquidation_size = "100.0"  # Maximum 100 ETH liquidation size
+
+[strategies.micro_arbitrage]
+enabled = true
+trading_pairs = ["WETH/USDC", "WETH/USDT", "WETH/DAI", "WBTC/USDC", "WBTC/USDT"]
+min_profit_percentage = 0.001      # 0.1% minimum profit
+min_profit_usd = "10.0"           # Minimum $10 profit
+max_position_size = "5.0"         # Maximum 5 ETH position
+max_concurrent_trades = 3         # Maximum 3 concurrent trades
+execution_timeout_ms = 5000       # 5 second timeout
+latency_threshold_ms = 100        # 100ms latency threshold
+price_update_interval_ms = 50     # 50ms price update interval
+order_book_depth = 10             # Top 10 levels
+slippage_tolerance = 0.005        # 0.5% slippage tolerance
+fee_tolerance = 0.003             # 0.3% fee tolerance
+risk_limit_per_trade = "1.0"      # 1 ETH risk per trade
+daily_volume_limit = "100.0"      # 100 ETH daily volume limit
+enable_cex_trading = true         # Enable CEX trading
+enable_dex_trading = true         # Enable DEX trading
+blacklist_tokens = []             # No blacklisted tokens
+priority_tokens = ["WETH", "USDC", "USDT", "DAI", "WBTC"]  # Priority tokens
+
+# Exchange configurations for micro arbitrage
+[[strategies.micro_arbitrage.exchanges]]
+name = "uniswap_v2"
+exchange_type = "DEX"
+enabled = true
+api_endpoint = "https://api.uniswap.org/v1"
+trading_pairs = ["WETH/USDC", "WETH/USDT", "WETH/DAI"]
+fee_percentage = 0.003            # 0.3% fee
+min_order_size = "0.01"          # 0.01 ETH minimum
+max_order_size = "10.0"          # 10 ETH maximum
+rate_limit_per_second = 10       # 10 requests per second
+supports_fast_execution = true
+
+[[strategies.micro_arbitrage.exchanges]]
+name = "sushiswap"
+exchange_type = "DEX"
+enabled = true
+api_endpoint = "https://api.sushi.com/v1"
+trading_pairs = ["WETH/USDC", "WETH/USDT", "WETH/DAI"]
+fee_percentage = 0.003            # 0.3% fee
+min_order_size = "0.01"          # 0.01 ETH minimum
+max_order_size = "10.0"          # 10 ETH maximum
+rate_limit_per_second = 10       # 10 requests per second
+supports_fast_execution = true
+
+[[strategies.micro_arbitrage.exchanges]]
+name = "mock_binance"
+exchange_type = "CEX"
+enabled = true
+api_endpoint = "https://api.binance.com/api/v3"
+trading_pairs = ["WETH/USDC", "WETH/USDT", "WBTC/USDC"]
+fee_percentage = 0.001            # 0.1% fee
+min_order_size = "0.001"         # 0.001 ETH minimum
+max_order_size = "50.0"          # 50 ETH maximum
+rate_limit_per_second = 20       # 20 requests per second
+websocket_endpoint = "wss://stream.binance.com:9443/ws"
+supports_fast_execution = true
+
+[[strategies.micro_arbitrage.exchanges]]
+name = "mock_coinbase"
+exchange_type = "CEX"
+enabled = true
+api_endpoint = "https://api.exchange.coinbase.com"
+trading_pairs = ["WETH/USDC", "WETH/DAI", "WBTC/USDC"]
+fee_percentage = 0.0025           # 0.25% fee
+min_order_size = "0.001"         # 0.001 ETH minimum
+max_order_size = "25.0"          # 25 ETH maximum
+rate_limit_per_second = 10       # 10 requests per second
+websocket_endpoint = "wss://ws-feed.exchange.coinbase.com"
+supports_fast_execution = true
 
 [flashbots]
 relay_url = "https://relay.flashbots.net"
@@ -37,7 +118,7 @@ builder_urls = [
 ]
 max_priority_fee_per_gas = "2"  # 2 gwei
 max_fee_per_gas = "50"          # 50 gwei
-private_key = "your_private_key_here"
+private_key = "0x0000000000000000000000000000000000000000000000000000000000000001"
 
 [safety]
 max_concurrent_bundles = 5

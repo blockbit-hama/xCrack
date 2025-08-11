@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use anyhow::Result;
-use ethers::types::{H160, U256};
+use ethers::types::{U256, H160};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
@@ -36,19 +36,11 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StrategyConfig {
-    pub arbitrage: ArbitrageConfig,
     pub sandwich: SandwichConfig,
     pub liquidation: LiquidationConfig,
+    pub micro_arbitrage: MicroArbitrageConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArbitrageConfig {
-    pub enabled: bool,
-    pub min_profit_threshold: String, // ETH amount
-    pub max_trade_size: String,       // ETH amount
-    pub max_price_impact: f64,        // 0.05 = 5%
-    pub supported_dexes: Vec<String>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandwichConfig {
@@ -56,6 +48,10 @@ pub struct SandwichConfig {
     pub min_target_value: String, // ETH amount
     pub max_slippage: f64,        // 0.03 = 3%
     pub max_frontrun_size: String, // ETH amount
+    pub min_profit_eth: String, // minimum profit in ETH
+    pub min_profit_percentage: f64, // minimum profit percentage
+    pub gas_multiplier: f64, // gas price multiplier
+    pub max_gas_price_gwei: String, // max gas price in gwei
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +60,58 @@ pub struct LiquidationConfig {
     pub protocols: Vec<String>,
     pub min_health_factor: f64, // Below this, liquidation is considered
     pub max_liquidation_amount: String, // ETH amount
+    pub min_profit_eth: String, // minimum profit in ETH
+    pub min_liquidation_amount: String, // minimum liquidation amount
+    pub gas_multiplier: f64, // gas price multiplier
+    pub max_gas_price_gwei: String, // max gas price in gwei
+    pub health_factor_threshold: f64, // health factor threshold
+    pub max_liquidation_size: String, // max liquidation size
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MicroArbitrageConfig {
+    pub enabled: bool,
+    pub exchanges: Vec<ExchangeConfig>, // 모니터링할 거래소들
+    pub trading_pairs: Vec<String>, // 거래할 토큰 페어들
+    pub min_profit_percentage: f64, // 최소 수익률 (0.1% = 0.001)
+    pub min_profit_usd: String, // 최소 수익 달러 금액
+    pub max_position_size: String, // 최대 포지션 크기
+    pub max_concurrent_trades: usize, // 최대 동시 거래 수
+    pub execution_timeout_ms: u64, // 실행 타임아웃 (밀리초)
+    pub latency_threshold_ms: u64, // 지연 임계값 (밀리초)
+    pub price_update_interval_ms: u64, // 가격 업데이트 간격
+    pub order_book_depth: u32, // 오더북 깊이
+    pub slippage_tolerance: f64, // 슬리피지 허용치
+    pub fee_tolerance: f64, // 수수료 허용치
+    pub risk_limit_per_trade: String, // 거래당 위험 한도
+    pub daily_volume_limit: String, // 일일 거래량 한도
+    pub enable_cex_trading: bool, // CEX 거래 활성화
+    pub enable_dex_trading: bool, // DEX 거래 활성화
+    pub blacklist_tokens: Vec<String>, // 거래 금지 토큰들
+    pub priority_tokens: Vec<String>, // 우선순위 토큰들
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExchangeConfig {
+    pub name: String,
+    pub exchange_type: ExchangeType, // DEX or CEX
+    pub enabled: bool,
+    pub api_endpoint: String,
+    pub api_key: Option<String>,
+    pub api_secret: Option<String>,
+    pub trading_pairs: Vec<String>,
+    pub fee_percentage: f64,
+    pub min_order_size: String,
+    pub max_order_size: String,
+    pub rate_limit_per_second: u32,
+    pub websocket_endpoint: Option<String>,
+    pub supports_fast_execution: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ExchangeType {
+    DEX, // 탈중앙화 거래소 (Uniswap, SushiSwap 등)
+    CEX, // 중앙화 거래소 (Binance, Coinbase 등)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,22 +174,15 @@ impl Config {
                 base_fee: None,
             },
             strategies: StrategyConfig {
-                arbitrage: ArbitrageConfig {
-                    enabled: true,
-                    min_profit_threshold: "0.01".to_string(),
-                    max_trade_size: "10.0".to_string(),
-                    max_price_impact: 0.05,
-                    supported_dexes: vec![
-                        "uniswap_v2".to_string(),
-                        "sushiswap".to_string(),
-                        "uniswap_v3".to_string(),
-                    ],
-                },
                 sandwich: SandwichConfig {
                     enabled: true,
                     min_target_value: "0.5".to_string(),
                     max_slippage: 0.03,
                     max_frontrun_size: "5.0".to_string(),
+                    min_profit_eth: "0.05".to_string(),
+                    min_profit_percentage: 0.01,
+                    gas_multiplier: 1.5,
+                    max_gas_price_gwei: "200".to_string(),
                 },
                 liquidation: LiquidationConfig {
                     enabled: true,
@@ -152,6 +193,87 @@ impl Config {
                     ],
                     min_health_factor: 1.05,
                     max_liquidation_amount: "50.0".to_string(),
+                    min_profit_eth: "0.05".to_string(),
+                    min_liquidation_amount: "1.0".to_string(),
+                    gas_multiplier: 1.5,
+                    max_gas_price_gwei: "200".to_string(),
+                    health_factor_threshold: 1.0,
+                    max_liquidation_size: "10.0".to_string(),
+                },
+                micro_arbitrage: MicroArbitrageConfig {
+                    enabled: true,
+                    exchanges: vec![
+                        // DEX 거래소들
+                        ExchangeConfig {
+                            name: "uniswap_v2".to_string(),
+                            exchange_type: ExchangeType::DEX,
+                            enabled: true,
+                            api_endpoint: "https://api.uniswap.org/v1".to_string(),
+                            api_key: None,
+                            api_secret: None,
+                            trading_pairs: vec!["WETH/USDC".to_string(), "WETH/USDT".to_string(), "WETH/DAI".to_string()],
+                            fee_percentage: 0.003, // 0.3%
+                            min_order_size: "10".to_string(), // 10 USDC
+                            max_order_size: "50000".to_string(), // 50K USDC
+                            rate_limit_per_second: 10,
+                            websocket_endpoint: Some("wss://api.uniswap.org/ws".to_string()),
+                            supports_fast_execution: true,
+                        },
+                        ExchangeConfig {
+                            name: "sushiswap".to_string(),
+                            exchange_type: ExchangeType::DEX,
+                            enabled: true,
+                            api_endpoint: "https://api.sushi.com/v1".to_string(),
+                            api_key: None,
+                            api_secret: None,
+                            trading_pairs: vec!["WETH/USDC".to_string(), "WETH/USDT".to_string(), "WETH/DAI".to_string()],
+                            fee_percentage: 0.003, // 0.3%
+                            min_order_size: "10".to_string(),
+                            max_order_size: "50000".to_string(),
+                            rate_limit_per_second: 10,
+                            websocket_endpoint: Some("wss://api.sushi.com/ws".to_string()),
+                            supports_fast_execution: true,
+                        },
+                        // CEX 거래소들 (Mock용)
+                        ExchangeConfig {
+                            name: "mock_binance".to_string(),
+                            exchange_type: ExchangeType::CEX,
+                            enabled: true,
+                            api_endpoint: "https://api.binance.com/api/v3".to_string(),
+                            api_key: Some("mock_api_key".to_string()),
+                            api_secret: Some("mock_api_secret".to_string()),
+                            trading_pairs: vec!["ETHUSDC".to_string(), "ETHUSDT".to_string(), "ETHDAI".to_string()],
+                            fee_percentage: 0.001, // 0.1%
+                            min_order_size: "10".to_string(),
+                            max_order_size: "100000".to_string(),
+                            rate_limit_per_second: 20,
+                            websocket_endpoint: Some("wss://stream.binance.com:9443/ws".to_string()),
+                            supports_fast_execution: true,
+                        },
+                    ],
+                    trading_pairs: vec![
+                        "WETH/USDC".to_string(),
+                        "WETH/USDT".to_string(),
+                        "WETH/DAI".to_string(),
+                        "WBTC/USDC".to_string(),
+                        "WBTC/USDT".to_string(),
+                    ],
+                    min_profit_percentage: 0.001, // 0.1%
+                    min_profit_usd: "5".to_string(), // 최소 5달러 수익
+                    max_position_size: "10000".to_string(), // 최대 10K USDC
+                    max_concurrent_trades: 50,
+                    execution_timeout_ms: 100, // 100ms 타임아웃
+                    latency_threshold_ms: 50, // 50ms 지연 임계값
+                    price_update_interval_ms: 10, // 10ms마다 가격 업데이트
+                    order_book_depth: 10, // 상위 10개 레벨
+                    slippage_tolerance: 0.002, // 0.2% 슬리피지 허용
+                    fee_tolerance: 0.001, // 0.1% 수수료 허용
+                    risk_limit_per_trade: "1000".to_string(), // 거래당 1K USDC 위험 한도
+                    daily_volume_limit: "500000".to_string(), // 일일 500K USDC 볼륨 한도
+                    enable_cex_trading: true,
+                    enable_dex_trading: true,
+                    blacklist_tokens: vec!["SHIB".to_string(), "DOGE".to_string()], // 고변동성 토큰 제외
+                    priority_tokens: vec!["WETH".to_string(), "WBTC".to_string(), "USDC".to_string(), "USDT".to_string()],
                 },
             },
             flashbots: FlashbotsConfig {
@@ -257,11 +379,40 @@ impl Config {
         }
 
         // Validate strategy thresholds
-        if self.strategies.arbitrage.enabled {
-            let min_profit: f64 = self.strategies.arbitrage.min_profit_threshold.parse()
-                .map_err(|_| anyhow::anyhow!("Invalid arbitrage min profit threshold"))?;
+        if self.strategies.sandwich.enabled {
+            let min_profit: f64 = self.strategies.sandwich.min_profit_eth.parse()
+                .map_err(|_| anyhow::anyhow!("Invalid sandwich min profit threshold"))?;
             if min_profit <= 0.0 {
-                return Err(anyhow::anyhow!("Arbitrage min profit threshold must be positive"));
+                return Err(anyhow::anyhow!("Sandwich min profit threshold must be positive"));
+            }
+        }
+
+        // Validate micro arbitrage configuration
+        if self.strategies.micro_arbitrage.enabled {
+            let min_profit_usd: f64 = self.strategies.micro_arbitrage.min_profit_usd.parse()
+                .map_err(|_| anyhow::anyhow!("Invalid micro arbitrage min profit USD"))?;
+            if min_profit_usd <= 0.0 {
+                return Err(anyhow::anyhow!("Micro arbitrage min profit USD must be positive"));
+            }
+
+            if self.strategies.micro_arbitrage.min_profit_percentage <= 0.0 {
+                return Err(anyhow::anyhow!("Micro arbitrage min profit percentage must be positive"));
+            }
+
+            if self.strategies.micro_arbitrage.exchanges.is_empty() {
+                return Err(anyhow::anyhow!("At least one exchange must be configured for micro arbitrage"));
+            }
+
+            if self.strategies.micro_arbitrage.trading_pairs.is_empty() {
+                return Err(anyhow::anyhow!("At least one trading pair must be configured for micro arbitrage"));
+            }
+
+            if self.strategies.micro_arbitrage.execution_timeout_ms == 0 {
+                return Err(anyhow::anyhow!("Execution timeout must be greater than 0"));
+            }
+
+            if self.strategies.micro_arbitrage.max_concurrent_trades == 0 {
+                return Err(anyhow::anyhow!("Max concurrent trades must be greater than 0"));
             }
         }
 
@@ -291,7 +442,7 @@ mod tests {
         assert!(config.network.ws_url.is_some());
         
         // Test strategies
-        assert!(config.strategies.arbitrage.enabled);
+        assert!(config.strategies.sandwich.enabled);
         assert!(config.strategies.sandwich.enabled);
         assert!(config.strategies.liquidation.enabled);
         
@@ -311,6 +462,9 @@ mod tests {
     fn test_config_validation() {
         let mut config = Config::default();
         
+        // Set valid values for the default config to pass validation
+        config.flashbots.private_key = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string();
+        
         // Valid config should pass
         assert!(config.validate().is_ok());
         
@@ -325,7 +479,7 @@ mod tests {
         
         // Reset and test invalid profit threshold
         config = Config::default();
-        config.strategies.arbitrage.min_profit_threshold = "invalid".to_string();
+        config.strategies.sandwich.min_profit_eth = "invalid".to_string();
         assert!(config.validate().is_err());
         
         // Reset and test negative emergency stop
@@ -382,7 +536,7 @@ mod tests {
         
         // Basic checks
         assert_eq!(config.network.chain_id, deserialized.network.chain_id);
-        assert_eq!(config.strategies.arbitrage.enabled, deserialized.strategies.arbitrage.enabled);
+        assert_eq!(config.strategies.sandwich.enabled, deserialized.strategies.sandwich.enabled);
         assert_eq!(config.dexes.len(), deserialized.dexes.len());
         assert_eq!(config.tokens.len(), deserialized.tokens.len());
     }

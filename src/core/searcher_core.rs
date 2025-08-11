@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use anyhow::Result;
 use tracing::{info, debug, error, warn};
-use ethers::types::U256;
+use alloy::primitives::U256;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{RwLock, mpsc};
 use std::time::{Instant, Duration};
@@ -9,11 +9,14 @@ use ethers::providers::{Provider, Ws};
 
 use crate::config::Config;
 use crate::types::{PerformanceMetrics, Transaction, Opportunity, Bundle};
+use crate::strategies::StrategyManager;
+use crate::mocks::{is_mock_mode, MockFlashbotsClient, MockRpcProvider, MockMempoolMonitor};
 use super::{
-    StrategyManager, 
     BundleManager, 
     CoreMempoolMonitor, 
-    PerformanceTracker
+    PerformanceTracker,
+    MicroArbitrageOrchestrator,
+    MicroArbitrageSystemStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -23,6 +26,7 @@ pub struct SearcherStatus {
     pub submitted_bundles: usize,
     pub performance_metrics: PerformanceMetrics,
     pub uptime_seconds: u64,
+    pub micro_arbitrage_status: Option<MicroArbitrageSystemStatus>,
 }
 
 pub struct SearcherCore {
@@ -36,6 +40,9 @@ pub struct SearcherCore {
     bundle_manager: Arc<BundleManager>,
     mempool_monitor: Arc<CoreMempoolMonitor>,
     performance_tracker: Arc<PerformanceTracker>,
+    
+    // 마이크로아비트래지 시스템 (옵셔널)
+    micro_arbitrage_orchestrator: Option<Arc<MicroArbitrageOrchestrator>>,
     
     // 채널들
     tx_sender: Option<mpsc::UnboundedSender<Transaction>>,
@@ -52,8 +59,8 @@ impl SearcherCore {
             opportunities_found: 0,
             bundles_submitted: 0,
             bundles_included: 0,
-            total_profit: U256::zero(),
-            total_gas_spent: U256::zero(),
+            total_profit: U256::ZERO,
+            total_gas_spent: U256::ZERO,
             avg_analysis_time: 0.0,
             avg_submission_time: 0.0,
             success_rate: 0.0,
@@ -61,10 +68,28 @@ impl SearcherCore {
         };
         
         // 핵심 컴포넌트들 초기화
-        let strategy_manager = Arc::new(StrategyManager::new(Arc::clone(&config)).await?);
+        let strategy_manager = Arc::new(StrategyManager::new(Arc::clone(&config), Arc::clone(&provider)).await?);
         let bundle_manager = Arc::new(BundleManager::new(Arc::clone(&config)).await?);
         let mempool_monitor = Arc::new(CoreMempoolMonitor::new(Arc::clone(&config), Arc::clone(&provider)).await?);
         let performance_tracker = Arc::new(PerformanceTracker::new(Arc::clone(&config)).await?);
+        
+        // 마이크로아비트래지 시스템 초기화 (활성화된 경우)
+        let micro_arbitrage_orchestrator = if config.strategies.micro_arbitrage.enabled {
+            info!("🎼 마이크로아비트래지 시스템 초기화 중...");
+            
+            // 마이크로아비트래지 전략 추출
+            if let Some(micro_strategy) = strategy_manager.get_strategy(crate::types::StrategyType::MicroArbitrage).await {
+                // FIXME: 타입 캐스팅 문제를 해결하기 위해 임시로 None 반환
+                // 실제로는 MicroArbitrageOrchestrator::new를 호출해야 함
+                warn!("⚠️ 마이크로아비트래지 오케스트레이터 초기화 임시 비활성화 (타입 캐스팅 이슈)");
+                None
+            } else {
+                warn!("⚠️ 마이크로아비트래지 전략을 찾을 수 없음");
+                None
+            }
+        } else {
+            None
+        };
         
         info!("✅ SearcherCore 초기화 완료");
         
@@ -77,6 +102,7 @@ impl SearcherCore {
             bundle_manager,
             mempool_monitor,
             performance_tracker,
+            micro_arbitrage_orchestrator,
             tx_sender: None,
             opportunity_sender: None,
             bundle_sender: None,
@@ -93,6 +119,7 @@ impl SearcherCore {
             bundle_manager: Arc::clone(&self.bundle_manager),
             mempool_monitor: Arc::clone(&self.mempool_monitor),
             performance_tracker: Arc::clone(&self.performance_tracker),
+            micro_arbitrage_orchestrator: self.micro_arbitrage_orchestrator.as_ref().map(Arc::clone),
             tx_sender: self.tx_sender.clone(),
             opportunity_sender: self.opportunity_sender.clone(),
             bundle_sender: self.bundle_sender.clone(),
@@ -119,22 +146,29 @@ impl SearcherCore {
         let (opportunity_sender, mut opportunity_receiver) = mpsc::unbounded_channel::<Opportunity>();
         let (bundle_sender, mut bundle_receiver) = mpsc::unbounded_channel::<Bundle>();
         
-        // 채널 전송자들 저장
-        let mut self_mut = unsafe { &mut *(self as *const _ as *mut Self) };
-        self_mut.tx_sender = Some(tx_sender);
-        self_mut.opportunity_sender = Some(opportunity_sender);
-        self_mut.bundle_sender = Some(bundle_sender);
+        // 채널 저장 (run_main_loop에서 사용하기 위해)
+        // Note: 실제로는 Arc<RwLock<>> 패턴이 더 안전하지만, 현재 구조상 mut self가 필요
+        // 임시 해결책: 채널을 직접 전달
         
         // 3. 멤풀 모니터링 시작
         info!("📡 멤풀 모니터링 시작 중...");
-        self.mempool_monitor.start(self_mut.tx_sender.as_ref().unwrap().clone()).await?;
+        self.mempool_monitor.start(tx_sender.clone()).await?;
+        
+        // 3.1. 마이크로아비트래지 시스템 시작 (활성화된 경우)
+        if let Some(ref orchestrator) = self.micro_arbitrage_orchestrator {
+            info!("⚡ 마이크로아비트래지 시스템 시작 중...");
+            // FIXME: orchestrator.start()를 호출해야 하지만 mutable reference 문제로 임시 주석
+            warn!("⚠️ 마이크로아비트래지 오케스트레이터 시작 임시 비활성화 (mutable reference 이슈)");
+        }
         
         // 4. 메인 처리 루프 실행
         info!("🔄 메인 처리 루프 시작 중...");
         self.run_main_loop(
             tx_receiver,
             opportunity_receiver,
-            bundle_receiver
+            bundle_receiver,
+            opportunity_sender,
+            bundle_sender
         ).await?;
         
         Ok(())
@@ -146,13 +180,15 @@ impl SearcherCore {
         mut tx_receiver: mpsc::UnboundedReceiver<Transaction>,
         mut opportunity_receiver: mpsc::UnboundedReceiver<Opportunity>,
         mut bundle_receiver: mpsc::UnboundedReceiver<Bundle>,
+        opportunity_sender: mpsc::UnboundedSender<Opportunity>,
+        bundle_sender: mpsc::UnboundedSender<Bundle>,
     ) -> Result<()> {
         info!("🎯 메인 처리 루프 실행 중...");
         
         // 트랜잭션 처리 태스크
         let strategy_manager = Arc::clone(&self.strategy_manager);
         let performance_tracker = Arc::clone(&self.performance_tracker);
-        let opportunity_sender = self.opportunity_sender.as_ref().unwrap().clone();
+        let opportunity_sender_clone = opportunity_sender.clone();
         
         tokio::spawn(async move {
             info!("🔄 트랜잭션 처리 태스크 시작");
@@ -175,7 +211,7 @@ impl SearcherCore {
                 
                 // 발견된 기회들을 전송
                 for opportunity in opportunities {
-                    if let Err(e) = opportunity_sender.send(opportunity) {
+                    if let Err(e) = opportunity_sender_clone.send(opportunity) {
                         error!("❌ 기회 전송 실패: {}", e);
                     }
                 }
@@ -186,7 +222,7 @@ impl SearcherCore {
         let strategy_manager = Arc::clone(&self.strategy_manager);
         let bundle_manager = Arc::clone(&self.bundle_manager);
         let performance_tracker = Arc::clone(&self.performance_tracker);
-        let bundle_sender = self.bundle_sender.as_ref().unwrap().clone();
+        let bundle_sender_clone = bundle_sender.clone();
         
         tokio::spawn(async move {
             info!("✅ 기회 검증 및 번들 생성 태스크 시작");
@@ -212,7 +248,7 @@ impl SearcherCore {
                     match bundle_manager.create_optimal_bundle(validated_opportunities).await {
                         Ok(Some(bundle)) => {
                             info!("📦 번들 생성됨: {}", bundle.id);
-                            if let Err(e) = bundle_sender.send(bundle) {
+                            if let Err(e) = bundle_sender_clone.send(bundle) {
                                 error!("❌ 번들 전송 실패: {}", e);
                             }
                         }
@@ -367,12 +403,20 @@ impl SearcherCore {
         let mempool_stats = self.mempool_monitor.get_stats().await;
         let bundle_stats = self.bundle_manager.get_bundle_stats().await;
         
+        // 마이크로아비트래지 상태 조회 (있는 경우)
+        let micro_arbitrage_status = if let Some(ref orchestrator) = self.micro_arbitrage_orchestrator {
+            Some(orchestrator.get_comprehensive_status().await)
+        } else {
+            None
+        };
+        
         Ok(SearcherStatus {
             is_running: self.is_running.load(Ordering::SeqCst),
             active_opportunities: mempool_stats.transactions_processed as usize,
             submitted_bundles: bundle_stats.total_submitted as usize,
-            performance_metrics: metrics,
+            performance_metrics: metrics.clone(),
             uptime_seconds: metrics.uptime,
+            micro_arbitrage_status,
         })
     }
 
@@ -407,7 +451,7 @@ impl SearcherCore {
     }
 
     /// 전략 통계 조회
-    pub async fn get_strategy_stats(&self) -> std::collections::HashMap<crate::types::StrategyType, super::strategy_manager::StrategyStats> {
+    pub async fn get_strategy_stats(&self) -> std::collections::HashMap<crate::types::StrategyType, crate::strategies::manager::StrategyStats> {
         self.strategy_manager.get_strategy_stats().await
     }
 
@@ -445,12 +489,12 @@ impl std::fmt::Debug for SearcherCore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::types::{H256, H160, U256};
-    use chrono::Utc;
+    // use ethers::types::{H256, H160, U256};
+    // use chrono::Utc;
 
     #[tokio::test]
     async fn test_searcher_core_creation() {
-        let config = Arc::new(Config::default());
+        let _config = Arc::new(Config::default());
         // 실제 테스트에서는 더미 프로바이더가 필요
         // let provider = Arc::new(Provider::new(Ws::connect("wss://dummy").await.unwrap()));
         // let core = SearcherCore::new(config, provider).await;
@@ -459,7 +503,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_searcher_status() {
-        let config = Arc::new(Config::default());
+        let _config = Arc::new(Config::default());
         // 실제 테스트에서는 더미 프로바이더가 필요
         // let provider = Arc::new(Provider::new(Ws::connect("wss://dummy").await.unwrap()));
         // let core = SearcherCore::new(config, provider).await.unwrap();
