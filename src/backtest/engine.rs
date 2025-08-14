@@ -8,7 +8,6 @@ use uuid::Uuid;
 
 use crate::{
     strategies::{
-        predictive::{PredictionSignal, PredictiveStrategy, PredictiveStrategyType},
         execution_engine::{ExecutionStrategy, ExecutionTask, QuantExecutionEngine},
         traits::Strategy,
     },
@@ -82,8 +81,13 @@ pub struct BacktestTrade {
 pub enum TradeType {
     /// MEV 거래 (샌드위치, 아비트래지, 청산)
     Mev { mev_type: String, profit: f64 },
-    /// 예측 기반 거래
-    Predictive { confidence: f64, prediction_accuracy: Option<f64> },
+    /// 크로스체인 아비트래지 거래
+    CrossChain {
+        source_chain: String,
+        dest_chain: String,
+        bridge_protocol: String,
+        profit: f64,
+    },
     /// 주문 실행 최적화
     Execution { execution_type: String, slippage: f64 },
 }
@@ -212,6 +216,10 @@ impl BacktestEngine {
                         // Simulate micro arbitrage strategy
                         tracing::info!("Simulating micro arbitrage strategy");
                     }
+                    StrategyType::CrossChainArbitrage => {
+                        // Simulate cross-chain arbitrage strategy
+                        tracing::info!("Simulating cross-chain arbitrage strategy");
+                    }
                 }
             }
 
@@ -235,18 +243,18 @@ impl BacktestEngine {
         Ok(result)
     }
 
-    /// 예측 전략 시뮬레이션
-    async fn simulate_predictive_strategy(
+    /// 크로스체인 아비트래지 전략 시뮬레이션
+    async fn simulate_cross_chain_arbitrage_strategy(
         &self,
         strategy_name: &str,
-        signals: &[PredictionSignal],
+        opportunities: &[CrossChainOpportunity],
         market_data: &HashMap<String, HistoricalDataPoint>,
     ) -> Result<()> {
-        for signal in signals {
-            if let Some(data) = market_data.get(&signal.symbol) {
-                // 신호 검증 및 실행
-                if signal.confidence >= 0.7 && self.has_sufficient_balance(signal, data.price).await? {
-                    let trade = self.execute_predictive_trade(strategy_name, signal, data).await?;
+        for opportunity in opportunities {
+            if let Some(data) = market_data.get(&opportunity.symbol) {
+                // 기회 검증 및 실행
+                if opportunity.profit_percent >= 0.2 && self.has_sufficient_cross_chain_balance(opportunity, data.price).await? {
+                    let trade = self.execute_cross_chain_trade(strategy_name, opportunity, data).await?;
                     
                     // 거래 기록
                     {
@@ -306,42 +314,41 @@ impl BacktestEngine {
         Ok(())
     }
 
-    /// 예측 거래 실행
-    async fn execute_predictive_trade(
+    /// 크로스체인 아비트래지 거래 실행
+    async fn execute_cross_chain_trade(
         &self,
         strategy_name: &str,
-        signal: &PredictionSignal,
+        opportunity: &CrossChainOpportunity,
         data: &HistoricalDataPoint,
     ) -> Result<BacktestTrade> {
-        let side = if signal.direction > 0.0 { OrderSide::Buy } else { OrderSide::Sell };
-        let quantity = 100.0; // 간소화된 주문 크기
-        let price = data.price * (1.0 + self.config.slippage / 100.0); // 슬리피지 적용
-        let fee = quantity * price * self.config.trading_fee / 100.0;
+        let quantity = 10000.0; // 크로스체인은 일반적으로 큰 거래량
+        let profit = quantity * opportunity.profit_percent / 100.0;
+        let price = data.price;
+        let bridge_fee = quantity * price * 0.1 / 100.0; // 0.1% 브리지 수수료
+        let gas_fee = quantity * price * self.config.trading_fee / 100.0;
+        let total_fee = bridge_fee + gas_fee;
 
-        // 포트폴리오 업데이트
+        // 포트폴리오 업데이트 (크로스체인 수익 반영)
         {
             let mut state = self.simulation_state.write().unwrap();
-            state.portfolio_balance -= fee;
-            
-            match side {
-                OrderSide::Buy => state.portfolio_balance -= quantity * price,
-                OrderSide::Sell => state.portfolio_balance += quantity * price,
-            }
+            state.portfolio_balance += profit - total_fee;
         }
 
         Ok(BacktestTrade {
             id: Uuid::new_v4(),
-            symbol: signal.symbol.clone(),
-            side,
+            symbol: opportunity.symbol.clone(),
+            side: OrderSide::Buy, // 크로스체인은 방향이 복잡하므로 간소화
             quantity,
             price,
             timestamp: data.timestamp.timestamp() as u64,
             strategy: strategy_name.to_string(),
-            trade_type: TradeType::Predictive {
-                confidence: signal.confidence,
-                prediction_accuracy: None, // 추후 계산
+            trade_type: TradeType::CrossChain {
+                source_chain: opportunity.source_chain.clone(),
+                dest_chain: opportunity.dest_chain.clone(),
+                bridge_protocol: opportunity.bridge_protocol.clone(),
+                profit,
             },
-            fee,
+            fee: total_fee,
         })
     }
 
@@ -477,10 +484,14 @@ impl BacktestEngine {
         Ok(market_data)
     }
 
-    /// 잔고 충분성 확인
-    async fn has_sufficient_balance(&self, signal: &PredictionSignal, price: f64) -> Result<bool> {
+    /// 크로스체인 잔고 충분성 확인
+    async fn has_sufficient_cross_chain_balance(
+        &self, 
+        opportunity: &CrossChainOpportunity, 
+        price: f64
+    ) -> Result<bool> {
         let state = self.simulation_state.read().unwrap();
-        let required_balance = 100.0 * price; // 간소화된 계산
+        let required_balance = opportunity.amount.to::<u128>() as f64 * price / 1e18; // Wei to ETH conversion
         Ok(state.portfolio_balance > required_balance)
     }
 
@@ -544,6 +555,7 @@ impl BacktestEngine {
             let total_pnl: f64 = strategy_trade_list.iter()
                 .map(|t| match &t.trade_type {
                     TradeType::Mev { profit, .. } => *profit - t.fee,
+                    TradeType::CrossChain { profit, .. } => *profit - t.fee,
                     _ => -t.fee, // 간소화된 손익 계산
                 })
                 .sum();
@@ -552,6 +564,7 @@ impl BacktestEngine {
                 let winning_trades = strategy_trade_list.iter()
                     .filter(|t| match &t.trade_type {
                         TradeType::Mev { profit, .. } => *profit > t.fee,
+                        TradeType::CrossChain { profit, .. } => *profit > t.fee,
                         _ => false,
                     })
                     .count();
@@ -583,9 +596,9 @@ impl BacktestEngine {
 /// 전략 설정
 #[derive(Debug, Clone)]
 pub enum StrategyConfig {
-    Predictive {
+    CrossChain {
         name: String,
-        prediction_signals: Vec<PredictionSignal>,
+        cross_chain_opportunities: Vec<CrossChainOpportunity>,
     },
     Execution {
         name: String,
@@ -604,5 +617,21 @@ pub struct MevOpportunity {
     pub opportunity_type: String, // "sandwich", "arbitrage", "liquidation"
     pub profit_potential: f64,
     pub gas_cost: f64,
+    pub timestamp: u64,
+}
+
+/// 크로스체인 아비트래지 기회
+#[derive(Debug, Clone)]
+pub struct CrossChainOpportunity {
+    pub symbol: String,
+    pub source_chain: String,
+    pub dest_chain: String,
+    pub source_price: f64,
+    pub dest_price: f64,
+    pub profit_percent: f64,
+    pub amount: alloy::primitives::U256,
+    pub bridge_protocol: String,
+    pub bridge_fee: f64,
+    pub gas_fee: f64,
     pub timestamp: u64,
 }

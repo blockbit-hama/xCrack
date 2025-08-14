@@ -11,9 +11,7 @@ repository = "https://github.com/xcrack/mev-searcher-rust"
 name = "searcher"
 path = "src/main.rs"
 
-[[bin]]
-name = "predictive_demo"
-path = "src/bin/predictive_demo.rs"
+
 
 [dependencies]
 # Async runtime
@@ -28,7 +26,7 @@ toml = "0.8"
 # HTTP client
 reqwest = { version = "0.11", features = ["json", "stream"] }
 
-# WebSocket
+# WebSocket and Futures
 tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
 futures-util = "0.3"
 

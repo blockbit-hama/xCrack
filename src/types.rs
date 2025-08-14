@@ -25,6 +25,7 @@ pub enum StrategyType {
     Sandwich,
     Liquidation,
     MicroArbitrage, // 초고속 거래소간 마이크로 아비트래지
+    CrossChainArbitrage, // 크로스체인 아비트래지
     // TODO: 향후 구현 예정
     // Frontrun,
     // Backrun,
@@ -36,6 +37,7 @@ impl std::fmt::Display for StrategyType {
             StrategyType::Sandwich => write!(f, "Sandwich"),
             StrategyType::Liquidation => write!(f, "Liquidation"),
             StrategyType::MicroArbitrage => write!(f, "MicroArbitrage"),
+            StrategyType::CrossChainArbitrage => write!(f, "CrossChainArbitrage"),
         }
     }
 }
@@ -46,6 +48,7 @@ pub enum OpportunityType {
     Sandwich,
     Liquidation,
     MicroArbitrage,
+    CrossChainArbitrage,
     MevBoost,
 }
 
@@ -845,5 +848,241 @@ mod tests {
         );
         
         assert_eq!(opportunity.profit_per_gas(), 0.0);
+    }
+}
+
+// ================================
+// Cross-Chain Arbitrage Types
+// ================================
+
+/// Supported blockchain networks
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum ChainId {
+    Ethereum = 1,
+    Polygon = 137,
+    BSC = 56,
+    Arbitrum = 42161,
+    Optimism = 10,
+    Avalanche = 43114,
+}
+
+impl ChainId {
+    pub fn name(&self) -> &'static str {
+        match self {
+            ChainId::Ethereum => "ethereum",
+            ChainId::Polygon => "polygon",
+            ChainId::BSC => "bsc",
+            ChainId::Arbitrum => "arbitrum",
+            ChainId::Optimism => "optimism",
+            ChainId::Avalanche => "avalanche",
+        }
+    }
+
+    pub fn native_token(&self) -> &'static str {
+        match self {
+            ChainId::Ethereum => "ETH",
+            ChainId::Polygon => "MATIC",
+            ChainId::BSC => "BNB",
+            ChainId::Arbitrum => "ETH",
+            ChainId::Optimism => "ETH",
+            ChainId::Avalanche => "AVAX",
+        }
+    }
+}
+
+impl std::fmt::Display for ChainId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+/// Bridge protocol types
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum BridgeProtocol {
+    Stargate,
+    Hop,
+    Synapse,
+    Rubic,
+    Across,
+    Multichain,
+}
+
+impl BridgeProtocol {
+    pub fn name(&self) -> &'static str {
+        match self {
+            BridgeProtocol::Stargate => "stargate",
+            BridgeProtocol::Hop => "hop",
+            BridgeProtocol::Synapse => "synapse", 
+            BridgeProtocol::Rubic => "rubic",
+            BridgeProtocol::Across => "across",
+            BridgeProtocol::Multichain => "multichain",
+        }
+    }
+}
+
+/// Cross-chain token information
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CrossChainToken {
+    /// Token symbol (e.g., "USDC")
+    pub symbol: String,
+    /// Token addresses on different chains
+    pub addresses: std::collections::HashMap<ChainId, Address>,
+    /// Token decimals (usually same across chains)
+    pub decimals: u8,
+}
+
+/// Cross-chain arbitrage opportunity
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CrossChainArbitrageOpportunity {
+    /// Unique opportunity ID
+    pub id: String,
+    /// Token to arbitrage
+    pub token: CrossChainToken,
+    /// Source chain (buy from)
+    pub source_chain: ChainId,
+    /// Destination chain (sell to)
+    pub dest_chain: ChainId,
+    /// Price on source chain
+    pub source_price: f64,
+    /// Price on destination chain
+    pub dest_price: f64,
+    /// Price difference percentage
+    pub price_diff_percent: f64,
+    /// Trade amount
+    pub amount: U256,
+    /// Bridge protocol to use
+    pub bridge_protocol: BridgeProtocol,
+    /// Estimated bridge cost
+    pub bridge_cost: U256,
+    /// Estimated total gas costs
+    pub total_gas_cost: U256,
+    /// Expected profit (after costs)
+    pub expected_profit: U256,
+    /// Profit percentage
+    pub profit_percent: f64,
+    /// Estimated execution time (seconds)
+    pub estimated_time: u64,
+    /// Confidence score (0.0 - 1.0)
+    pub confidence: f64,
+    /// Timestamp when opportunity was discovered
+    pub discovered_at: DateTime<Utc>,
+    /// Expiry time for this opportunity
+    pub expires_at: DateTime<Utc>,
+}
+
+impl CrossChainArbitrageOpportunity {
+    /// Check if opportunity is still valid
+    pub fn is_valid(&self) -> bool {
+        Utc::now() < self.expires_at && self.expected_profit > U256::ZERO
+    }
+
+    /// Calculate profitability score
+    pub fn profitability_score(&self) -> f64 {
+        (self.profit_percent * self.confidence) / (self.estimated_time as f64 / 60.0) // per minute
+    }
+}
+
+/// Bridge route information
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BridgeRoute {
+    /// Bridge protocol
+    pub protocol: BridgeProtocol,
+    /// Source chain
+    pub from_chain: ChainId,
+    /// Destination chain  
+    pub to_chain: ChainId,
+    /// Token to bridge
+    pub token: CrossChainToken,
+    /// Bridge cost
+    pub cost: U256,
+    /// Estimated time (seconds)
+    pub estimated_time: u64,
+    /// Success rate (0.0 - 1.0)
+    pub success_rate: f64,
+    /// Whether this route requires destination gas
+    pub requires_dest_gas: bool,
+}
+
+/// Cross-chain trade execution status
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CrossChainTradeStatus {
+    /// Trade initiated
+    Initiated,
+    /// Source chain transaction confirmed
+    SourceTxConfirmed { tx_hash: B256 },
+    /// Bridge transaction in progress
+    BridgeInProgress { bridge_tx_hash: Option<B256> },
+    /// Bridge completed, destination chain transaction pending
+    BridgeCompleted,
+    /// Destination chain transaction confirmed
+    DestTxConfirmed { tx_hash: B256 },
+    /// Trade completed successfully
+    Completed {
+        source_tx_hash: B256,
+        dest_tx_hash: B256,
+        actual_profit: U256,
+    },
+    /// Trade failed
+    Failed {
+        reason: String,
+        stage: CrossChainTradeStage,
+        recovery_possible: bool,
+    },
+}
+
+/// Cross-chain trade execution stages
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CrossChainTradeStage {
+    SourceChainBuy,
+    BridgeTransfer,
+    DestChainSell,
+}
+
+/// Cross-chain trade execution record
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CrossChainTrade {
+    /// Trade ID
+    pub id: String,
+    /// Opportunity that triggered this trade
+    pub opportunity: CrossChainArbitrageOpportunity,
+    /// Current status
+    pub status: CrossChainTradeStatus,
+    /// Start time
+    pub started_at: DateTime<Utc>,
+    /// Completion time (if completed)
+    pub completed_at: Option<DateTime<Utc>>,
+    /// Actual execution time
+    pub actual_execution_time: Option<u64>,
+    /// Source chain transaction hash
+    pub source_tx_hash: Option<B256>,
+    /// Destination chain transaction hash  
+    pub dest_tx_hash: Option<B256>,
+    /// Actual profit realized
+    pub actual_profit: Option<U256>,
+    /// Error message (if failed)
+    pub error_message: Option<String>,
+}
+
+impl CrossChainTrade {
+    pub fn new(opportunity: CrossChainArbitrageOpportunity) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            opportunity,
+            status: CrossChainTradeStatus::Initiated,
+            started_at: Utc::now(),
+            completed_at: None,
+            actual_execution_time: None,
+            source_tx_hash: None,
+            dest_tx_hash: None,
+            actual_profit: None,
+            error_message: None,
+        }
+    }
+
+    pub fn is_completed(&self) -> bool {
+        matches!(
+            self.status,
+            CrossChainTradeStatus::Completed { .. } | CrossChainTradeStatus::Failed { .. }
+        )
     }
 }
