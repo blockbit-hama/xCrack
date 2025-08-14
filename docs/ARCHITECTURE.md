@@ -7,16 +7,18 @@
 
 1. [전체 시스템 아키텍처](#전체-시스템-아키텍처)
 2. [핵심 컴포넌트](#핵심-컴포넌트)
-3. [마이크로 아비트래지 시스템](#마이크로-아비트래지-시스템)
-4. [데이터 흐름](#데이터-흐름)
-5. [전략 실행 흐름](#전략-실행-흐름)
-6. [채널 아키텍처](#채널-아키텍처)
-7. [Mock 시스템](#mock-시스템)
-8. [성능 모니터링](#성능-모니터링)
-9. [에러 처리](#에러-처리)
-10. [구성 관리](#구성-관리)
-11. [테스트 아키텍처](#테스트-아키텍처)
-12. [보안 및 위험 관리](#보안-및-위험-관리)
+3. [예측 기반 자동매매 시스템](#예측-기반-자동매매-시스템)
+4. [AI 예측 시스템 (Python)](#ai-예측-시스템-python)
+5. [마이크로 아비트래지 시스템](#마이크로-아비트래지-시스템)
+6. [데이터 흐름](#데이터-흐름)
+7. [전략 실행 흐름](#전략-실행-흐름)
+8. [채널 아키텍처](#채널-아키텍처)
+9. [Mock 시스템](#mock-시스템)
+10. [성능 모니터링](#성능-모니터링)
+11. [에러 처리](#에러-처리)
+12. [구성 관리](#구성-관리)
+13. [테스트 아키텍처](#테스트-아키텍처)
+14. [보안 및 위험 관리](#보안-및-위험-관리)
 
 ---
 
@@ -28,7 +30,8 @@ xCrack은 Rust로 구현된 고성능 MEV (Maximum Extractable Value) 서쳐입�
 
 **주요 특징:**
 - 🚀 **고성능**: 비동기 Rust 기반 초고속 처리 (< 100ms 응답시간)
-- 🎯 **다전략 지원**: Sandwich, Liquidation, Micro-Arbitrage 전략
+- 🎯 **다전략 지원**: Sandwich, Liquidation, Micro-Arbitrage, AI 예측 기반 전략
+- 🧠 **AI 통합**: Python 기반 머신러닝 예측 시스템 완전 통합
 - 🔄 **실시간 처리**: 채널 기반 병렬 처리 아키텍처
 - 🛡️ **위험 관리**: 포괄적인 안전장치 및 모니터링
 - 🧪 **테스트 친화적**: 완전한 Mock 시스템으로 안전한 개발/테스트
@@ -43,6 +46,32 @@ graph TB
         DEX2[🍣 SushiSwap]
         CEX1[🔸 Mock Binance]
         CEX2[🔵 Mock Coinbase]
+    end
+
+    subgraph "AI Prediction System (Python)"
+        subgraph "AI Core"
+            AI_MAIN[🤖 AI Main System]
+            ENSEMBLE[🧠 Ensemble Predictor]
+            MARKET_ANALYZER[📊 Market Analyzer]
+            MEV_DETECTOR[🔍 MEV Detector]
+        end
+
+        subgraph "ML Models"
+            LSTM[📈 LSTM Model]
+            TRANSFORMER[🔄 Transformer Model]
+            RF[🌳 Random Forest]
+            XGB[⚡ XGBoost]
+        end
+
+        subgraph "Data Collection"
+            MARKET_COLLECTOR[📡 Market Data Collector]
+            FEATURE_ENG[⚙️ Feature Engineer]
+            PREDICTION_ENGINE[🎯 Prediction Engine]
+        end
+
+        subgraph "Communication"
+            RUST_BRIDGE[🌉 Rust Bridge]
+        end
     end
 
     subgraph "xCrack MEV Searcher (Rust)"
@@ -65,6 +94,8 @@ graph TB
             SANDWICH[🥪 SandwichStrategy]
             LIQ[💧 LiquidationStrategy]
             MICRO_ARB[⚡ MicroArbitrageStrategy]
+            PREDICTIVE[🤖 PredictiveStrategy]
+            EXEC_ENGINE[⚡ ExecutionEngine]
         end
 
         subgraph "Exchange Integration Layer"
@@ -95,6 +126,25 @@ graph TB
         end
     end
 
+    %% AI-Rust Communication
+    RUST_BRIDGE -.->|WebSocket/TCP/Redis| SC
+    SC -.->|Performance Feedback| RUST_BRIDGE
+    PREDICTIVE -.->|Prediction Requests| RUST_BRIDGE
+    RUST_BRIDGE -.->|Predictions/MEV Signals| PREDICTIVE
+
+    %% AI Internal Flow
+    AI_MAIN --> MARKET_COLLECTOR
+    AI_MAIN --> ENSEMBLE
+    AI_MAIN --> MEV_DETECTOR
+    ENSEMBLE --> LSTM
+    ENSEMBLE --> TRANSFORMER
+    ENSEMBLE --> RF
+    ENSEMBLE --> XGB
+    MARKET_COLLECTOR --> FEATURE_ENG
+    FEATURE_ENG --> PREDICTION_ENGINE
+    PREDICTION_ENGINE --> RUST_BRIDGE
+    MEV_DETECTOR --> RUST_BRIDGE
+
     %% External Connections (Production)
     ETH -.->|WebSocket| CMM
     CMM -.->|HTTP/WS| ETH
@@ -106,6 +156,13 @@ graph TB
     EM -.->|WebSocket/REST| DEX2
     EM -.->|WebSocket/REST| CEX1
     EM -.->|WebSocket/REST| CEX2
+    
+    %% AI Market Data
+    MARKET_COLLECTOR -.->|API/WebSocket| DEX1
+    MARKET_COLLECTOR -.->|API/WebSocket| DEX2
+    MARKET_COLLECTOR -.->|API/WebSocket| CEX1
+    MARKET_COLLECTOR -.->|API/WebSocket| CEX2
+    MARKET_COLLECTOR -.->|Mempool Data| ETH
 
     %% Mock Connections (Test Mode)
     MOCK_WS -.->|Local WS| SC
@@ -135,6 +192,9 @@ graph TB
     SM --> SANDWICH
     SM --> LIQ
     SM --> MICRO_ARB
+    SM --> PREDICTIVE
+    PREDICTIVE --> EXEC_ENGINE
+    EXEC_ENGINE --> OE
     
     %% Data Flow
     CONFIG --> CACHE
@@ -145,7 +205,11 @@ graph TB
     style SANDWICH fill:#4ecdc4
     style LIQ fill:#45b7d1
     style MICRO_ARB fill:#f39c12
+    style PREDICTIVE fill:#e74c3c
     style MAO fill:#9b59b6
+    style AI_MAIN fill:#8e44ad
+    style ENSEMBLE fill:#3498db
+    style RUST_BRIDGE fill:#e67e22
     style MOCK_WS fill:#96ceb4
     style MOCK_FB fill:#96ceb4
     style MOCK_MM fill:#96ceb4
@@ -389,6 +453,554 @@ pub struct CoreMempoolMonitor {
 - 🔍 지능적 트랜잭션 필터링 (가치, 가스, 타입별)
 - 📊 멤풀 혼잡도 및 가스비 트렌드 분석
 - ⚡ 고가치 트랜잭션 우선 처리
+
+---
+
+## 예측 기반 자동매매 시스템
+
+### 1. 예측 기반 전략 아키텍처
+
+xCrack의 예측 기반 자동매매 시스템은 AI 예측 신호를 받아 VWAP, TWAP, Iceberg 등의 정량적 거래 전략을 실행하는 시스템입니다.
+
+```mermaid
+graph TB
+    subgraph "Predictive Trading System"
+        subgraph "AI Prediction Input"
+            PRED_SIGNAL[🤖 Prediction Signal]
+            MEV_SIGNAL[⚡ MEV Signal]
+            MARKET_SIGNAL[📊 Market Signal]
+        end
+
+        subgraph "Strategy Selection"
+            PREDICTIVE_STRATEGY[🎯 PredictiveStrategy]
+            STRATEGY_ROUTER[🔀 Strategy Router]
+            RISK_MANAGER[🛡️ Risk Manager]
+        end
+
+        subgraph "Execution Strategies"
+            VWAP[📊 VWAP Execution]
+            TWAP[⏰ TWAP Execution]
+            ICEBERG[🧊 Iceberg Execution]
+            MEV_PRED[⚡ MEV Predictive]
+        end
+
+        subgraph "Execution Engine"
+            EXEC_ENGINE[⚡ QuantExecutionEngine]
+            ORDER_SLICER[✂️ Order Slicer]
+            POSITION_MGR[📈 Position Manager]
+        end
+
+        subgraph "Order Execution"
+            ORDER_EXECUTOR[📤 OrderExecutor]
+            PRICE_FEED[💱 PriceFeedManager]
+        end
+    end
+
+    PRED_SIGNAL --> PREDICTIVE_STRATEGY
+    MEV_SIGNAL --> PREDICTIVE_STRATEGY
+    MARKET_SIGNAL --> PREDICTIVE_STRATEGY
+    
+    PREDICTIVE_STRATEGY --> STRATEGY_ROUTER
+    STRATEGY_ROUTER --> RISK_MANAGER
+    
+    RISK_MANAGER --> VWAP
+    RISK_MANAGER --> TWAP
+    RISK_MANAGER --> ICEBERG
+    RISK_MANAGER --> MEV_PRED
+    
+    VWAP --> EXEC_ENGINE
+    TWAP --> EXEC_ENGINE
+    ICEBERG --> EXEC_ENGINE
+    MEV_PRED --> EXEC_ENGINE
+    
+    EXEC_ENGINE --> ORDER_SLICER
+    ORDER_SLICER --> POSITION_MGR
+    POSITION_MGR --> ORDER_EXECUTOR
+    
+    PRICE_FEED --> ORDER_EXECUTOR
+
+    style PREDICTIVE_STRATEGY fill:#e74c3c
+    style EXEC_ENGINE fill:#3498db
+    style VWAP fill:#27ae60
+    style TWAP fill:#f39c12
+    style ICEBERG fill:#9b59b6
+```
+
+### 2. 예측 신호 처리 흐름
+
+```mermaid
+sequenceDiagram
+    participant AI as AI Predictor
+    participant PS as PredictiveStrategy
+    participant RM as RiskManager
+    participant EE as ExecutionEngine
+    participant OE as OrderExecutor
+
+    Note over AI,OE: Prediction-Based Trading Flow
+
+    AI->>PS: Send Prediction Signal
+    PS->>PS: Validate Signal Confidence
+    PS->>RM: Check Risk Limits
+    
+    alt Risk Approved
+        RM->>PS: Risk Clearance
+        PS->>PS: Select Strategy Type
+        
+        alt VWAP Strategy
+            PS->>EE: Execute VWAP
+            EE->>EE: Calculate VWAP Slices
+            EE->>OE: Submit Time-Weighted Orders
+        else TWAP Strategy
+            PS->>EE: Execute TWAP
+            EE->>EE: Calculate Time Slices
+            EE->>OE: Submit Equal Time Orders
+        else Iceberg Strategy
+            PS->>EE: Execute Iceberg
+            EE->>EE: Calculate Hidden Orders
+            EE->>OE: Submit Iceberg Orders
+        else MEV Predictive
+            PS->>EE: Execute MEV Combined
+            EE->>EE: Check MEV Opportunity
+            EE->>OE: Fast Market Orders
+        end
+        
+        OE->>EE: Execution Confirmation
+        EE->>PS: Update Position
+        PS->>AI: Send Performance Feedback
+    else Risk Denied
+        RM->>PS: Risk Rejection
+        PS->>AI: Signal Rejected
+    end
+```
+
+### 3. 정량적 실행 전략
+
+#### VWAP (Volume Weighted Average Price) 전략
+```rust
+pub async fn execute_vwap_strategy(
+    &self,
+    signal: &PredictionSignal,
+    total_size: f64,
+    duration_minutes: u32,
+    max_participation_rate: f64,
+) -> Result<()>
+```
+
+**특징:**
+- 시장 거래량에 비례하여 주문 분할
+- 시장 임팩트 최소화
+- 대량 주문 실행에 최적화
+
+#### TWAP (Time Weighted Average Price) 전략
+```rust
+pub async fn execute_twap_strategy(
+    &self,
+    signal: &PredictionSignal,
+    total_size: f64,
+    duration_minutes: u32,
+    slice_count: u32,
+) -> Result<()>
+```
+
+**특징:**
+- 시간 균등 분할 실행
+- 예측 가능한 실행 패턴
+- 시간 분산 리스크 관리
+
+#### Iceberg 전략
+```rust
+pub async fn execute_iceberg_strategy(
+    &self,
+    signal: &PredictionSignal,
+    total_size: f64,
+    visible_size: f64,
+    total_size_config: f64,
+) -> Result<()>
+```
+
+**특징:**
+- 주문서 노출 최소화
+- 시장 정보 은닉
+- 대형 포지션 구축에 유리
+
+#### MEV 예측 결합 전략
+```rust
+pub async fn execute_mev_predictive_strategy(
+    &self,
+    signal: &PredictionSignal,
+    order_size: f64,
+    mev_threshold: f64,
+    fallback_strategy: PredictiveStrategyType,
+) -> Result<()>
+```
+
+**특징:**
+- AI 예측과 MEV 기회 결합
+- 동적 전략 전환
+- 최적 실행 타이밍 선택
+
+### 4. 리스크 관리 시스템
+
+```mermaid
+graph TD
+    subgraph "Risk Management Framework"
+        subgraph "Pre-Trade Risk"
+            SIGNAL_VAL[📊 Signal Validation]
+            CONFIDENCE_CHECK[🎯 Confidence Threshold]
+            POSITION_LIMIT[📈 Position Limits]
+            DAILY_LIMIT[📅 Daily Limits]
+        end
+
+        subgraph "Real-Time Risk"
+            DRAWDOWN_MON[📉 Drawdown Monitor]
+            VOLATILITY_CHECK[📊 Volatility Check]
+            CORRELATION_RISK[🔗 Correlation Risk]
+            LIQUIDITY_RISK[💧 Liquidity Risk]
+        end
+
+        subgraph "Post-Trade Risk"
+            PNL_TRACKING[💰 P&L Tracking]
+            PERFORMANCE_EVAL[📈 Performance Evaluation]
+            MODEL_FEEDBACK[🔄 Model Feedback]
+            STRATEGY_ADJUST[⚙️ Strategy Adjustment]
+        end
+    end
+
+    SIGNAL_VAL --> CONFIDENCE_CHECK
+    CONFIDENCE_CHECK --> POSITION_LIMIT
+    POSITION_LIMIT --> DAILY_LIMIT
+    
+    DAILY_LIMIT --> DRAWDOWN_MON
+    DRAWDOWN_MON --> VOLATILITY_CHECK
+    VOLATILITY_CHECK --> CORRELATION_RISK
+    CORRELATION_RISK --> LIQUIDITY_RISK
+    
+    LIQUIDITY_RISK --> PNL_TRACKING
+    PNL_TRACKING --> PERFORMANCE_EVAL
+    PERFORMANCE_EVAL --> MODEL_FEEDBACK
+    MODEL_FEEDBACK --> STRATEGY_ADJUST
+
+    style SIGNAL_VAL fill:#e74c3c
+    style DRAWDOWN_MON fill:#f39c12
+    style PNL_TRACKING fill:#27ae60
+```
+
+---
+
+## AI 예측 시스템 (Python)
+
+### 1. AI 시스템 전체 아키텍처
+
+```mermaid
+graph TB
+    subgraph "AI Prediction System Architecture"
+        subgraph "Data Layer"
+            MARKET_DATA[📊 Market Data Collector]
+            MEMPOOL_DATA[🌊 Mempool Monitor]
+            FEATURE_DATA[⚙️ Feature Engineer]
+            HIST_DATA[📚 Historical Data]
+        end
+
+        subgraph "ML Models Layer"
+            ENSEMBLE[🧠 Ensemble Predictor]
+            
+            subgraph "Deep Learning"
+                LSTM[📈 LSTM Predictor]
+                TRANSFORMER[🔄 Transformer Model]
+            end
+            
+            subgraph "Traditional ML"
+                RF[🌳 Random Forest]
+                XGB[⚡ XGBoost]
+            end
+        end
+
+        subgraph "Analysis Layer"
+            MARKET_ANALYZER[📊 Market Analyzer]
+            MEV_DETECTOR[🔍 MEV Detector]
+            PREDICTION_ENGINE[🎯 Prediction Engine]
+            PATTERN_DETECTOR[🔍 Pattern Detector]
+        end
+
+        subgraph "Communication Layer"
+            RUST_BRIDGE[🌉 Rust Bridge]
+            WS_CLIENT[🔌 WebSocket Client]
+            REDIS_CLIENT[📮 Redis Client]
+            TCP_CLIENT[🌐 TCP Client]
+        end
+
+        subgraph "Model Management"
+            MODEL_TRAINER[🏋️ Model Trainer]
+            PERFORMANCE_EVAL[📈 Performance Evaluator]
+            WEIGHT_OPTIMIZER[⚖️ Weight Optimizer]
+            MODEL_SELECTOR[🎯 Model Selector]
+        end
+    end
+
+    MARKET_DATA --> FEATURE_DATA
+    MEMPOOL_DATA --> FEATURE_DATA
+    HIST_DATA --> FEATURE_DATA
+    
+    FEATURE_DATA --> ENSEMBLE
+    ENSEMBLE --> LSTM
+    ENSEMBLE --> TRANSFORMER
+    ENSEMBLE --> RF
+    ENSEMBLE --> XGB
+    
+    ENSEMBLE --> PREDICTION_ENGINE
+    MARKET_ANALYZER --> PREDICTION_ENGINE
+    MEV_DETECTOR --> PREDICTION_ENGINE
+    PATTERN_DETECTOR --> PREDICTION_ENGINE
+    
+    PREDICTION_ENGINE --> RUST_BRIDGE
+    RUST_BRIDGE --> WS_CLIENT
+    RUST_BRIDGE --> REDIS_CLIENT
+    RUST_BRIDGE --> TCP_CLIENT
+    
+    PERFORMANCE_EVAL --> MODEL_TRAINER
+    MODEL_TRAINER --> WEIGHT_OPTIMIZER
+    WEIGHT_OPTIMIZER --> MODEL_SELECTOR
+    MODEL_SELECTOR --> ENSEMBLE
+
+    style ENSEMBLE fill:#8e44ad
+    style PREDICTION_ENGINE fill:#3498db
+    style RUST_BRIDGE fill:#e67e22
+    style MEV_DETECTOR fill:#e74c3c
+```
+
+### 2. 앙상블 예측 모델
+
+#### 모델 구성
+```python
+class EnsemblePredictor:
+    """앙상블 예측 시스템"""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.models = {
+            'lstm': LSTMPredictor(config['lstm']),
+            'transformer': TransformerPredictor(config['transformer']),
+            'random_forest': RandomForestRegressor(**config['random_forest']),
+            'xgboost': xgb.XGBRegressor(**config['xgboost'])
+        }
+        
+        # 동적 가중치 시스템
+        self.ensemble_weights = {
+            'lstm': 0.3,
+            'transformer': 0.3,
+            'random_forest': 0.2,
+            'xgboost': 0.2
+        }
+```
+
+#### 예측 프로세스
+```mermaid
+flowchart TD
+    START[Market Data Input] --> FEATURE[Feature Engineering]
+    FEATURE --> PARALLEL{Parallel Model Prediction}
+    
+    PARALLEL --> LSTM_PRED[LSTM Prediction]
+    PARALLEL --> TRANS_PRED[Transformer Prediction]
+    PARALLEL --> RF_PRED[Random Forest Prediction]
+    PARALLEL --> XGB_PRED[XGBoost Prediction]
+    
+    LSTM_PRED --> ENSEMBLE[Ensemble Combination]
+    TRANS_PRED --> ENSEMBLE
+    RF_PRED --> ENSEMBLE
+    XGB_PRED --> ENSEMBLE
+    
+    ENSEMBLE --> VALIDATION[Confidence Validation]
+    VALIDATION --> FILTERING[Signal Filtering]
+    FILTERING --> OUTPUT[Final Prediction Signal]
+    
+    OUTPUT --> FEEDBACK[Performance Feedback]
+    FEEDBACK --> WEIGHT_UPDATE[Dynamic Weight Update]
+    WEIGHT_UPDATE --> ENSEMBLE
+
+    style PARALLEL fill:#3498db
+    style ENSEMBLE fill:#8e44ad
+    style VALIDATION fill:#e74c3c
+    style WEIGHT_UPDATE fill:#f39c12
+```
+
+### 3. MEV 기회 탐지 시스템
+
+```mermaid
+graph TD
+    subgraph "MEV Detection Pipeline"
+        subgraph "Data Sources"
+            MEMPOOL[🌊 Mempool Data]
+            ORDER_FLOW[📊 Order Flow]
+            PRICE_FEED[💱 Price Feeds]
+            GAS_TRACKER[⛽ Gas Tracker]
+        end
+
+        subgraph "Analysis Engines"
+            SANDWICH_DET[🥪 Sandwich Detector]
+            ARB_DET[⚡ Arbitrage Detector]
+            LIQ_DET[💧 Liquidation Detector]
+            FRONT_DET[🏃 Frontrun Detector]
+        end
+
+        subgraph "Opportunity Evaluation"
+            PROFIT_CALC[💰 Profit Calculator]
+            RISK_ASSESS[📊 Risk Assessment]
+            TIMING_OPT[⏰ Timing Optimizer]
+            CONFIDENCE_SCORE[🎯 Confidence Scorer]
+        end
+
+        subgraph "Signal Generation"
+            PRIORITY_RANK[📈 Priority Ranking]
+            SIGNAL_FORMAT[📋 Signal Formatter]
+            RUST_SEND[🌉 Send to Rust]
+        end
+    end
+
+    MEMPOOL --> SANDWICH_DET
+    ORDER_FLOW --> ARB_DET
+    PRICE_FEED --> LIQ_DET
+    GAS_TRACKER --> FRONT_DET
+    
+    SANDWICH_DET --> PROFIT_CALC
+    ARB_DET --> PROFIT_CALC
+    LIQ_DET --> RISK_ASSESS
+    FRONT_DET --> TIMING_OPT
+    
+    PROFIT_CALC --> CONFIDENCE_SCORE
+    RISK_ASSESS --> CONFIDENCE_SCORE
+    TIMING_OPT --> CONFIDENCE_SCORE
+    
+    CONFIDENCE_SCORE --> PRIORITY_RANK
+    PRIORITY_RANK --> SIGNAL_FORMAT
+    SIGNAL_FORMAT --> RUST_SEND
+
+    style PROFIT_CALC fill:#27ae60
+    style CONFIDENCE_SCORE fill:#3498db
+    style RUST_SEND fill:#e67e22
+```
+
+### 4. 실시간 통신 시스템
+
+#### 통신 프로토콜
+```python
+class CommunicationProtocol(Enum):
+    WEBSOCKET = "websocket"  # 실시간 양방향 통신
+    REDIS = "redis"          # 고성능 메시지 큐
+    TCP = "tcp"              # 저수준 소켓 통신
+
+class RustBridge:
+    """Rust xCrack과의 통신 브리지"""
+    
+    async def send_prediction(self, prediction: PredictionMessage) -> bool
+    async def send_mev_opportunity(self, opportunity: MEVOpportunityMessage) -> bool
+    async def get_performance_feedback(self) -> Optional[Dict[str, Any]]
+```
+
+#### 메시지 구조
+```python
+@dataclass
+class PredictionMessage:
+    symbol: str
+    direction: float        # -1.0 ~ 1.0 (매도/매수 강도)
+    confidence: float       # 0.0 ~ 1.0 (예측 신뢰도)
+    time_horizon: int       # 예측 시간 지평 (분)
+    expected_move: float    # 예상 가격 변동률 (%)
+    strategy_type: str      # "vwap", "twap", "iceberg", "mev"
+    strategy_params: Dict[str, Any]
+    
+@dataclass
+class MEVOpportunityMessage:
+    symbol: str
+    opportunity_type: str   # "sandwich", "arbitrage", "liquidation"
+    profit_potential: float
+    confidence: float
+    priority: int          # 1-10 (우선순위)
+    time_sensitive: bool
+    execution_strategy: str
+```
+
+### 5. 모델 학습 및 최적화
+
+```mermaid
+graph TD
+    subgraph "Model Learning Pipeline"
+        subgraph "Data Preparation"
+            RAW_DATA[📊 Raw Market Data]
+            CLEAN_DATA[🧹 Data Cleaning]
+            FEATURE_ENG[⚙️ Feature Engineering]
+            LABEL_GEN[🏷️ Label Generation]
+        end
+
+        subgraph "Model Training"
+            TRAIN_SPLIT[📈 Train/Validation Split]
+            MODEL_TRAIN[🏋️ Model Training]
+            HYPEROPT[🎯 Hyperparameter Optimization]
+            CROSS_VAL[✅ Cross Validation]
+        end
+
+        subgraph "Performance Evaluation"
+            BACKTEST[📊 Backtesting]
+            LIVE_TEST[🔴 Live Testing]
+            PERFORMANCE_METRICS[📈 Performance Metrics]
+            FEEDBACK_LOOP[🔄 Feedback Integration]
+        end
+
+        subgraph "Model Deployment"
+            MODEL_SELECT[🎯 Model Selection]
+            WEIGHT_UPDATE[⚖️ Weight Update]
+            VERSION_CONTROL[📝 Version Control]
+            PRODUCTION_DEPLOY[🚀 Production Deploy]
+        end
+    end
+
+    RAW_DATA --> CLEAN_DATA
+    CLEAN_DATA --> FEATURE_ENG
+    FEATURE_ENG --> LABEL_GEN
+    
+    LABEL_GEN --> TRAIN_SPLIT
+    TRAIN_SPLIT --> MODEL_TRAIN
+    MODEL_TRAIN --> HYPEROPT
+    HYPEROPT --> CROSS_VAL
+    
+    CROSS_VAL --> BACKTEST
+    BACKTEST --> LIVE_TEST
+    LIVE_TEST --> PERFORMANCE_METRICS
+    PERFORMANCE_METRICS --> FEEDBACK_LOOP
+    
+    FEEDBACK_LOOP --> MODEL_SELECT
+    MODEL_SELECT --> WEIGHT_UPDATE
+    WEIGHT_UPDATE --> VERSION_CONTROL
+    VERSION_CONTROL --> PRODUCTION_DEPLOY
+
+    style MODEL_TRAIN fill:#3498db
+    style PERFORMANCE_METRICS fill:#27ae60
+    style PRODUCTION_DEPLOY fill:#e74c3c
+```
+
+### 6. 성능 모니터링 및 피드백
+
+#### 실시간 성능 추적
+- **예측 정확도**: 실제 시장 움직임과 예측 비교
+- **수익성 검증**: 실제 거래 결과와 예측 수익 비교
+- **모델 성능**: 개별 모델별 기여도 분석
+- **시장 적응성**: 변화하는 시장 조건에 대한 적응력
+
+#### 피드백 루프
+```python
+async def update_models(self, feedback_data: Dict[str, Any]):
+    """성과 피드백을 통한 모델 업데이트"""
+    
+    # 1. 성과 데이터 분석
+    model_scores = self._analyze_performance(feedback_data)
+    
+    # 2. 앙상블 가중치 동적 조정
+    await self._update_ensemble_weights(model_scores)
+    
+    # 3. 개별 모델 재학습
+    await self._retrain_models(feedback_data)
+    
+    # 4. 성능 검증 및 배포
+    await self._validate_and_deploy()
+```
 
 ---
 

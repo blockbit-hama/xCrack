@@ -17,6 +17,7 @@ use crate::mocks::{MockConfig, get_mock_config};
 /// 
 /// Uniswap, SushiSwap 등의 DEX를 시뮬레이션합니다.
 /// 실제 블록체인 대신 지연시간과 가스비를 모방합니다.
+#[derive(Debug)]
 pub struct MockDexClient {
     exchange_name: String,
     mock_config: MockConfig,
@@ -29,6 +30,7 @@ pub struct MockDexClient {
 /// 
 /// Binance, Coinbase 등의 중앙화 거래소를 시뮬레이션합니다.
 /// API 호출과 주문 실행을 모방합니다.
+#[derive(Debug)]
 pub struct MockCexClient {
     exchange_name: String,
     mock_config: MockConfig,

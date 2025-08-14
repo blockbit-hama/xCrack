@@ -18,6 +18,7 @@ use crate::strategies::MicroArbitrageStrategy;
 /// 
 /// ExchangeMonitor로부터 실시간 가격 데이터를 수신하여
 /// MicroArbitrageStrategy에 전달하고 데이터 품질을 관리합니다.
+#[derive(Debug)]
 pub struct PriceFeedManager {
     config: Arc<Config>,
     is_running: Arc<AtomicBool>,
@@ -643,6 +644,61 @@ impl PriceFeedManager {
     /// 실행 중인지 확인
     pub fn is_running(&self) -> bool {
         self.is_running.load(Ordering::SeqCst)
+    }
+    
+    /// 현재 가격 조회 (예측기반 전략용)
+    pub async fn get_current_price(&self, symbol: &str) -> Result<f64> {
+        // 모든 거래소에서 해당 심볼의 가격을 조회하여 평균값 계산
+        let cache = self.price_cache.read().await;
+        let mut prices = Vec::new();
+        
+        for exchange_cache in cache.values() {
+            if let Some(price_data) = exchange_cache.get(symbol) {
+                let price = price_data.last_price.to_f64().unwrap_or(0.0);
+                if price > 0.0 {
+                    prices.push(price);
+                }
+            }
+        }
+        
+        if prices.is_empty() {
+            // Mock 데이터 반환
+            Ok(3000.0) // ETH 기본 가격
+        } else {
+            let average_price = prices.iter().sum::<f64>() / prices.len() as f64;
+            Ok(average_price)
+        }
+    }
+    
+    /// 현재 거래량 조회 (예측기반 전략용)
+    pub async fn get_current_volume(&self, symbol: &str) -> Result<f64> {
+        let cache = self.price_cache.read().await;
+        let mut volumes = Vec::new();
+        
+        for exchange_cache in cache.values() {
+            if let Some(price_data) = exchange_cache.get(symbol) {
+                let volume = price_data.volume_24h.to_string().parse::<f64>().unwrap_or(0.0);
+                if volume > 0.0 {
+                    volumes.push(volume);
+                }
+            }
+        }
+        
+        if volumes.is_empty() {
+            // Mock 데이터 반환
+            Ok(1000000.0) // 기본 거래량
+        } else {
+            let total_volume = volumes.iter().sum::<f64>();
+            Ok(total_volume)
+        }
+    }
+    
+    /// 변동성 조회 (예측기반 전략용)
+    pub async fn get_volatility(&self, symbol: &str) -> Result<f64> {
+        // 실제 구현에서는 과거 가격 데이터를 기반으로 변동성 계산
+        // Mock 환경에서는 고정값 반환
+        let _ = symbol; // 파라미터 사용
+        Ok(0.15) // 15% 변동성
     }
 }
 

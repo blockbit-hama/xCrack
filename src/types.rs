@@ -64,6 +64,42 @@ pub struct Opportunity {
     pub details: OpportunityDetails,
 }
 
+impl Opportunity {
+    pub fn new(
+        opportunity_type: OpportunityType,
+        strategy: StrategyType,
+        expected_profit: U256,
+        confidence: f64,
+        gas_estimate: u64,
+        expiry_block: u64,
+        details: OpportunityDetails,
+    ) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            opportunity_type,
+            strategy,
+            expected_profit,
+            confidence,
+            gas_estimate,
+            priority: if confidence > 0.8 { Priority::High } else { Priority::Medium },
+            timestamp: Utc::now(),
+            expiry_block,
+            details,
+        }
+    }
+
+    pub fn is_expired(&self, current_block: u64) -> bool {
+        current_block >= self.expiry_block
+    }
+
+    pub fn profit_per_gas(&self) -> f64 {
+        if self.gas_estimate == 0 {
+            return 0.0;
+        }
+        self.expected_profit.to::<u128>() as f64 / self.gas_estimate as f64
+    }
+}
+
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
@@ -210,7 +246,7 @@ pub struct OrderExecutionResult {
 }
 
 /// 주문 방향
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum OrderSide {
     Buy,
     Sell,
@@ -263,6 +299,36 @@ pub struct Bundle {
     pub expiry_time: DateTime<Utc>,
 }
 
+impl Bundle {
+    pub fn new(
+        transactions: Vec<Transaction>,
+        target_block: u64,
+        expected_profit: U256,
+        gas_estimate: u64,
+        strategy: StrategyType,
+    ) -> Self {
+        let timestamp = Utc::now();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            transactions,
+            target_block,
+            expected_profit,
+            gas_estimate,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            priority: Priority::Medium,
+            strategy,
+            hash: None,
+            timestamp,
+            expiry_time: timestamp + chrono::Duration::minutes(5),
+        }
+    }
+
+    pub fn is_expired(&self) -> bool {
+        Utc::now() > self.expiry_time
+    }
+}
+
 /// Bundle status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum BundleStatus {
@@ -286,6 +352,91 @@ pub struct BundleResult {
     pub gas_used: Option<u64>,
     pub error: Option<String>,
     pub timestamp: DateTime<Utc>,
+}
+
+/// Order representation for predictive strategy
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Order {
+    pub id: uuid::Uuid,
+    pub symbol: String,
+    pub side: OrderSide,
+    pub order_type: OrderType,
+    pub quantity: f64,
+    pub price: Option<f64>,
+    pub time_in_force: TimeInForce,
+    pub timestamp: u64,
+}
+
+/// Order type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum OrderType {
+    Market,
+    Limit,
+    StopLoss,
+    TakeProfit,
+}
+
+/// Time in force for orders
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TimeInForce {
+    GTC, // Good Till Cancelled
+    IOC, // Immediate Or Cancel
+    FOK, // Fill Or Kill
+    GTD, // Good Till Date
+}
+
+/// Position representation for predictive strategy
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Position {
+    pub id: uuid::Uuid,
+    pub symbol: String,
+    pub side: OrderSide,
+    pub size: f64,
+    pub entry_price: f64,
+    pub current_price: f64,
+    pub unrealized_pnl: f64,
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Strategy signal for MEV strategies
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StrategySignal {
+    pub signal_type: String,
+    pub data: HashMap<String, String>,
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Prediction signal from AI models
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PredictionSignal {
+    pub symbol: String,
+    pub direction: f64, // -1.0 to 1.0
+    pub confidence: f64, // 0.0 to 1.0
+    pub time_horizon: u32, // minutes
+    pub expected_move: f64, // percentage
+    pub timestamp: u64,
+    pub strategy_type: PredictiveStrategyType,
+}
+
+/// Predictive strategy types
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PredictiveStrategyType {
+    VwapExecution {
+        duration_minutes: u32,
+        max_participation_rate: f64,
+    },
+    TwapExecution {
+        duration_minutes: u32,
+        slice_count: u32,
+    },
+    IcebergExecution {
+        visible_size: f64,
+        total_size: f64,
+    },
+    MevPredictive {
+        mev_threshold: f64,
+        fallback_strategy: Box<PredictiveStrategyType>,
+    },
 }
 
 /// Pool state for AMM calculations
@@ -433,6 +584,17 @@ pub enum MevError {
 /// Result type alias
 pub type MevResult<T> = Result<T, MevError>;
 
+/// Signal type enumeration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SignalType {
+    Entry,
+    Exit,
+    Rebalance,
+    StopLoss,
+    TakeProfit,
+}
+
+
 /// Utility functions
 impl Priority {
     pub fn to_u8(&self) -> u8 {
@@ -455,91 +617,7 @@ impl Priority {
     }
 }
 
-impl Opportunity {
-    pub fn new(
-        opportunity_type: OpportunityType,
-        strategy: StrategyType,
-        expected_profit: U256,
-        confidence: f64,
-        gas_estimate: u64,
-        expiry_block: u64,
-        details: OpportunityDetails,
-    ) -> Self {
-        let id = uuid::Uuid::new_v4().to_string();
-        let priority = if expected_profit > U256::from(100_000_000_000_000_000u64) {
-            Priority::High
-        } else if expected_profit > U256::from(50_000_000_000_000_000u64) {
-            Priority::Medium
-        } else {
-            Priority::Low
-        };
 
-        Self {
-            id,
-            opportunity_type,
-            strategy,
-            expected_profit,
-            confidence,
-            gas_estimate,
-            priority,
-            timestamp: Utc::now(),
-            expiry_block,
-            details,
-        }
-    }
-
-    pub fn is_expired(&self, current_block: u64) -> bool {
-        current_block >= self.expiry_block
-    }
-
-    pub fn profit_per_gas(&self) -> f64 {
-        if self.gas_estimate == 0 {
-            return 0.0;
-        }
-        self.expected_profit.to::<u128>() as f64 / self.gas_estimate as f64
-    }
-}
-
-impl Bundle {
-    pub fn new(
-        transactions: Vec<Transaction>,
-        target_block: u64,
-        expected_profit: U256,
-        gas_estimate: u64,
-        strategy: StrategyType,
-    ) -> Self {
-        let id = uuid::Uuid::new_v4().to_string();
-        let priority = if expected_profit > U256::from(100_000_000_000_000_000u64) {
-            Priority::High
-        } else if expected_profit > U256::from(50_000_000_000_000_000u64) {
-            Priority::Medium
-        } else {
-            Priority::Low
-        };
-
-        let now = Utc::now();
-        let expiry_time = now + chrono::Duration::seconds(crate::constants::MAX_BUNDLE_LIFETIME as i64);
-
-        Self {
-            id,
-            transactions,
-            target_block,
-            expected_profit,
-            gas_estimate,
-            max_fee_per_gas: None,
-            max_priority_fee_per_gas: None,
-            priority,
-            strategy,
-            hash: None,
-            timestamp: now,
-            expiry_time,
-        }
-    }
-
-    pub fn is_expired(&self) -> bool {
-        Utc::now() > self.expiry_time
-    }
-}
 
 #[cfg(test)]
 mod tests {

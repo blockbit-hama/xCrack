@@ -65,4 +65,69 @@ pub fn calculate_price_impact(
     let new_price = new_reserve_out as f64 / new_reserve_in as f64;
     
     ((original_price - new_price) / original_price).abs()
+}
+
+/// Calculate Volume Weighted Average Price (VWAP)
+pub fn calculate_vwap(prices: &[f64], volumes: &[f64]) -> f64 {
+    if prices.is_empty() || volumes.is_empty() || prices.len() != volumes.len() {
+        return 0.0;
+    }
+    
+    let mut total_volume = 0.0;
+    let mut total_price_volume = 0.0;
+    
+    for (price, volume) in prices.iter().zip(volumes.iter()) {
+        total_price_volume += price * volume;
+        total_volume += volume;
+    }
+    
+    if total_volume == 0.0 {
+        return 0.0;
+    }
+    
+    total_price_volume / total_volume
+}
+
+/// Calculate Time Weighted Average Price (TWAP)
+pub fn calculate_twap(prices: &[f64], time_weights: &[f64]) -> f64 {
+    if prices.is_empty() || time_weights.is_empty() || prices.len() != time_weights.len() {
+        return 0.0;
+    }
+    
+    let mut total_weight = 0.0;
+    let mut total_weighted_price = 0.0;
+    
+    for (price, weight) in prices.iter().zip(time_weights.iter()) {
+        total_weighted_price += price * weight;
+        total_weight += weight;
+    }
+    
+    if total_weight == 0.0 {
+        return 0.0;
+    }
+    
+    total_weighted_price / total_weight
+}
+
+/// Calculate order slicing for iceberg orders
+pub fn calculate_iceberg_slices(total_amount: u128, max_slice_size: u128) -> Vec<u128> {
+    if total_amount == 0 || max_slice_size == 0 {
+        return vec![];
+    }
+    
+    let mut slices = vec![];
+    let mut remaining = total_amount;
+    
+    while remaining > 0 {
+        let slice_size = if remaining > max_slice_size {
+            max_slice_size
+        } else {
+            remaining
+        };
+        
+        slices.push(slice_size);
+        remaining -= slice_size;
+    }
+    
+    slices
 } 

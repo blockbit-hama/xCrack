@@ -18,6 +18,7 @@ mod core;
 mod constants;
 mod mocks;
 mod exchange;
+mod backtest;
 
 use config::Config;
 use core::SearcherCore;
@@ -72,7 +73,7 @@ async fn main() -> Result<()> {
                 .short('s')
                 .long("strategies")
                 .value_name("STRATEGIES")
-                .help("활성화할 전략들 (sandwich,liquidation,micro_arbitrage)")
+                .help("활성화할 전략들 (sandwich,liquidation,micro_arbitrage,predictive)")
                 .default_value("sandwich,liquidation,micro_arbitrage")
         )
         .get_matches();
@@ -119,6 +120,14 @@ async fn main() -> Result<()> {
 
     // 전략 선택 적용
     let strategies = matches.get_one::<String>("strategies").unwrap();
+    
+    // 예측기반 전략만 실행하는 경우 간단한 Mock 실행
+    if strategies == "predictive" {
+        info!("🧠 예측기반 자동매매 전략 단독 실행 모드");
+        strategies::run_predictive_strategy_mock().await?;
+        return Ok(());
+    }
+    
     apply_strategy_selection(&mut config, strategies);
 
     // 환경 변수에서 민감한 정보 로드
@@ -261,6 +270,12 @@ fn apply_strategy_selection(config: &mut Config, strategies: &str) {
             "liquidation" => {
                 config.strategies.liquidation.enabled = true;
                 info!("경쟁적 청산 전략 활성화");
+            }
+            "micro_arbitrage" => {
+                info!("마이크로 아비트러지 전략 활성화");
+            }
+            "predictive" => {
+                info!("예측기반 자동매매 전략 활성화 (Mock 모드)");
             }
             _ => {
                 warn!("알 수 없는 전략: {}", strategy);

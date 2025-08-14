@@ -72,6 +72,7 @@ pub struct OrderExecutorStats {
 /// 마이크로아비트래지 기회가 발생했을 때 
 /// 여러 거래소에서 동시에 주문을 실행하여
 /// 최소 지연시간으로 수익을 실현합니다.
+#[derive(Debug)]
 pub struct OrderExecutor {
     config: Arc<Config>,
     is_running: Arc<AtomicBool>,
@@ -140,7 +141,7 @@ struct ExecutionStats {
 
 /// 거래소 클라이언트 트레이트
 #[async_trait::async_trait]
-pub trait ExchangeClient: Send + Sync {
+pub trait ExchangeClient: Send + Sync + std::fmt::Debug {
     /// 통합 주문 실행
     async fn place_order(&self, order: OrderRequest) -> Result<OrderResponse>;
     
@@ -791,9 +792,36 @@ impl OrderExecutor {
     pub fn is_running(&self) -> bool {
         self.is_running.load(Ordering::SeqCst)
     }
+    
+    /// 단일 주문 실행 (예측기반 전략용)
+    pub async fn execute_order(&self, order: crate::types::Order) -> Result<String> {
+        // Mock 모드에서는 시뮬레이션
+        if crate::mocks::is_mock_mode() {
+            let order_id = format!("order_{}_{}", order.side as u8, Uuid::new_v4().to_string()[..8].to_string());
+            
+            // Mock 실행 지연
+            tokio::time::sleep(tokio::time::Duration::from_millis(50 + fastrand::u64(50..150))).await;
+            
+            tracing::info!("✅ Mock 주문 실행 성공: {} {} {} @ {}", 
+                order_id, 
+                match order.side {
+                    crate::types::OrderSide::Buy => "매수",
+                    crate::types::OrderSide::Sell => "매도",
+                },
+                order.quantity,
+                order.symbol
+            );
+            
+            return Ok(order_id);
+        }
+        
+        // TODO: 실제 주문 실행 구현
+        Err(anyhow!("Real order execution not implemented"))
+    }
 }
 
 /// DEX 클라이언트 구현
+#[derive(Debug)]
 struct DexClient {
     exchange_name: String,
     config: ExchangeConfig,
@@ -953,6 +981,7 @@ impl ExchangeClient for DexClient {
 }
 
 /// CEX 클라이언트 구현
+#[derive(Debug)]
 struct CexClient {
     exchange_name: String,
     config: ExchangeConfig,

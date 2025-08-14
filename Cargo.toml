@@ -11,6 +11,10 @@ repository = "https://github.com/xcrack/mev-searcher-rust"
 name = "searcher"
 path = "src/main.rs"
 
+[[bin]]
+name = "predictive_demo"
+path = "src/bin/predictive_demo.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
