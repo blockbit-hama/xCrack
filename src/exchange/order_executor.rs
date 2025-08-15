@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::config::{Config, ExchangeConfig, ExchangeType};
 use crate::types::{
     MicroArbitrageOpportunity, OrderExecutionResult, OrderSide, OrderStatus,
-    ExchangeInfo, PriceData,
+    ExchangeInfo, PriceData, ArbitrageError,
 };
 use alloy::primitives::U256;
 
@@ -120,6 +120,13 @@ enum ExecutionStatus {
     TimedOut,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum RiskLevel {
+    Low,      // 소액 - 계속 진행
+    High,     // 중간 - 해당 페어만 중단
+    Critical, // 고액 - 시스템 중단
+}
+
 /// 실행 통계
 #[derive(Debug, Clone)]
 struct ExecutionStats {
@@ -127,6 +134,7 @@ struct ExecutionStats {
     successful_executions: u64,
     failed_executions: u64,
     timed_out_executions: u64,
+    partial_executions: u64,  // 부분 체결 카운트 추가
     total_volume: U256,
     total_profit: U256,
     total_fees: U256,
@@ -244,6 +252,7 @@ impl OrderExecutor {
                 successful_executions: 0,
                 failed_executions: 0,
                 timed_out_executions: 0,
+                partial_executions: 0,
                 total_volume: U256::ZERO,
                 total_profit: U256::ZERO,
                 total_fees: U256::ZERO,
@@ -439,20 +448,51 @@ impl OrderExecutor {
                     Ok(false)
                 }
             }
-            (Ok(buy_order_id), Err(_)) => {
-                // 매수 주문만 성공 - 매수 주문 취소
+            (Ok(buy_order_id), Err(sell_err)) => {
+                // 🚨 부분 체결: 매수만 성공
+                error!("⚠️ 부분 체결 발생: 매수만 성공 - Order ID: {}, Exchange: {}, Amount: {}", 
+                    buy_order_id, opportunity.buy_exchange, opportunity.max_amount);
+                
+                // 실행 컨텍스트 업데이트
                 self.update_execution_context(&execution_id, Some(buy_order_id.clone()), None, ExecutionStatus::Failed).await;
-                let _ = buy_client.cancel_order(&buy_order_id).await;
-                Ok(false)
+                
+                // 부분 체결 처리
+                self.handle_partial_execution(
+                    &execution_id,
+                    Some((buy_order_id.clone(), buy_client.clone(), &opportunity.buy_exchange, opportunity.max_amount)),
+                    None,
+                    &opportunity
+                ).await;
+                
+                // 통계 업데이트
+                self.update_partial_execution_stats().await;
+                
+                Err(anyhow!("Partial execution: Buy succeeded, Sell failed - {}", sell_err))
             }
-            (Err(_), Ok(sell_order_id)) => {
-                // 매도 주문만 성공 - 매도 주문 취소
+            (Err(buy_err), Ok(sell_order_id)) => {
+                // 🚨 부분 체결: 매도만 성공
+                error!("⚠️ 부분 체결 발생: 매도만 성공 - Order ID: {}, Exchange: {}, Amount: {}", 
+                    sell_order_id, opportunity.sell_exchange, opportunity.max_amount);
+                
+                // 실행 컨텍스트 업데이트
                 self.update_execution_context(&execution_id, None, Some(sell_order_id.clone()), ExecutionStatus::Failed).await;
-                let _ = sell_client.cancel_order(&sell_order_id).await;
-                Ok(false)
+                
+                // 부분 체결 처리
+                self.handle_partial_execution(
+                    &execution_id,
+                    None,
+                    Some((sell_order_id.clone(), sell_client.clone(), &opportunity.sell_exchange, opportunity.max_amount)),
+                    &opportunity
+                ).await;
+                
+                // 통계 업데이트
+                self.update_partial_execution_stats().await;
+                
+                Err(anyhow!("Partial execution: Sell succeeded, Buy failed - {}", buy_err))
             }
-            (Err(_), Err(_)) => {
-                // 양쪽 주문 모두 실패
+            (Err(buy_err), Err(sell_err)) => {
+                // 양쪽 주문 모두 실패 - 안전한 상황
+                warn!("Both orders failed - No position risk. Buy: {}, Sell: {}", buy_err, sell_err);
                 self.update_execution_context(&execution_id, None, None, ExecutionStatus::Failed).await;
                 Ok(false)
             }
@@ -785,6 +825,122 @@ impl OrderExecutor {
         match limit {
             Some(n) => history.iter().rev().take(n).cloned().collect(),
             None => history.clone(),
+        }
+    }
+    
+    /// 부분 체결 통계 업데이트
+    async fn update_partial_execution_stats(&self) {
+        let mut stats = self.stats.lock().await;
+        stats.partial_executions += 1;
+        stats.total_executions += 1;
+        stats.failed_executions += 1;  // 부분 체결도 실패로 간주
+        
+        // 성공률 재계산
+        stats.success_rate = stats.successful_executions as f64 / stats.total_executions as f64;
+        
+        warn!("⚠️ 부분 체결 발생 - 총 {}건", stats.partial_executions);
+    }
+    
+    /// 부분 체결 처리
+    async fn handle_partial_execution(
+        &self,
+        execution_id: &str,
+        buy_order: Option<(String, Arc<dyn ExchangeClient>, &str, U256)>,
+        sell_order: Option<(String, Arc<dyn ExchangeClient>, &str, U256)>,
+        opportunity: &MicroArbitrageOpportunity,
+    ) {
+        warn!("⚠️ 부분 체결 감지: {}", execution_id);
+        
+        // 1. 시스템 중단 대신 경고만 (시스템은 계속 실행)
+        warn!("⚠️ 부분 체결 발생 - 포지션 불균형 주의");
+        
+        // 주문 존재 여부를 미리 저장
+        let has_buy_order = buy_order.is_some();
+        let has_sell_order = sell_order.is_some();
+        
+        // 2. 체결된 주문 취소 시도 (베스트 에포트)
+        if let Some((order_id, client, exchange, amount)) = buy_order {
+            warn!("📌 매수 주문 취소 시도: {} @ {}", order_id, exchange);
+            match client.cancel_order(&order_id).await {
+                Ok(_) => info!("✅ 매수 주문 취소 성공"),
+                Err(e) => {
+                    error!("❌ 매수 주문 취소 실패: {} - 수동 개입 필요", e);
+                    error!("⚠️ 노출된 포지션: {} {} @ {}", amount, opportunity.token_symbol, exchange);
+                }
+            }
+        }
+        
+        if let Some((order_id, client, exchange, amount)) = sell_order {
+            warn!("📌 매도 주문 취소 시도: {} @ {}", order_id, exchange);
+            match client.cancel_order(&order_id).await {
+                Ok(_) => info!("✅ 매도 주문 취소 성공"),
+                Err(e) => {
+                    error!("❌ 매도 주문 취소 실패: {} - 수동 개입 필요", e);
+                    error!("⚠️ 노출된 포지션: -{} {} @ {}", amount, opportunity.token_symbol, exchange);
+                }
+            }
+        }
+        
+        // 3. 위험도 평가 및 조건부 대응
+        let risk_level = self.evaluate_partial_execution_risk(opportunity).await;
+        
+        match risk_level {
+            RiskLevel::Critical => {
+                // 큰 금액이거나 위험한 토큰인 경우만 시스템 일시 중단
+                error!("🚨 심각: 고위험 부분 체결 - 시스템 일시 중단");
+                self.is_running.store(false, Ordering::SeqCst);
+            },
+            RiskLevel::High => {
+                // 중간 위험 - 해당 토큰쌍만 거래 중단
+                warn!("⚠️ 경고: {} 거래쌍 일시 중단", opportunity.token_symbol);
+                // TODO: 특정 토큰쌍만 블랙리스트 처리
+            },
+            RiskLevel::Low => {
+                // 낮은 위험 - 로깅만 하고 계속 진행
+                info!("ℹ️ 부분 체결 기록 - 시스템 정상 운영");
+            }
+        }
+        
+        // 4. 부분 체결 이력 저장
+        let result = OrderExecutionResult {
+            order_id: execution_id.to_string(),
+            exchange: if has_buy_order { 
+                opportunity.buy_exchange.clone() 
+            } else { 
+                opportunity.sell_exchange.clone() 
+            },
+            symbol: opportunity.token_symbol.clone(),
+            side: if has_buy_order { OrderSide::Buy } else { OrderSide::Sell },
+            amount: opportunity.max_amount,
+            price: if has_buy_order { opportunity.buy_price } else { opportunity.sell_price },
+            filled_amount: U256::ZERO,  // 부분 체결이므로 정확한 체결량은 알 수 없음
+            filled_price: Decimal::ZERO,
+            status: OrderStatus::PartiallyFilled,
+            execution_time: Utc::now(),
+            latency_ms: 0,
+            fees: U256::ZERO,
+        };
+        
+        self.order_history.lock().await.push(result);
+        
+        info!("✅ 부분 체결 처리 완료");
+    }
+    
+    /// 부분 체결 위험도 평가
+    async fn evaluate_partial_execution_risk(&self, opportunity: &MicroArbitrageOpportunity) -> RiskLevel {
+        // USD 가치 계산 (예시: 1 ETH = $2000)
+        let position_value_usd = opportunity.max_amount.to::<u64>() * 2000 / 10u64.pow(18);
+        
+        // 위험도 판단 기준
+        if position_value_usd > 10000 {
+            // $10,000 이상: 심각
+            RiskLevel::Critical
+        } else if position_value_usd > 1000 {
+            // $1,000 - $10,000: 높음
+            RiskLevel::High
+        } else {
+            // $1,000 미만: 낮음
+            RiskLevel::Low
         }
     }
     

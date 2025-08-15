@@ -110,6 +110,7 @@ websocket_endpoint = "wss://ws-feed.exchange.coinbase.com"
 supports_fast_execution = true
 
 [flashbots]
+network = "mainnet"                    # Network for Flashbots (mainnet, goerli, sepolia)
 relay_url = "https://relay.flashbots.net"
 builder_urls = [
     "https://relay.flashbots.net",
@@ -119,6 +120,15 @@ builder_urls = [
 max_priority_fee_per_gas = "2"  # 2 gwei
 max_fee_per_gas = "50"          # 50 gwei
 private_key = "0x0000000000000000000000000000000000000000000000000000000000000001"
+
+# Bridge Configuration for Cross-chain Arbitrage
+[bridges]
+enabled = true
+default_slippage = 0.5              # 0.5% default slippage
+max_bridge_time = 1800              # 30 minutes maximum bridge time
+preferred_bridges = ["lifi", "stargate", "hop"]  # Preferred bridges in order
+lifi_api_key = ""                   # Optional LI.FI API key for higher rate limits
+enable_aggregation = true           # Use LI.FI for bridge aggregation
 
 [safety]
 max_concurrent_bundles = 5
@@ -142,6 +152,7 @@ max_concurrent_analysis = 10
 batch_processing_interval = 100  # milliseconds
 mempool_filter_min_value = "0.1"     # 0.1 ETH minimum
 mempool_filter_min_gas_price = "10"  # 10 gwei minimum
+mempool_filter_max_gas_price = "500" # 500 gwei maximum
 enable_metrics = true
 cache_size = 10000
 

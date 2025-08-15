@@ -121,6 +121,7 @@ pub struct FlashbotsConfig {
     pub max_priority_fee_per_gas: String, // gwei
     pub max_fee_per_gas: String,          // gwei
     pub private_key: String,
+    pub network: String,
     #[serde(default)]
     pub simulation_mode: bool,
 }
@@ -152,6 +153,7 @@ pub struct PerformanceConfig {
     pub batch_processing_interval: u64, // milliseconds
     pub mempool_filter_min_value: String, // ETH amount
     pub mempool_filter_min_gas_price: String, // gwei
+    pub mempool_filter_max_gas_price: String, // gwei
     pub enable_metrics: bool,
     pub cache_size: usize,
 }
@@ -286,6 +288,7 @@ impl Config {
                 max_priority_fee_per_gas: "2".to_string(),
                 max_fee_per_gas: "50".to_string(),
                 private_key: "your_private_key_here".to_string(),
+                network: "mainnet".to_string(),
                 simulation_mode: false,
             },
             safety: SafetyConfig {
@@ -310,6 +313,7 @@ impl Config {
                 batch_processing_interval: 100,
                 mempool_filter_min_value: "0.1".to_string(),
                 mempool_filter_min_gas_price: "10".to_string(),
+                mempool_filter_max_gas_price: "200".to_string(),
                 enable_metrics: true,
                 cache_size: 10000,
             },

@@ -441,16 +441,239 @@ impl MicroArbitrageStrategy {
         Ok(success)
     }
     
-    /// 실제 아비트래지 실행 (실제 구현에서는 거래소 API 호출)
-    async fn execute_real_arbitrage(&self, _opportunity: &MicroArbitrageOpportunity, _trade_id: &str) -> Result<bool> {
-        // TODO: 실제 거래소 API 구현
-        // 1. 매수 주문 생성 및 실행
-        // 2. 매도 주문 생성 및 실행  
-        // 3. 주문 상태 모니터링
-        // 4. 부분 체결 처리
-        // 5. 실패 시 롤백
+    /// 실제 아비트래지 실행 (실제 거래소 API 호출)
+    async fn execute_real_arbitrage(&self, opportunity: &MicroArbitrageOpportunity, trade_id: &str) -> Result<bool> {
+        use crate::exchange::{ExchangeClientFactory, ExchangeClient};
         
-        warn!("⚠️ 실제 아비트래지 실행은 아직 구현되지 않음 (Mock 모드 사용)");
+        info!("🚀 실제 아비트래지 실행: {}", trade_id);
+        info!("  매수: {} @ {}", opportunity.buy_exchange, opportunity.buy_price);
+        info!("  매도: {} @ {}", opportunity.sell_exchange, opportunity.sell_price);
+        
+        // 거래소 클라이언트 생성 (실제 환경에서는 설정에서 API 키 로드)
+        let buy_client = self.create_exchange_client(&opportunity.buy_exchange).await?;
+        let sell_client = self.create_exchange_client(&opportunity.sell_exchange).await?;
+        
+        // 연결 상태 확인
+        if !buy_client.is_connected() || !sell_client.is_connected() {
+            return Err(anyhow::anyhow!("거래소 연결 실패"));
+        }
+        
+        // 잔고 확인
+        let base_asset = "ETH"; // 기본 자산
+        let quote_asset = "USDT"; // 견적 자산
+        
+        let buy_balance = buy_client.get_balance(quote_asset).await?;
+        let sell_balance = sell_client.get_balance(base_asset).await?;
+        
+        let required_quote = opportunity.buy_price * rust_decimal::Decimal::from_f64_retain(opportunity.max_amount.to::<u128>() as f64 / 1e18).unwrap_or_default();
+        let required_base = rust_decimal::Decimal::from_f64_retain(opportunity.max_amount.to::<u128>() as f64 / 1e18).unwrap_or_default();
+        
+        if buy_balance < required_quote {
+            warn!("⚠️ 매수 거래소 잔고 부족: 필요 {} {}, 보유 {} {}", required_quote, quote_asset, buy_balance, quote_asset);
+            return Ok(false);
+        }
+        
+        if sell_balance < required_base {
+            warn!("⚠️ 매도 거래소 잔고 부족: 필요 {} {}, 보유 {} {}", required_base, base_asset, sell_balance, base_asset);
+            return Ok(false);
+        }
+        
+        // 병렬 주문 실행
+        let symbol = format!("{}USDT", base_asset);
+        let amount = opportunity.max_amount;
+        
+        debug!("📊 주문 실행 - 심볼: {}, 수량: {}", symbol, amount);
+        
+        let (buy_result, sell_result) = tokio::join!(
+            buy_client.place_buy_order(&symbol, amount, opportunity.buy_price),
+            sell_client.place_sell_order(&symbol, amount, opportunity.sell_price)
+        );
+        
+        match (buy_result, sell_result) {
+            (Ok(buy_order_id), Ok(sell_order_id)) => {
+                info!("✅ 양쪽 주문 성공 - Buy: {}, Sell: {}", buy_order_id, sell_order_id);
+                
+                // 주문 상태 모니터링
+                let monitoring_result = self.monitor_order_execution(
+                    &buy_client,
+                    &sell_client,
+                    &buy_order_id,
+                    &sell_order_id,
+                    trade_id
+                ).await;
+                
+                match monitoring_result {
+                    Ok(success) => {
+                        if success {
+                            info!("🎉 아비트래지 완전 성공: {}", trade_id);
+                        } else {
+                            warn!("⚠️ 주문 모니터링 중 문제 발생: {}", trade_id);
+                        }
+                        Ok(success)
+                    }
+                    Err(e) => {
+                        error!("💥 주문 모니터링 실패: {} - {}", trade_id, e);
+                        
+                        // 긴급 주문 취소 시도
+                        let _ = tokio::join!(
+                            buy_client.cancel_order(&buy_order_id),
+                            sell_client.cancel_order(&sell_order_id)
+                        );
+                        
+                        Err(e)
+                    }
+                }
+            }
+            (Ok(buy_order_id), Err(sell_error)) => {
+                error!("⚠️ 매도 주문 실패, 매수 주문 취소 중: {}", sell_error);
+                let _ = buy_client.cancel_order(&buy_order_id).await;
+                Ok(false)
+            }
+            (Err(buy_error), Ok(sell_order_id)) => {
+                error!("⚠️ 매수 주문 실패, 매도 주문 취소 중: {}", buy_error);
+                let _ = sell_client.cancel_order(&sell_order_id).await;
+                Ok(false)
+            }
+            (Err(buy_error), Err(sell_error)) => {
+                error!("❌ 양쪽 주문 모두 실패 - Buy: {}, Sell: {}", buy_error, sell_error);
+                Ok(false)
+            }
+        }
+    }
+    
+    /// 거래소 클라이언트 생성
+    async fn create_exchange_client(&self, exchange_name: &str) -> Result<std::sync::Arc<dyn crate::exchange::ExchangeClient>> {
+        use crate::exchange::ExchangeClientFactory;
+        
+        match exchange_name.to_lowercase().as_str() {
+            "binance" | "mock_binance" => {
+                // 실제 환경에서는 설정에서 API 키 로드
+                let api_key = std::env::var("BINANCE_API_KEY").unwrap_or_default();
+                let secret_key = std::env::var("BINANCE_SECRET_KEY").unwrap_or_default();
+                Ok(ExchangeClientFactory::create_binance_client(api_key, secret_key))
+            }
+            "coinbase" | "mock_coinbase" => {
+                let api_key = std::env::var("COINBASE_API_KEY").unwrap_or_default();
+                let secret_key = std::env::var("COINBASE_SECRET_KEY").unwrap_or_default();
+                let passphrase = std::env::var("COINBASE_PASSPHRASE").unwrap_or_default();
+                Ok(ExchangeClientFactory::create_coinbase_client(api_key, secret_key, passphrase))
+            }
+            _ => {
+                // 지원되지 않는 거래소의 경우 Mock 클라이언트 사용
+                warn!("⚠️ 지원되지 않는 거래소: {}, Mock 클라이언트 사용", exchange_name);
+                let api_key = "mock_key".to_string();
+                let secret_key = "mock_secret".to_string();
+                Ok(ExchangeClientFactory::create_binance_client(api_key, secret_key))
+            }
+        }
+    }
+    
+    /// 주문 실행 모니터링
+    async fn monitor_order_execution(
+        &self,
+        buy_client: &std::sync::Arc<dyn crate::exchange::ExchangeClient>,
+        sell_client: &std::sync::Arc<dyn crate::exchange::ExchangeClient>,
+        buy_order_id: &str,
+        sell_order_id: &str,
+        trade_id: &str,
+    ) -> Result<bool> {
+        use crate::types::OrderStatus;
+        
+        let max_wait_time = std::time::Duration::from_secs(30); // 최대 30초 대기
+        let check_interval = std::time::Duration::from_millis(500); // 0.5초마다 체크
+        let start_time = std::time::Instant::now();
+        
+        let mut buy_filled = false;
+        let mut sell_filled = false;
+        
+        while start_time.elapsed() < max_wait_time {
+            // 주문 상태 확인
+            let (buy_status_result, sell_status_result) = tokio::join!(
+                buy_client.get_order_status(buy_order_id),
+                sell_client.get_order_status(sell_order_id)
+            );
+            
+            match buy_status_result {
+                Ok(OrderStatus::Filled) => {
+                    if !buy_filled {
+                        info!("✅ 매수 주문 체결 완료: {} ({})", buy_order_id, trade_id);
+                        buy_filled = true;
+                    }
+                }
+                Ok(OrderStatus::PartiallyFilled) => {
+                    debug!("🔄 매수 주문 부분 체결: {} ({})", buy_order_id, trade_id);
+                }
+                Ok(OrderStatus::Cancelled) => {
+                    warn!("❌ 매수 주문 취소됨: {} ({})", buy_order_id, trade_id);
+                    return Ok(false);
+                }
+                Ok(OrderStatus::Rejected) => {
+                    warn!("❌ 매수 주문 거부됨: {} ({})", buy_order_id, trade_id);
+                    return Ok(false);
+                }
+                Ok(OrderStatus::Expired) => {
+                    warn!("❌ 매수 주문 만료됨: {} ({})", buy_order_id, trade_id);
+                    return Ok(false);
+                }
+                Ok(OrderStatus::Pending) => {
+                    debug!("⏳ 매수 주문 대기 중: {} ({})", buy_order_id, trade_id);
+                }
+                Err(e) => {
+                    warn!("⚠️ 매수 주문 상태 확인 실패: {} - {}", buy_order_id, e);
+                }
+            }
+            
+            match sell_status_result {
+                Ok(OrderStatus::Filled) => {
+                    if !sell_filled {
+                        info!("✅ 매도 주문 체결 완료: {} ({})", sell_order_id, trade_id);
+                        sell_filled = true;
+                    }
+                }
+                Ok(OrderStatus::PartiallyFilled) => {
+                    debug!("🔄 매도 주문 부분 체결: {} ({})", sell_order_id, trade_id);
+                }
+                Ok(OrderStatus::Cancelled) => {
+                    warn!("❌ 매도 주문 취소됨: {} ({})", sell_order_id, trade_id);
+                    return Ok(false);
+                }
+                Ok(OrderStatus::Rejected) => {
+                    warn!("❌ 매도 주문 거부됨: {} ({})", sell_order_id, trade_id);
+                    return Ok(false);
+                }
+                Ok(OrderStatus::Expired) => {
+                    warn!("❌ 매도 주문 만료됨: {} ({})", sell_order_id, trade_id);
+                    return Ok(false);
+                }
+                Ok(OrderStatus::Pending) => {
+                    debug!("⏳ 매도 주문 대기 중: {} ({})", sell_order_id, trade_id);
+                }
+                Err(e) => {
+                    warn!("⚠️ 매도 주문 상태 확인 실패: {} - {}", sell_order_id, e);
+                }
+            }
+            
+            // 양쪽 주문 모두 체결되면 성공
+            if buy_filled && sell_filled {
+                info!("🎯 아비트래지 완전 체결: {} ({}ms)", trade_id, start_time.elapsed().as_millis());
+                return Ok(true);
+            }
+            
+            // 다음 체크까지 대기
+            tokio::time::sleep(check_interval).await;
+        }
+        
+        // 타임아웃 발생
+        warn!("⏰ 주문 모니터링 타임아웃: {} ({}초)", trade_id, max_wait_time.as_secs());
+        
+        // 미체결 주문 취소 시도
+        if !buy_filled {
+            let _ = buy_client.cancel_order(buy_order_id).await;
+        }
+        if !sell_filled {
+            let _ = sell_client.cancel_order(sell_order_id).await;
+        }
+        
         Ok(false)
     }
     

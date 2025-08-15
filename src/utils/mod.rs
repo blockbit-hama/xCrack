@@ -4,6 +4,7 @@ pub mod validation;
 pub mod crypto;
 pub mod time;
 pub mod network;
+pub mod abi;
 
 // Re-exports
 // pub use math::*;

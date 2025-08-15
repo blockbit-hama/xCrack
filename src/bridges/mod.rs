@@ -3,6 +3,7 @@ pub mod stargate;
 pub mod hop;
 pub mod rubic;
 pub mod synapse;
+pub mod lifi;
 pub mod manager;
 
 // Re-exports
@@ -11,4 +12,5 @@ pub use stargate::StargateBridge;
 pub use hop::HopBridge;
 pub use rubic::RubicBridge;
 pub use synapse::SynapseBridge;
+pub use lifi::LiFiBridge;
 pub use manager::{BridgeManager, RouteStrategy};

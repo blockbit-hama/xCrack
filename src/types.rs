@@ -584,6 +584,38 @@ pub enum MevError {
     Database(String),
 }
 
+/// Arbitrage specific errors
+#[derive(thiserror::Error, Debug)]
+pub enum ArbitrageError {
+    #[error("Both orders executed successfully")]
+    Success,
+    
+    #[error("Partial execution - Buy succeeded, Sell failed: {details}")]
+    BuyOnlyExecuted { 
+        details: String,
+        buy_order_id: String,
+        exchange: String,
+        amount: String,
+    },
+    
+    #[error("Partial execution - Sell succeeded, Buy failed: {details}")]  
+    SellOnlyExecuted { 
+        details: String,
+        sell_order_id: String,
+        exchange: String,
+        amount: String,
+    },
+    
+    #[error("Both orders failed: {reason}")]
+    BothFailed { reason: String },
+    
+    #[error("Execution timeout after {elapsed_ms}ms")]
+    Timeout { elapsed_ms: u64 },
+    
+    #[error("General execution error: {0}")]
+    ExecutionFailed(String),
+}
+
 /// Result type alias
 pub type MevResult<T> = Result<T, MevError>;
 
@@ -905,6 +937,7 @@ pub enum BridgeProtocol {
     Rubic,
     Across,
     Multichain,
+    LiFi,  // Bridge aggregator
 }
 
 impl BridgeProtocol {
@@ -916,6 +949,7 @@ impl BridgeProtocol {
             BridgeProtocol::Rubic => "rubic",
             BridgeProtocol::Across => "across",
             BridgeProtocol::Multichain => "multichain",
+            BridgeProtocol::LiFi => "lifi",
         }
     }
 }
