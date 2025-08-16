@@ -99,6 +99,9 @@ impl CrossChainArbitrageStrategy {
             BridgeProtocol::Hop,
             BridgeProtocol::Rubic,
             BridgeProtocol::Synapse,
+            BridgeProtocol::LiFi,      // Bridge aggregator
+            BridgeProtocol::Across,    // Fast bridge
+            BridgeProtocol::Multichain, // Multi-chain bridge
         ];
         
         Self {
@@ -474,10 +477,13 @@ impl CrossChainArbitrageStrategy {
                 Some("hop") => BridgeProtocol::Hop,
                 Some("rubic") => BridgeProtocol::Rubic,
                 Some("synapse") => BridgeProtocol::Synapse,
-                _ => BridgeProtocol::Stargate, // 기본값
+                Some("lifi") => BridgeProtocol::LiFi,
+                Some("across") => BridgeProtocol::Across,
+                Some("multichain") => BridgeProtocol::Multichain,
+                _ => BridgeProtocol::LiFi, // LiFi를 기본값으로 (aggregator)
             }
         } else {
-            BridgeProtocol::Stargate // 기본값
+            BridgeProtocol::LiFi // LiFi를 기본값으로 (aggregator)
         }
     }
     
@@ -719,6 +725,9 @@ mod tests {
         assert_eq!(BridgeProtocol::Hop.name(), "hop");
         assert_eq!(BridgeProtocol::Rubic.name(), "rubic");
         assert_eq!(BridgeProtocol::Synapse.name(), "synapse");
+        assert_eq!(BridgeProtocol::LiFi.name(), "lifi");
+        assert_eq!(BridgeProtocol::Across.name(), "across");
+        assert_eq!(BridgeProtocol::Multichain.name(), "multichain");
     }
     
     #[test]

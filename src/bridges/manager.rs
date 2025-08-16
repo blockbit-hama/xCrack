@@ -1,5 +1,5 @@
 use super::traits::{Bridge, BridgeQuote, BridgeError, BridgeResult};
-use super::{StargateBridge, HopBridge, RubicBridge, SynapseBridge, LiFiBridge};
+use super::{StargateBridge, HopBridge, RubicBridge, SynapseBridge, LiFiBridge, AcrossBridge, MultichainBridge};
 use crate::types::{ChainId, CrossChainToken, BridgeProtocol};
 use alloy::primitives::U256;
 use std::sync::Arc;
@@ -60,6 +60,12 @@ impl BridgeManager {
         // Add LI.FI bridge (primary aggregator)
         let lifi_api_key = std::env::var("LIFI_API_KEY").ok();
         bridges.insert(BridgeProtocol::LiFi, Arc::new(LiFiBridge::new(lifi_api_key)));
+        
+        // Add Across bridge (fast optimistic bridge)
+        bridges.insert(BridgeProtocol::Across, Arc::new(AcrossBridge::new()));
+        
+        // Add Multichain bridge (comprehensive multi-chain support)
+        bridges.insert(BridgeProtocol::Multichain, Arc::new(MultichainBridge::new()));
         
         Self {
             bridges,
