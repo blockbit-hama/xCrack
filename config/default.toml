@@ -7,6 +7,27 @@ rpc_url = "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
 ws_url = "wss://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
 block_time = 12
 
+[blockchain]
+enable_onchain_strategies = true
+mempool_monitoring = true
+event_listening = true
+max_rpc_calls_per_second = 100
+cache_ttl_seconds = 60
+
+[blockchain.primary_network]
+chain_id = 1
+name = "mainnet"
+rpc_url = "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+ws_url = "wss://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+block_time = 12
+
+[[blockchain.backup_networks]]
+chain_id = 1
+name = "mainnet-backup"
+rpc_url = "https://mainnet.infura.io/v3/YOUR_PROJECT_ID"
+ws_url = "wss://mainnet.infura.io/ws/v3/YOUR_PROJECT_ID"
+block_time = 12
+
 [strategies]
 
 [strategies.arbitrage]

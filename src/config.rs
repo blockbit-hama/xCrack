@@ -14,6 +14,17 @@ pub struct NetworkConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockchainConfig {
+    pub primary_network: NetworkConfig,
+    pub backup_networks: Vec<NetworkConfig>,
+    pub enable_onchain_strategies: bool,
+    pub mempool_monitoring: bool,
+    pub event_listening: bool,
+    pub max_rpc_calls_per_second: u32,
+    pub cache_ttl_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DexConfig {
     pub name: String,
     pub router: H160,
@@ -25,6 +36,7 @@ pub struct DexConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub network: NetworkConfig,
+    pub blockchain: BlockchainConfig,
     pub strategies: StrategyConfig,
     pub flashbots: FlashbotsConfig,
     pub safety: SafetyConfig,
@@ -167,6 +179,10 @@ impl Config {
         Ok(config)
     }
 
+    pub async fn load_from_file(path: &str) -> Result<Self> {
+        Self::load(path).await
+    }
+
     pub fn default() -> Self {
         Self {
             network: NetworkConfig {
@@ -176,6 +192,22 @@ impl Config {
                 ws_url: Some("wss://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY".to_string()),
                 block_time: 12,
                 base_fee: None,
+            },
+            blockchain: BlockchainConfig {
+                primary_network: NetworkConfig {
+                    chain_id: 1,
+                    name: "mainnet".to_string(),
+                    rpc_url: "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY".to_string(),
+                    ws_url: Some("wss://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY".to_string()),
+                    block_time: 12,
+                    base_fee: None,
+                },
+                backup_networks: vec![],
+                enable_onchain_strategies: true,
+                mempool_monitoring: true,
+                event_listening: true,
+                max_rpc_calls_per_second: 100,
+                cache_ttl_seconds: 300,
             },
             strategies: StrategyConfig {
                 sandwich: SandwichConfig {

@@ -17,6 +17,13 @@ use crate::types::{
     ExchangeInfo, PriceData, ArbitrageError,
 };
 use alloy::primitives::U256;
+// ethers 트레이트 메서드 사용을 위한 import
+use ethers::signers::Signer;
+use ethers::providers::Middleware;
+use ethers::middleware::SignerMiddleware;
+use ethers::contract::Contract;
+use ethers::abi::Abi;
+use ethers::types::{H160 as EthersH160, Address as EthersAddress};
 
 // 실제 CEX 클라이언트 연동을 위한 의존성
 use crate::exchange::client::{
@@ -444,14 +451,26 @@ impl OrderExecutor {
             return self.execute_mock_arbitrage(&execution_id, &opportunity).await;
         }
         
-        // 동시 주문 실행
-        let (buy_result, sell_result) = tokio::join!(
-            buy_client.place_buy_order(&opportunity.token_symbol, opportunity.max_amount, opportunity.buy_price),
-            sell_client.place_sell_order(&opportunity.token_symbol, opportunity.max_amount, opportunity.sell_price)
-        );
+        // 재시도 가능한 동시 주문 실행 루프
+        let mut attempt: u32 = 0;
+        let max_attempts = self.max_retry_attempts.max(1);
+        let mut last_error: Option<anyhow::Error> = None;
+        while attempt < max_attempts {
+            attempt += 1;
+            let backoff_ms = 10u64.saturating_mul(attempt as u64) * 5; // 50ms, 100ms, 150ms...
+            if attempt > 1 { sleep(Duration::from_millis(backoff_ms)).await; }
+
+            // 슬리피지/가격 완화 적용: 시도마다 가격을 약간 보수적으로 조정
+            let buy_price = opportunity.buy_price * Decimal::from_str("1.001").unwrap_or(Decimal::ONE);
+            let sell_price = opportunity.sell_price * Decimal::from_str("0.999").unwrap_or(Decimal::ONE);
+
+            let (buy_result, sell_result) = tokio::join!(
+                buy_client.place_buy_order(&opportunity.token_symbol, opportunity.max_amount, buy_price),
+                sell_client.place_sell_order(&opportunity.token_symbol, opportunity.max_amount, sell_price)
+            );
         
-        // 주문 결과 처리
-        match (buy_result, sell_result) {
+            // 주문 결과 처리
+            match (buy_result, sell_result) {
             (Ok(buy_order_id), Ok(sell_order_id)) => {
                 // 양쪽 주문 모두 성공
                 self.update_execution_context(&execution_id, Some(buy_order_id.clone()), Some(sell_order_id.clone()), ExecutionStatus::BothOrdersPlaced).await;
@@ -461,10 +480,10 @@ impl OrderExecutor {
                 
                 if filled {
                     self.update_execution_context(&execution_id, None, None, ExecutionStatus::Completed).await;
-                    Ok(true)
+                    return Ok(true);
                 } else {
                     self.update_execution_context(&execution_id, None, None, ExecutionStatus::Failed).await;
-                    Ok(false)
+                    return Ok(false);
                 }
             }
             (Ok(buy_order_id), Err(sell_err)) => {
@@ -486,7 +505,8 @@ impl OrderExecutor {
                 // 통계 업데이트
                 self.update_partial_execution_stats().await;
                 
-                Err(anyhow!("Partial execution: Buy succeeded, Sell failed - {}", sell_err))
+                last_error = Some(anyhow!("Partial execution: Buy succeeded, Sell failed - {}", sell_err));
+                continue;
             }
             (Err(buy_err), Ok(sell_order_id)) => {
                 // 🚨 부분 체결: 매도만 성공
@@ -506,16 +526,20 @@ impl OrderExecutor {
                 
                 // 통계 업데이트
                 self.update_partial_execution_stats().await;
-                
-                Err(anyhow!("Partial execution: Sell succeeded, Buy failed - {}", buy_err))
+                last_error = Some(anyhow!("Partial execution: Sell succeeded, Buy failed - {}", buy_err));
+                continue;
             }
             (Err(buy_err), Err(sell_err)) => {
                 // 양쪽 주문 모두 실패 - 안전한 상황
                 warn!("Both orders failed - No position risk. Buy: {}, Sell: {}", buy_err, sell_err);
-                self.update_execution_context(&execution_id, None, None, ExecutionStatus::Failed).await;
-                Ok(false)
+                last_error = Some(anyhow!("Both failed: buy={}, sell={}", buy_err, sell_err));
+                continue;
             }
-        }
+        } // end match
+        } // end while
+        // 모든 재시도 실패
+        self.update_execution_context(&execution_id, None, None, ExecutionStatus::Failed).await;
+        if let Some(e) = last_error { Err(e) } else { Ok(false) }
     }
     
     /// Mock 아비트래지 실행
@@ -1172,15 +1196,43 @@ struct DexClient {
     config: ExchangeConfig,
     average_latency: Arc<Mutex<u64>>,
     is_connected: Arc<AtomicBool>,
+    // 온체인 실행을 위한 프로바이더/서명자
+    http_provider: Option<ethers::providers::Provider<ethers::providers::Http>>, 
+    wallet: Option<ethers::signers::LocalWallet>,
 }
 
 impl DexClient {
     async fn new(config: ExchangeConfig) -> Result<Self> {
+        // 실환경에서만 온체인 구성 로드
+        let http_provider = if !crate::mocks::is_mock_mode() {
+            if let Ok(rpc_url) = std::env::var("ETH_RPC_URL") {
+                Some(ethers::providers::Provider::<ethers::providers::Http>::try_from(rpc_url)
+                    .map_err(|e| anyhow!("provider error: {}", e))?)
+            } else {
+                None
+            }
+        } else { None };
+
+        let wallet = if !crate::mocks::is_mock_mode() {
+            let pk = std::env::var("PRIVATE_KEY").ok().or_else(|| std::env::var("FLASHBOTS_PRIVATE_KEY").ok());
+            if let Some(pk) = pk {
+                let mut w = pk.parse::<ethers::signers::LocalWallet>()
+                    .map_err(|e| anyhow!("wallet parse error: {}", e))?;
+                // 체인ID 설정 (기본 1)
+                let chain_id = std::env::var("CHAIN_ID").ok()
+                    .and_then(|s| s.parse::<u64>().ok()).unwrap_or(1);
+                w = w.with_chain_id(chain_id);
+                Some(w)
+            } else { None }
+        } else { None };
+
         Ok(Self {
             exchange_name: config.name.clone(),
             config,
             average_latency: Arc::new(Mutex::new(20)), // 기본 20ms
             is_connected: Arc::new(AtomicBool::new(true)),
+            http_provider,
+            wallet,
         })
     }
     
@@ -1224,8 +1276,77 @@ impl ExchangeClient for DexClient {
             });
         }
         
-        // TODO: 실제 DEX 주문 구현
-        Err(anyhow!("Real DEX ordering not implemented"))
+        // 온체인 스왑: 0x Swap API 활용
+        let provider = self.http_provider.as_ref().ok_or_else(|| anyhow!("provider not configured"))?;
+        let wallet = self.wallet.as_ref().ok_or_else(|| anyhow!("wallet not configured"))?;
+        let wallet_addr = wallet.address();
+
+        // 토큰 주소 매핑
+        let (base, quote) = split_pair(&order.symbol)?; // (WETH, USDC)
+        let base_addr = token_address(&base)?;
+        let quote_addr = token_address(&quote)?;
+
+        // 수량 계산: amount는 base 기준 수량(wei)
+        let amount_wei = order.quantity;
+
+        // 0x Quote 구성
+        let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build()?;
+        let mut url = reqwest::Url::parse("https://api.0x.org/swap/v1/quote")?;
+        let mut params: Vec<(String, String)> = Vec::new();
+        params.push(("takerAddress".to_string(), format!("0x{:x}", wallet_addr)));
+        // 슬리피지: 기본 0.3% (환경변수로 조절 가능)
+        let slippage_pct = std::env::var("DEX_SLIPPAGE_PCT").ok()
+            .and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.003);
+        params.push(("slippagePercentage".to_string(), format!("{}", slippage_pct)));
+
+        match order.order_type {
+            OrderType::Buy => {
+                // quote -> base, buyAmount = base
+                params.push(("buyToken".to_string(), format!("{}", base_addr)));
+                params.push(("sellToken".to_string(), format!("{}", quote_addr)));
+                params.push(("buyAmount".to_string(), amount_wei.to_string()));
+            }
+            OrderType::Sell => {
+                // base -> quote, sellAmount = base
+                params.push(("buyToken".to_string(), format!("{}", quote_addr)));
+                params.push(("sellToken".to_string(), format!("{}", base_addr)));
+                params.push(("sellAmount".to_string(), amount_wei.to_string()));
+            }
+        }
+        url.query_pairs_mut().extend_pairs(params.iter().map(|(k, v)| (&**k, &**v)));
+
+        #[derive(Deserialize)]
+        struct OxQuote { to: String, data: String, value: String, gas: Option<String>, gasPrice: Option<String>, #[allow(dead_code)] allowanceTarget: Option<String> }
+        let quote: OxQuote = client.get(url).send().await?.json().await?;
+
+        // 트랜잭션 전송
+        let to_addr: ethers::types::H160 = quote.to.parse().map_err(|e| anyhow!("to parse: {}", e))?;
+        let data_bytes = hex::decode(quote.data.trim_start_matches("0x")).map_err(|e| anyhow!("data hex: {}", e))?;
+        let value_u256 = ethers::types::U256::from_dec_str(&quote.value).unwrap_or_default();
+        let mut tx = ethers::types::transaction::eip2718::TypedTransaction::Legacy(
+            ethers::types::TransactionRequest::new()
+                .to(to_addr)
+                .data(data_bytes)
+                .value(value_u256)
+        );
+        if let Some(gp) = quote.gasPrice.as_deref() { if let Ok(v) = ethers::types::U256::from_dec_str(gp) { tx.set_gas_price(v); } }
+        if let Some(g) = quote.gas.as_deref() { if let Ok(v) = ethers::types::U256::from_dec_str(g) { tx.set_gas(v); } }
+
+        // Signer 미들웨어 구성 후 송신
+        let client = SignerMiddleware::new(provider.clone(), wallet.clone());
+        let pending = client.send_transaction(tx, None).await?;
+        let tx_hash = pending.tx_hash();
+
+        Ok(OrderResponse {
+            order_id: format!("0x{:x}", tx_hash),
+            status: OrderStatus::Pending,
+            executed_price: order.price, // 기대 가격 기록
+            executed_quantity: order.quantity,
+            timestamp: Utc::now(),
+            transaction_hash: Some(format!("0x{:x}", tx_hash)),
+            gas_used: None,
+            gas_price: None,
+        })
     }
     
     async fn get_balance(&self, token: &str) -> Result<Decimal> {
@@ -1242,8 +1363,39 @@ impl ExchangeClient for DexClient {
             return Ok(balance);
         }
         
-        // TODO: 실제 DEX 잔고 조회 구현
-        Err(anyhow!("Real DEX balance check not implemented"))
+        // 온체인 잔고 조회 구현: ETH 또는 ERC-20 balanceOf
+        let provider = self.http_provider.as_ref().ok_or_else(|| anyhow!("provider not configured"))?;
+        let wallet = self.wallet.as_ref().ok_or_else(|| anyhow!("wallet not configured"))?;
+        let owner = wallet.address();
+
+        if token.eq_ignore_ascii_case("ETH") {
+            let wei = provider.get_balance(owner, None).await?;
+            let eth = ethers::utils::format_units(wei, 18).unwrap_or_else(|_| "0".to_string());
+            return Ok(Decimal::from_str(&eth).unwrap_or(Decimal::ZERO));
+        }
+
+        let addr_str = token_address(token)?;
+        let token_addr: EthersH160 = addr_str.parse().map_err(|e| anyhow!("invalid token address {}: {}", addr_str, e))?;
+        // Minimal ERC-20 ABI (balanceOf)
+        let abi_json = r#"[
+            {"constant":true,"inputs":[{"name":"owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"},
+            {"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}
+        ]"#;
+        let abi: Abi = serde_json::from_str(abi_json)?;
+        let client = std::sync::Arc::new(provider.clone());
+        let contract = Contract::new(EthersAddress::from(token_addr), abi, client.clone());
+        // decimals
+        let decimals: u8 = contract
+            .method::<(), u8>("decimals", ())?
+            .call()
+            .await
+            .unwrap_or(18u8);
+        let bal: ethers::types::U256 = contract
+            .method::<(EthersAddress,), ethers::types::U256>("balanceOf", (owner,))?
+            .call()
+            .await?;
+        let bal_str = ethers::utils::format_units(bal, decimals as u32).unwrap_or_else(|_| "0".to_string());
+        Ok(Decimal::from_str(&bal_str).unwrap_or(Decimal::ZERO))
     }
     
     async fn get_current_price(&self, symbol: &str) -> Result<PriceData> {
@@ -1320,8 +1472,8 @@ impl ExchangeClient for DexClient {
             return Ok(true);
         }
         
-        // TODO: 실제 DEX 주문 취소 구현
-        Err(anyhow!("Real DEX order cancellation not implemented"))
+        // 온체인 스왑은 취소 불가 (베스트 에포트)
+        Ok(false)
     }
     
     async fn get_order_status(&self, order_id: &str) -> Result<OrderStatus> {
@@ -1329,8 +1481,15 @@ impl ExchangeClient for DexClient {
             return Ok(OrderStatus::Filled); // Mock에서는 항상 체결됨
         }
         
-        // TODO: 실제 DEX 주문 상태 조회 구현
-        Err(anyhow!("Real DEX order status check not implemented"))
+        // 트랜잭션 해시로 영수증 확인
+        let provider = self.http_provider.as_ref().ok_or_else(|| anyhow!("provider not configured"))?;
+        let hash: ethers::types::H256 = order_id.parse().unwrap_or_default();
+        if hash == ethers::types::H256::zero() { return Ok(OrderStatus::Pending); }
+        if let Ok(Some(receipt)) = provider.get_transaction_receipt(hash).await {
+            if receipt.status == Some(1u64.into()) { Ok(OrderStatus::Filled) } else { Ok(OrderStatus::Cancelled) }
+        } else {
+            Ok(OrderStatus::Pending)
+        }
     }
     
     async fn get_order_fills(&self, order_id: &str) -> Result<Vec<OrderFill>> {
@@ -1338,8 +1497,8 @@ impl ExchangeClient for DexClient {
             return Ok(vec![]); // Mock에서는 빈 배열
         }
         
-        // TODO: 실제 DEX 주문 체결 내역 조회 구현
-        Err(anyhow!("Real DEX order fills check not implemented"))
+        // 온체인 스왑은 세부 체결 이벤트 파싱 필요: 생략
+        Ok(vec![])
     }
     
     fn get_exchange_name(&self) -> &str {
@@ -1356,6 +1515,28 @@ impl ExchangeClient for DexClient {
     
     fn is_connected(&self) -> bool {
         self.is_connected.load(Ordering::SeqCst)
+    }
+}
+
+// ----- 내부 유틸 -----
+fn split_pair(pair: &str) -> Result<(String, String)> {
+    let parts: Vec<&str> = pair.split('/').collect();
+    if parts.len() != 2 {
+        return Err(anyhow!("invalid pair format: {}", pair));
+    }
+    Ok((parts[0].to_uppercase(), parts[1].to_uppercase()))
+}
+
+fn token_address(symbol: &str) -> Result<String> {
+    // 메인넷 기본 매핑
+    let up = symbol.to_uppercase();
+    match up.as_str() {
+        "WETH" => Ok(crate::constants::WETH.to_string()),
+        "USDC" => Ok(crate::constants::USDC.to_string()),
+        "USDT" => Ok(crate::constants::USDT.to_string()),
+        "DAI" => Ok(crate::constants::DAI.to_string()),
+        "WBTC" => Ok(crate::constants::WBTC.to_string()),
+        other => Err(anyhow!("unsupported token: {}", other)),
     }
 }
 

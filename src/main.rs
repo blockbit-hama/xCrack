@@ -20,9 +20,11 @@ mod mocks;
 mod exchange;
 mod backtest;
 mod bridges;
+mod blockchain;
 
 use config::Config;
 use core::SearcherCore;
+use monitoring::manager::MonitoringManager;
 
 /// ETH 금액을 포맷팅하는 헬퍼 함수
 fn format_eth_amount(wei: alloy::primitives::U256) -> String {
@@ -166,6 +168,10 @@ async fn main() -> Result<()> {
     // -> 내부에서 strategy_manager,bundle_manager,mempool_monitor,performance_tracker 초기화
     info!("🔧 SearcherCore 초기화 중...");
     let searcher_core = SearcherCore::new(Arc::clone(&config), Arc::clone(&provider)).await?;
+
+    // 메트릭 서버 시작 (백그라운드)
+    let monitoring_manager = MonitoringManager::new(Arc::clone(&config)).await?;
+    monitoring_manager.start().await?;
     
     // 신호 처리 설정
     let searcher_core_clone = searcher_core.clone();

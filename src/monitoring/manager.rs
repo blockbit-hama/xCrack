@@ -1,19 +1,65 @@
 use std::sync::Arc;
 use anyhow::Result;
-
+use axum::{routing::get, Router};
+use axum::response::IntoResponse;
+use serde::Serialize;
 use crate::config::Config;
+use crate::core::performance_tracker::PerformanceTracker;
+use std::net::SocketAddr;
 
+#[derive(Clone)]
 pub struct MonitoringManager {
     config: Arc<Config>,
+    tracker: Arc<PerformanceTracker>,
 }
 
 impl MonitoringManager {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self { config }
+    pub async fn new(config: Arc<Config>) -> Result<Self> {
+        let tracker = Arc::new(PerformanceTracker::new(Arc::clone(&config)).await?);
+        Ok(Self { config, tracker })
     }
 
     pub async fn start(&self) -> Result<()> {
-        // Placeholder for monitoring functionality
+        let tracker = Arc::clone(&self.tracker);
+        let app = Router::new()
+            .route("/metrics", get(move || metrics_handler(Arc::clone(&tracker))));
+
+        let port = self.config.monitoring.metrics_port;
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        tracing::info!("📈 Metrics server listening on http://{}", addr);
+
+        tokio::spawn(async move {
+            if let Err(e) = axum::Server::bind(&addr).serve(app.into_make_service()).await {
+                tracing::error!("Metrics server error: {}", e);
+            }
+        });
         Ok(())
     }
-} 
+}
+
+#[derive(Serialize)]
+struct MetricsJson {
+    transactions_processed: u64,
+    opportunities_found: u64,
+    bundles_submitted: u64,
+    bundles_included: u64,
+    total_profit_eth: String,
+    success_rate: f64,
+    avg_analysis_time_ms: f64,
+    avg_submission_time_ms: f64,
+}
+
+async fn metrics_handler(tracker: Arc<PerformanceTracker>) -> impl IntoResponse {
+    let metrics = tracker.get_metrics().await;
+    let body = MetricsJson {
+        transactions_processed: metrics.transactions_processed,
+        opportunities_found: metrics.opportunities_found,
+        bundles_submitted: metrics.bundles_submitted,
+        bundles_included: metrics.bundles_included,
+        total_profit_eth: ethers::utils::format_ether(ethers::types::U256::from_big_endian(&metrics.total_profit.to_be_bytes::<32>())),
+        success_rate: metrics.success_rate,
+        avg_analysis_time_ms: metrics.avg_analysis_time,
+        avg_submission_time_ms: metrics.avg_submission_time,
+    };
+    axum::Json(body)
+}
