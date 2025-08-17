@@ -7,12 +7,12 @@ use tokio::time::{interval, sleep, Duration};
 
 use crate::config::Config;
 use crate::strategies::{MicroArbitrageStrategy, traits::Strategy};
-use crate::exchange::{ExchangeMonitor, PriceFeedManager, OrderExecutor};
+use crate::exchange::{ExchangeMonitor, PriceFeedManager, OrderExecutor, RealTimeScheduler};
 use crate::types::{PriceData, OrderBookSnapshot};
 
 /// 마이크로아비트래지 오케스트레이터
 /// 
-/// ExchangeMonitor, PriceFeedManager, 그리고 MicroArbitrageStrategy를
+/// ExchangeMonitor, PriceFeedManager, RealTimeScheduler 그리고 MicroArbitrageStrategy를
 /// 조율하여 완전한 마이크로아비트래지 시스템을 운영합니다.
 pub struct MicroArbitrageOrchestrator {
     config: Arc<Config>,
@@ -20,7 +20,8 @@ pub struct MicroArbitrageOrchestrator {
     
     // 핵심 컴포넌트들
     exchange_monitor: Arc<ExchangeMonitor>,
-    price_feed_manager: Arc<PriceFeedManager>,
+    _price_feed_manager: Arc<PriceFeedManager>,
+    _real_time_scheduler: Option<RealTimeScheduler>,
     micro_arbitrage_strategy: Arc<MicroArbitrageStrategy>,
     order_executor: Arc<OrderExecutor>,
 }
@@ -41,13 +42,17 @@ impl MicroArbitrageOrchestrator {
         // 주문 실행자 생성
         let order_executor = Arc::new(OrderExecutor::new(Arc::clone(&config)).await?);
         
+        // 실시간 스케줄러 생성
+        let real_time_scheduler = RealTimeScheduler::new(Arc::clone(&config));
+        
         info!("✅ 마이크로아비트래지 오케스트레이터 초기화 완료");
         
         Ok(Self {
             config,
             is_running: Arc::new(AtomicBool::new(false)),
             exchange_monitor,
-            price_feed_manager,
+            _price_feed_manager: price_feed_manager,
+            _real_time_scheduler: Some(real_time_scheduler),
             micro_arbitrage_strategy,
             order_executor,
         })
@@ -87,8 +92,32 @@ impl MicroArbitrageOrchestrator {
         info!("⚡ 마이크로아비트래지 전략 시작...");
         (*self.micro_arbitrage_strategy).start().await?;
         
-        // 4. 주기적 기회 스캔 태스크 시작
-        self.start_opportunity_scanner().await;
+        // 4. 실시간 스케줄러 시작 (새로운 고성능 스캔 시스템)
+        info!("⏰ 실시간 스케줄러 시작...");
+        // Note: real_time_scheduler is Option type, but we can't take from &self
+        // Create a new scheduler instance for this execution
+        let mut scheduler = RealTimeScheduler::new(Arc::clone(&self.config));
+        
+        // 새로운 채널 생성 (스케줄러 전용)
+        let (scheduler_price_sender, scheduler_price_receiver) = mpsc::unbounded_channel::<PriceData>();
+        let (scheduler_orderbook_sender, scheduler_orderbook_receiver) = mpsc::unbounded_channel::<OrderBookSnapshot>();
+        
+        // 실시간 스케줄러 시작
+        scheduler.start(
+            Arc::clone(&self.micro_arbitrage_strategy),
+            scheduler_price_sender,
+            scheduler_orderbook_sender,
+        ).await?;
+        
+        // 가격 피드 매니저를 스케줄러의 데이터 수신자로 연결
+        let mut price_feed_manager = PriceFeedManager::new(Arc::clone(&self.config));
+        price_feed_manager.start(
+            scheduler_price_receiver,
+            scheduler_orderbook_receiver,
+            Arc::clone(&self.micro_arbitrage_strategy),
+        ).await?;
+        
+        info!("✅ 실시간 스케줄러 연결 완료");
         
         // 5. 성능 모니터링 태스크 시작
         self.start_performance_monitor().await;
@@ -135,7 +164,7 @@ impl MicroArbitrageOrchestrator {
         let is_running = Arc::clone(&self.is_running);
         let strategy = Arc::clone(&self.micro_arbitrage_strategy);
         let exchange_monitor = Arc::clone(&self.exchange_monitor);
-        let price_feed_manager = Arc::clone(&self.price_feed_manager);
+        let price_feed_manager = Arc::clone(&self._price_feed_manager);
         let order_executor = Arc::clone(&self.order_executor);
         
         tokio::spawn(async move {
@@ -198,7 +227,7 @@ impl MicroArbitrageOrchestrator {
     async fn start_health_monitor(&self) {
         let is_running = Arc::clone(&self.is_running);
         let exchange_monitor = Arc::clone(&self.exchange_monitor);
-        let price_feed_manager = Arc::clone(&self.price_feed_manager);
+        let price_feed_manager = Arc::clone(&self._price_feed_manager);
         let strategy = Arc::clone(&self.micro_arbitrage_strategy);
         
         tokio::spawn(async move {
@@ -251,7 +280,7 @@ impl MicroArbitrageOrchestrator {
         self.micro_arbitrage_strategy.stop().await?;
         
         // 2. 가격 피드 매니저 중지
-        self.price_feed_manager.stop().await?;
+        self._price_feed_manager.stop().await?;
         
         // 3. 거래소 모니터 중지
         self.exchange_monitor.stop().await?;
@@ -272,14 +301,14 @@ impl MicroArbitrageOrchestrator {
     pub async fn get_comprehensive_status(&self) -> MicroArbitrageSystemStatus {
         let strategy_stats = (*self.micro_arbitrage_strategy).get_stats().await;
         let monitor_stats = (*self.exchange_monitor).get_monitoring_stats().await;
-        let feed_stats = (*self.price_feed_manager).get_stats().await;
+        let feed_stats = (*self._price_feed_manager).get_stats().await;
         let executor_stats = (*self.order_executor).get_stats().await;
         
         MicroArbitrageSystemStatus {
             is_running: self.is_running(),
             strategy_enabled: (*self.micro_arbitrage_strategy).is_enabled(),
             monitor_running: (*self.exchange_monitor).is_running(),
-            feed_manager_running: (*self.price_feed_manager).is_running(),
+            feed_manager_running: (*self._price_feed_manager).is_running(),
             
             total_opportunities: strategy_stats.total_opportunities,
             executed_trades: strategy_stats.executed_trades,

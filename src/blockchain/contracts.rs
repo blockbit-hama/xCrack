@@ -148,6 +148,76 @@ impl LendingPoolContract {
     }
 }
 
+/// Compound V3 Comet minimal wrapper
+pub struct CometContract {
+    contract: Contract<Provider<Http>>, 
+    address: Address,
+    abi: Abi,
+}
+
+impl CometContract {
+    pub fn new(address: Address, provider: Arc<Provider<Http>>) -> Result<Self> {
+        // Minimal ABI for liquidation-related read/write
+        let abi_json = r#"[
+            {"inputs":[{"internalType":"address","name":"borrower","type":"address"},{"internalType":"address","name":"collateralAsset","type":"address"},{"internalType":"uint256","name":"baseAmount","type":"uint256"}],"name":"liquidate","outputs":[],"stateMutability":"nonpayable","type":"function"},
+            {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"borrowBalanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+            {"inputs":[{"internalType":"address","name":"asset","type":"address"},{"internalType":"uint256","name":"baseAmount","type":"uint256"}],"name":"quoteCollateral","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+            {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"collateralBalanceOf","outputs":[{"internalType":"uint128","name":"","type":"uint128"}],"stateMutability":"view","type":"function"}
+        ]"#;
+        let abi: Abi = serde_json::from_str(abi_json)?;
+        let contract = Contract::new(address, abi.clone(), provider);
+        Ok(Self { contract, address, abi })
+    }
+    pub fn address(&self) -> Address { self.address }
+    pub fn abi(&self) -> &Abi { &self.abi }
+
+    /// Quote how much collateral you'd receive for repaying `baseAmount`
+    pub async fn quote_collateral(&self, asset: Address, base_amount: U256) -> Result<U256> {
+        let out: U256 = self.contract.method("quoteCollateral", (asset, base_amount))?.call().await?;
+        Ok(out)
+    }
+
+    /// Get user's borrow balance
+    pub async fn borrow_balance_of(&self, account: Address) -> Result<U256> {
+        let out: U256 = self.contract.method("borrowBalanceOf", account)?.call().await?;
+        Ok(out)
+    }
+}
+
+/// MakerDAO Vat minimal wrapper
+pub struct VatContract {
+    contract: Contract<Provider<Http>>, 
+    address: Address,
+    abi: Abi,
+}
+
+impl VatContract {
+    pub fn new(address: Address, provider: Arc<Provider<Http>>) -> Result<Self> {
+        // Minimal ABI for urns and ilks reads
+        let abi_json = r#"[
+            {"inputs":[{"internalType":"bytes32","name":"ilk","type":"bytes32"},{"internalType":"address","name":"urn","type":"address"}],"name":"urns","outputs":[{"internalType":"uint256","name":"ink","type":"uint256"},{"internalType":"uint256","name":"art","type":"uint256"}],"stateMutability":"view","type":"function"},
+            {"inputs":[{"internalType":"bytes32","name":"ilk","type":"bytes32"}],"name":"ilks","outputs":[{"internalType":"uint256","name":"Art","type":"uint256"},{"internalType":"uint256","name":"rate","type":"uint256"},{"internalType":"uint256","name":"spot","type":"uint256"},{"internalType":"uint256","name":"line","type":"uint256"},{"internalType":"uint256","name":"dust","type":"uint256"}],"stateMutability":"view","type":"function"}
+        ]"#;
+        let abi: Abi = serde_json::from_str(abi_json)?;
+        let contract = Contract::new(address, abi.clone(), provider);
+        Ok(Self { contract, address, abi })
+    }
+    pub fn address(&self) -> Address { self.address }
+    pub fn abi(&self) -> &Abi { &self.abi }
+
+    /// Read urns(ilk, urn) => (ink, art)
+    pub async fn urns(&self, ilk: [u8;32], urn: Address) -> Result<(U256, U256)> {
+        let out: (U256, U256) = self.contract.method("urns", (ilk, urn))?.call().await?;
+        Ok(out)
+    }
+
+    /// Read ilks(ilk) => (Art, rate, spot, line, dust)
+    pub async fn ilks(&self, ilk: [u8;32]) -> Result<(U256, U256, U256, U256, U256)> {
+        let out: (U256, U256, U256, U256, U256) = self.contract.method("ilks", (ilk,))?.call().await?;
+        Ok(out)
+    }
+}
+
 /// 사용자 계정 데이터
 #[derive(Debug, Clone)]
 pub struct UserAccountData {
@@ -358,6 +428,10 @@ impl ContractFactory {
     pub fn create_lending_pool(&self, address: Address) -> Result<Arc<LendingPoolContract>> {
         Ok(Arc::new(LendingPoolContract::new(address, self.provider.clone())?))
     }
+    /// Compound Comet 컨트랙트 생성
+    pub fn create_comet(&self, address: Address) -> Result<Arc<CometContract>> {
+        Ok(Arc::new(CometContract::new(address, self.provider.clone())?))
+    }
     
     /// AMM 풀 컨트랙트 생성
     pub fn create_amm_pool(&self, address: Address) -> Result<Arc<AmmPoolContract>> {
@@ -367,6 +441,11 @@ impl ContractFactory {
     /// ERC20 토큰 컨트랙트 생성
     pub fn create_erc20(&self, address: Address) -> Result<Arc<ERC20Contract>> {
         Ok(Arc::new(ERC20Contract::new(address, self.provider.clone())?))
+    }
+
+    /// Maker Vat 컨트랙트 생성
+    pub fn create_vat(&self, address: Address) -> Result<Arc<VatContract>> {
+        Ok(Arc::new(VatContract::new(address, self.provider.clone())?))
     }
 }
 

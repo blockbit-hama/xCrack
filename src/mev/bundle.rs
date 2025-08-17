@@ -572,6 +572,29 @@ impl BundleBuilder {
         Ok(signed_tx)
     }
 
+    /// 플래시론 + 청산 + 상환을 하나의 번들로 구성 (간단 구성)
+    pub async fn create_flashloan_liquidation_bundle(
+        &mut self,
+        flashloan_tx: Transaction,
+        liquidation_tx: Transaction,
+        repay_tx: Transaction,
+        target_block: u64,
+        expected_profit: U256,
+    ) -> Result<Bundle> {
+        let transactions = vec![flashloan_tx, liquidation_tx, repay_tx];
+        let mut bundle = Bundle::new(
+            transactions,
+            target_block,
+            BundleType::Liquidation,
+            OpportunityType::Liquidation,
+        );
+        bundle.metadata.expected_profit = expected_profit;
+        bundle.metadata.priority_level = PriorityLevel::Critical;
+        bundle.metadata.tags.push("flashloan".to_string());
+        bundle.metadata.tags.push("liquidation".to_string());
+        Ok(bundle)
+    }
+
     /// 자산 판매 트랜잭션 생성
     async fn create_asset_sell_transaction(
         &mut self,
@@ -657,6 +680,8 @@ pub struct LiquidationParams {
     pub auto_sell: bool,
     pub sell_contract: Option<Address>,
     pub sell_calldata: Option<Bytes>,
+        pub use_flash_loan: bool,
+        pub flash_loan_amount: Option<U256>,
 }
 
 impl NonceManager {

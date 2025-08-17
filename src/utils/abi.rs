@@ -9,6 +9,24 @@ use tracing::{debug, warn};
 
 // Uniswap V2 Router interface
 sol! {
+    /// Helper interface solely to ABI-encode parameters for a FlashLoan receiver
+    /// The actual receiver contract should implement a compatible decoder for this signature.
+    interface IFlashLoanReceiverHelper {
+        function executeLiquidation(
+            address liquidationTarget,
+            bytes liquidationCalldata,
+            address sellTarget,
+            bytes sellCalldata,
+            address sellSpender,
+            address debtAsset,
+            uint256 amount,
+            address collateralAsset,
+            uint256 minOut
+        ) external;
+    }
+}
+
+sol! {
     interface IUniswapV2Router {
         function swapExactTokensForTokens(
             uint amountIn,
@@ -101,6 +119,35 @@ sol! {
             uint256 ltv,
             uint256 healthFactor
         );
+
+        function flashLoanSimple(
+            address receiverAddress,
+            address asset,
+            uint256 amount,
+            bytes params,
+            uint16 referralCode
+        ) external;
+    }
+}
+
+// Compound V3 Comet (liquidate) minimal interface
+sol! {
+    interface IComet {
+        function allow(address manager, bool isAllowed) external;
+        function absorb(address absorber, address[] calldata accounts) external;
+        function buyCollateral(address asset, uint minAmount, uint baseAmount, address recipient) external;
+        function quoteCollateral(address asset, uint baseAmount) external view returns (uint);
+        function supply(address asset, uint amount) external;
+        function withdraw(address asset, uint amount) external;
+        function liquidate(address borrower, address collateralAsset, uint baseAmount) external;
+    }
+}
+
+// MakerDAO Dog (bite) minimal interface
+sol! {
+    interface IDog {
+        function file(bytes32 ilk, bytes32 what, address data) external;
+        function bark(bytes32 ilk, address urn, address kpr) external returns (uint id);
     }
 }
 
@@ -175,6 +222,18 @@ impl ABICodec {
         function_selectors.insert(
             "liquidationCall".to_string(),
             [0x00, 0xa7, 0x18, 0xa9], // liquidationCall(address,address,address,uint256,bool)
+        );
+
+        // Compound liquidate selector (Comet-style signature hash placeholder)
+        function_selectors.insert(
+            "liquidate".to_string(),
+            [0x4c, 0x0b, 0x5b, 0x3e],
+        );
+
+        // Maker bite/bark selector (using bark)
+        function_selectors.insert(
+            "bark".to_string(),
+            [0x1d, 0x26, 0x3b, 0x3c],
         );
 
         Self {
@@ -281,6 +340,80 @@ impl ABICodec {
             user,
             debtToCover: debt_to_cover,
             receiveAToken: receive_a_token,
+        };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode Aave flashLoanSimple call
+    pub fn encode_aave_flashloan_simple(
+        &self,
+        receiver: Address,
+        asset: Address,
+        amount: U256,
+        params: Bytes,
+        referral_code: u16,
+    ) -> Result<Bytes> {
+        let call = IAavePool::flashLoanSimpleCall {
+            receiverAddress: receiver,
+            asset,
+            amount,
+            params: params.into(),
+            referralCode: referral_code,
+        };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode Compound liquidation call
+    pub fn encode_compound_liquidation(
+        &self,
+        borrower: Address,
+        collateral_asset: Address,
+        base_amount: U256,
+    ) -> Result<Bytes> {
+        let call = IComet::liquidateCall {
+            borrower,
+            collateralAsset: collateral_asset,
+            baseAmount: base_amount,
+        };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode Maker bark (liquidation)
+    pub fn encode_maker_bark(
+        &self,
+        ilk: [u8; 32],
+        urn: Address,
+        keeper: Address,
+    ) -> Result<Bytes> {
+        let call = IDog::barkCall { ilk: FixedBytes::<32>::from(ilk), urn, kpr: keeper };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode parameters for the flashloan receiver to execute liquidation and optional sell
+    /// This produces calldata for a helper function signature that your receiver can decode.
+    /// If there is no sell step, pass Address::ZERO and empty Bytes for sellTarget/sellCalldata.
+    pub fn encode_flashloan_receiver_liquidation_params(
+        &self,
+        liquidation_target: Address,
+        liquidation_calldata: Bytes,
+        sell_target: Address,
+        sell_calldata: Bytes,
+        sell_spender: Address,
+        debt_asset: Address,
+        amount: U256,
+        collateral_asset: Address,
+        min_out: U256,
+    ) -> Result<Bytes> {
+        let call = IFlashLoanReceiverHelper::executeLiquidationCall {
+            liquidationTarget: liquidation_target,
+            liquidationCalldata: liquidation_calldata.into(),
+            sellTarget: sell_target,
+            sellCalldata: sell_calldata.into(),
+            sellSpender: sell_spender,
+            debtAsset: debt_asset,
+            amount,
+            collateralAsset: collateral_asset,
+            minOut: min_out,
         };
         Ok(call.abi_encode().into())
     }

@@ -17,6 +17,9 @@ use crate::blockchain::{
     BlockchainClient, ContractFactory, DexRouterContract, AmmPoolContract, 
     TransactionDecoder, EventListener, LogParser
 };
+use crate::oracle::{PriceOracle, PriceAggregator, ChainlinkOracle, UniswapTwapOracle};
+use crate::oracle::aggregator::AggregationStrategy;
+use crate::opportunity::{OpportunityManager, OpportunityPriority};
 
 /// 온체인 데이터 기반 실시간 샌드위치 전략
 /// 
@@ -32,8 +35,14 @@ pub struct OnChainSandwichStrategy {
     // AMM 풀 정보 캐시
     pool_cache: Arc<Mutex<HashMap<Address, PoolInfo>>>,
     
-    // 실시간 가격 데이터
+    // 실시간 가격 데이터 (대체됨)
     price_cache: Arc<Mutex<HashMap<(Address, Address), PriceInfo>>>,
+    
+    // 🆕 가격 오라클 시스템
+    price_oracle: Arc<PriceAggregator>,
+    
+    // 🆕 기회 관리자
+    opportunity_manager: Arc<OpportunityManager>,
     
     // 수익성 임계값
     min_profit_eth: U256,
@@ -110,6 +119,80 @@ pub struct OnChainSandwichOpportunity {
 }
 
 impl OnChainSandwichStrategy {
+    /// 🆕 대기 중인 최우선 기회 가져오기
+    pub async fn get_next_opportunity(&self) -> Option<OpportunityPriority> {
+        self.opportunity_manager.get_next_opportunity_for_strategy(StrategyType::Sandwich).await
+    }
+    
+    /// 🆕 여러 기회 배치로 가져오기
+    pub async fn get_opportunities_batch(&self, count: usize) -> Vec<OpportunityPriority> {
+        self.opportunity_manager.get_opportunities_batch(count).await
+            .into_iter()
+            .filter(|opp| opp.opportunity.strategy == StrategyType::Sandwich)
+            .collect()
+    }
+    
+    /// 🆕 기회 실행 결과 기록
+    pub async fn record_opportunity_execution(
+        &self,
+        opportunity_id: String,
+        success: bool,
+        actual_profit: Option<U256>,
+        gas_used: U256,
+        error_message: Option<String>,
+        execution_time_ms: u64,
+    ) -> Result<()> {
+        self.opportunity_manager.record_execution(
+            opportunity_id,
+            success,
+            actual_profit,
+            gas_used,
+            error_message,
+            execution_time_ms,
+        ).await
+    }
+    
+    /// 🆕 네트워크 상태 업데이트 (가격 및 기회 점수 조정용)
+    pub async fn update_network_state(&self, gas_price: U256, mempool_size: u32) -> Result<()> {
+        // 가스 가격을 혼잡도로 변환 (0.0 ~ 1.0)
+        let base_gas = U256::from(20_000_000_000u64); // 20 Gwei
+        let congestion = if gas_price > base_gas {
+            let excess = gas_price - base_gas;
+            let excess_ratio = excess.to::<u128>() as f64 / base_gas.to::<u128>() as f64;
+            (excess_ratio / 10.0).min(1.0) // 최대 1.0으로 제한
+        } else {
+            0.0
+        };
+        
+        // 멤풀 크기를 경쟁자 수로 변환
+        let competitors = (mempool_size / 10).min(100); // 10개당 1명의 경쟁자, 최대 100명
+        
+        self.opportunity_manager.update_network_state(congestion, competitors).await;
+        
+        debug!("📊 네트워크 상태 업데이트: congestion={:.2}, competitors={}", congestion, competitors);
+        Ok(())
+    }
+    
+    /// 🆕 기회 관리 통계 가져오기
+    pub async fn get_opportunity_stats(&self) -> Result<String> {
+        let stats = self.opportunity_manager.get_stats().await;
+        let queue_status = self.opportunity_manager.get_queue_status().await;
+        
+        Ok(format!(
+            "🎯 Opportunity Manager Stats:\n\
+             Total Opportunities: {}\n\
+             Total Executed: {} (Success Rate: {:.1}%)\n\
+             Total Profit: {} ETH\n\
+             Avg Execution Time: {:.1}ms\n\
+             Queue Status: {:?}",
+            stats.total_opportunities,
+            stats.total_executed,
+            stats.success_rate * 100.0,
+            format_eth_amount(stats.total_profit),
+            stats.avg_execution_time_ms,
+            queue_status
+        ))
+    }
     /// 새로운 온체인 샌드위치 전략 생성
     pub async fn new(
         config: Arc<Config>, 
@@ -132,10 +215,34 @@ impl OnChainSandwichStrategy {
             10
         ).unwrap_or_else(|_| U256::from(100_000_000_000u64)) * U256::from(1_000_000_000u64);
         
+        // 🆕 가격 오라클 시스템 초기화
+        info!("🔮 가격 오라클 시스템 초기화 중...");
+        let mut price_aggregator = PriceAggregator::new(AggregationStrategy::WeightedMean);
+        
+        // Chainlink 오라클 추가
+        let chainlink_oracle = Arc::new(ChainlinkOracle::new(
+            blockchain_client.get_provider().clone()
+        ));
+        price_aggregator.add_feed(chainlink_oracle, 1, 0.6); // 60% 가중치
+        
+        // Uniswap TWAP 오라클 추가
+        let uniswap_oracle = Arc::new(UniswapTwapOracle::new(
+            blockchain_client.get_provider().clone()
+        ));
+        price_aggregator.add_feed(uniswap_oracle, 2, 0.4); // 40% 가중치
+        
+        let price_oracle = Arc::new(price_aggregator);
+        
+        // 🆕 기회 관리자 초기화
+        info!("🎯 기회 관리자 초기화 중...");
+        let opportunity_manager = Arc::new(OpportunityManager::new(config.clone()).await?);
+        
         info!("✅ 온체인 샌드위치 전략 초기화 완료");
         info!("  📊 최소 수익: {} ETH", format_eth_amount(min_profit_eth));
         info!("  📈 최소 수익률: {:.2}%", min_profit_percentage);
         info!("  ⛽ 가스 배수: {:.2}x", gas_multiplier);
+        info!("  🔮 가격 오라클: Chainlink + Uniswap TWAP");
+        info!("  🎯 기회 관리: 우선순위 큐 시스템");
         
         let strategy = Self {
             config,
@@ -145,6 +252,8 @@ impl OnChainSandwichStrategy {
             enabled: Arc::new(AtomicBool::new(true)),
             pool_cache: Arc::new(Mutex::new(HashMap::new())),
             price_cache: Arc::new(Mutex::new(HashMap::new())),
+            price_oracle,
+            opportunity_manager,
             min_profit_eth,
             min_profit_percentage,
             gas_multiplier,
@@ -258,19 +367,51 @@ impl OnChainSandwichStrategy {
         Ok(true)
     }
     
-    /// 트랜잭션의 USD 가치 계산
+    /// 트랜잭션의 USD 가치 계산 (🆕 실제 오라클 사용)
     async fn calculate_transaction_usd_value(&self, decoded: &crate::blockchain::decoder::DecodedTransaction) -> Result<f64> {
-        // 임시 구현 - 실제로는 오라클이나 실시간 가격 피드 사용
-        let eth_usd_price = 2800.0; // $2800/ETH
+        let mut total_value = 0.0;
         
-        let mut total_value = decoded.value.as_u128() as f64 / 1e18 * eth_usd_price;
+        // ETH 가격 가져오기
+        let weth_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse::<Address>()?;
+        let eth_price_data = self.price_oracle.get_price_usd(ethers::types::H160::from_slice(weth_address.as_slice())).await?;
+        let eth_usd_price = eth_price_data.price_usd.to_string().parse::<f64>().unwrap_or(2800.0);
         
-        // 스왑 금액 추가
+        // 트랜잭션 기본 값
+        total_value += decoded.value.as_u128() as f64 / 1e18 * eth_usd_price;
+        
+        // 스왑 금액 추가 (토큰별 실제 가격 사용)
         if let Some(ethers::abi::Token::Uint(amount)) = decoded.parameters.get("amountIn") {
-            let amount_eth = amount.as_u128() as f64 / 1e18;
-            total_value += amount_eth * eth_usd_price;
+            // path에서 토큰 주소 추출
+            if let Some(ethers::abi::Token::Array(path_tokens)) = decoded.parameters.get("path") {
+                if !path_tokens.is_empty() {
+                    if let ethers::abi::Token::Address(token_addr) = &path_tokens[0] {
+                        let token_address = Address::from_slice(token_addr.as_bytes());
+                        
+                        // 해당 토큰의 실제 USD 가격 가져오기
+                        match self.price_oracle.get_price_usd(ethers::types::H160::from_slice(token_address.as_slice())).await {
+                            Ok(token_price) => {
+                                let token_amount = amount.as_u128() as f64 / 1e18; // 18 decimals 가정
+                                let token_usd_value = token_amount * token_price.price_usd.to_string().parse::<f64>().unwrap_or(0.0);
+                                total_value += token_usd_value;
+                                
+                                debug!("💰 토큰 가치 계산: {:?} = ${:.2}", token_address, token_usd_value);
+                            }
+                            Err(e) => {
+                                warn!("⚠️ 토큰 가격 조회 실패 {:?}: {}, ETH 가격으로 대체", token_address, e);
+                                let amount_eth = amount.as_u128() as f64 / 1e18;
+                                total_value += amount_eth * eth_usd_price;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // path 정보가 없으면 ETH로 계산
+                let amount_eth = amount.as_u128() as f64 / 1e18;
+                total_value += amount_eth * eth_usd_price;
+            }
         }
         
+        debug!("💵 총 트랜잭션 가치: ${:.2}", total_value);
         Ok(total_value)
     }
     
@@ -673,7 +814,21 @@ impl Strategy for OnChainSandwichStrategy {
                 }),
             );
             
-            opportunities.push(opportunity);
+            // 🆕 기회 관리자에 추가
+            match self.opportunity_manager.add_opportunity(opportunity.clone()).await {
+                Ok(added) => {
+                    if added {
+                        info!("🎯 샌드위치 기회가 우선순위 큐에 추가됨: profit={} ETH", 
+                            format_eth_amount(opportunity.expected_profit));
+                        opportunities.push(opportunity);
+                    } else {
+                        debug!("⚠️ 기회가 큐에 추가되지 않음 (우선순위 부족 또는 큐 만료)");
+                    }
+                }
+                Err(e) => {
+                    warn!("❌ 기회 추가 실패: {}", e);
+                }
+            }
         }
         
         // 통계 업데이트

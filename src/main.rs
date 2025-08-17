@@ -21,6 +21,9 @@ mod exchange;
 mod backtest;
 mod bridges;
 mod blockchain;
+mod oracle;      // 🆕 가격 오라클 시스템
+mod opportunity; // 🆕 기회 관리 시스템
+mod storage;     // 🆕 Redis 기반 스토리지
 
 use config::Config;
 use core::SearcherCore;

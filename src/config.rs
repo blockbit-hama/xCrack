@@ -11,6 +11,8 @@ pub struct NetworkConfig {
     pub ws_url: Option<String>,
     pub block_time: u64,
     pub base_fee: Option<U256>,
+    #[serde(default)]
+    pub flashloan_receiver: Option<H160>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,6 +194,7 @@ impl Config {
                 ws_url: Some("wss://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY".to_string()),
                 block_time: 12,
                 base_fee: None,
+                flashloan_receiver: None,
             },
             blockchain: BlockchainConfig {
                 primary_network: NetworkConfig {
@@ -201,6 +204,7 @@ impl Config {
                     ws_url: Some("wss://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY".to_string()),
                     block_time: 12,
                     base_fee: None,
+                    flashloan_receiver: None,
                 },
                 backup_networks: vec![],
                 enable_onchain_strategies: true,
