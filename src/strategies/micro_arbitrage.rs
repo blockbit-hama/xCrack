@@ -847,8 +847,19 @@ impl Strategy for MicroArbitrageStrategy {
         self.enabled.store(true, Ordering::SeqCst);
         info!("🚀 마이크로 아비트래지 전략 시작됨");
         
-        // TODO: 가격 피드 구독 시작
-        // TODO: WebSocket 연결 초기화
+        // 가격 피드 구독/WS 초기화: 현재는 ExchangeMonitor -> PriceFeedManager 경로를 통해
+        // 데이터를 수신하므로 여기서는 상태 플래그 및 로깅만 수행
+        let exchanges_count = self.exchanges.len();
+        let pairs_count = {
+            let mut set = std::collections::HashSet::new();
+            for (_ex, map) in self.price_cache.lock().await.iter() {
+                for (sym, _pd) in map.iter() { set.insert(sym.clone()); }
+            }
+            set.len()
+        };
+        info!("📡 가격 피드 준비 상태 - 거래소: {}, 페어(캐시기준): {}", exchanges_count, pairs_count);
+        info!("🧭 최소 수익률: {:.3}%, 최소 수익(USD): {}", self.min_profit_percentage * 100.0, self.min_profit_usd);
+        info!("⏱️ 타임아웃: {}ms, 동시 거래 한도: {}", self.execution_timeout_ms, self.max_concurrent_trades);
         
         Ok(())
     }

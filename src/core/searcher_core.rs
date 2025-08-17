@@ -3,7 +3,7 @@ use anyhow::Result;
 use tracing::{info, debug, error, warn};
 use alloy::primitives::U256;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, mpsc, Mutex};
 use std::time::{Instant, Duration};
 use ethers::providers::{Provider, Ws};
 
@@ -42,7 +42,7 @@ pub struct SearcherCore {
     performance_tracker: Arc<PerformanceTracker>,
     
     // 마이크로아비트래지 시스템 (옵셔널)
-    micro_arbitrage_orchestrator: Option<Arc<MicroArbitrageOrchestrator>>,
+    micro_arbitrage_orchestrator: Option<Arc<Mutex<MicroArbitrageOrchestrator>>>,
     
     // 채널들
     tx_sender: Option<mpsc::UnboundedSender<Transaction>>,
@@ -77,12 +77,18 @@ impl SearcherCore {
         let micro_arbitrage_orchestrator = if config.strategies.micro_arbitrage.enabled {
             info!("🎼 마이크로아비트래지 시스템 초기화 중...");
             
-            // 마이크로아비트래지 전략 추출
-            if let Some(micro_strategy) = strategy_manager.get_strategy(crate::types::StrategyType::MicroArbitrage).await {
-                // FIXME: 타입 캐스팅 문제를 해결하기 위해 임시로 None 반환
-                // 실제로는 MicroArbitrageOrchestrator::new를 호출해야 함
-                warn!("⚠️ 마이크로아비트래지 오케스트레이터 초기화 임시 비활성화 (타입 캐스팅 이슈)");
-                None
+            // 타입 안전한 핸들로 직접 가져오기
+            if let Some(micro_strategy) = strategy_manager.get_micro_arbitrage_strategy() {
+                match MicroArbitrageOrchestrator::new(Arc::clone(&config), micro_strategy).await {
+                    Ok(orchestrator) => {
+                        info!("✅ 마이크로아비트래지 오케스트레이터 초기화 완료");
+                        Some(Arc::new(Mutex::new(orchestrator)))
+                    }
+                    Err(e) => {
+                        error!("❌ 마이크로아비트래지 오케스트레이터 초기화 실패: {}", e);
+                        None
+                    }
+                }
             } else {
                 warn!("⚠️ 마이크로아비트래지 전략을 찾을 수 없음");
                 None
@@ -155,10 +161,16 @@ impl SearcherCore {
         self.mempool_monitor.start(tx_sender.clone()).await?;
         
         // 3.1. 마이크로아비트래지 시스템 시작 (활성화된 경우)
-        if let Some(ref orchestrator) = self.micro_arbitrage_orchestrator {
+        if let Some(orchestrator_arc) = &self.micro_arbitrage_orchestrator {
             info!("⚡ 마이크로아비트래지 시스템 시작 중...");
-            // FIXME: orchestrator.start()를 호출해야 하지만 mutable reference 문제로 임시 주석
-            warn!("⚠️ 마이크로아비트래지 오케스트레이터 시작 임시 비활성화 (mutable reference 이슈)");
+            let orchestrator_arc = Arc::clone(orchestrator_arc);
+            // 별도 태스크에서 구동
+            tokio::spawn(async move {
+                let guard = orchestrator_arc.lock().await;
+                if let Err(e) = guard.start().await {
+                    error!("❌ 마이크로아비트래지 오케스트레이터 시작 실패: {}", e);
+                }
+            });
         }
         
         // 4. 메인 처리 루프 실행
@@ -405,7 +417,8 @@ impl SearcherCore {
         
         // 마이크로아비트래지 상태 조회 (있는 경우)
         let micro_arbitrage_status = if let Some(ref orchestrator) = self.micro_arbitrage_orchestrator {
-            Some(orchestrator.get_comprehensive_status().await)
+            let guard = orchestrator.lock().await;
+            Some(guard.get_comprehensive_status().await)
         } else {
             None
         };

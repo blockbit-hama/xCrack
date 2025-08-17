@@ -54,7 +54,7 @@ impl MicroArbitrageOrchestrator {
     }
     
     /// 마이크로아비트래지 시스템 시작
-    pub async fn start(&mut self) -> Result<()> {
+    pub async fn start(&self) -> Result<()> {
         if self.is_running.load(Ordering::SeqCst) {
             warn!("⚠️ 마이크로아비트래지 오케스트레이터가 이미 실행 중입니다");
             return Ok(());
@@ -220,12 +220,12 @@ impl MicroArbitrageOrchestrator {
                 // 비정상 상태 감지
                 if !monitor_running {
                     error!("❌ 거래소 모니터가 중지됨");
-                    // TODO: 자동 재시작 로직
+                    warn!("자동 재시작은 외부 supervisor 또는 상위 루프에서 처리 예정");
                 }
                 
                 if !feed_manager_running {
                     error!("❌ 가격 피드 매니저가 중지됨");
-                    // TODO: 자동 재시작 로직
+                    warn!("자동 재시작은 외부 supervisor 또는 상위 루프에서 처리 예정");
                 }
                 
                 if !strategy_enabled {

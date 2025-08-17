@@ -19,6 +19,8 @@ pub struct StrategyManager {
     provider: Arc<Provider<Ws>>,
     strategies: Arc<RwLock<HashMap<StrategyType, Arc<dyn Strategy + Send + Sync>>>>,
     performance_stats: Arc<RwLock<HashMap<StrategyType, StrategyStats>>>,
+    // Typed handle for MicroArbitrage to avoid downcasting issues
+    micro_arbitrage_strategy: Option<Arc<MicroArbitrageStrategy>>, 
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +35,7 @@ impl StrategyManager {
     pub async fn new(config: Arc<Config>, provider: Arc<Provider<Ws>>) -> Result<Self> {
         let mut strategies = HashMap::new();
         let mut performance_stats = HashMap::new();
+        let mut micro_arbitrage_strategy_typed: Option<Arc<MicroArbitrageStrategy>> = None;
         
         
         // 샌드위치 전략 초기화
@@ -82,7 +85,9 @@ impl StrategyManager {
             info!("⚡ 마이크로아비트래지 전략 초기화 중...");
             match MicroArbitrageStrategy::new(Arc::clone(&config), Arc::clone(&provider)).await {
                 Ok(micro_arbitrage_strategy) => {
-                    strategies.insert(StrategyType::MicroArbitrage, Arc::new(micro_arbitrage_strategy) as Arc<dyn Strategy + Send + Sync>);
+                    let arc_strategy = Arc::new(micro_arbitrage_strategy);
+                    strategies.insert(StrategyType::MicroArbitrage, arc_strategy.clone() as Arc<dyn Strategy + Send + Sync>);
+                    micro_arbitrage_strategy_typed = Some(arc_strategy);
                     info!("✅ 마이크로아비트래지 전략 초기화 완료");
                 }
                 Err(e) => {
@@ -105,6 +110,7 @@ impl StrategyManager {
             provider,
             strategies: Arc::new(RwLock::new(strategies)),
             performance_stats: Arc::new(RwLock::new(performance_stats)),
+            micro_arbitrage_strategy: micro_arbitrage_strategy_typed,
         })
     }
 
@@ -307,6 +313,11 @@ impl StrategyManager {
     pub async fn get_strategy(&self, strategy_type: StrategyType) -> Option<Arc<dyn Strategy + Send + Sync>> {
         let strategies = self.strategies.read().await;
         strategies.get(&strategy_type).map(Arc::clone)
+    }
+
+    /// Get typed MicroArbitrageStrategy handle (if initialized)
+    pub fn get_micro_arbitrage_strategy(&self) -> Option<Arc<MicroArbitrageStrategy>> {
+        self.micro_arbitrage_strategy.clone()
     }
 }
 
