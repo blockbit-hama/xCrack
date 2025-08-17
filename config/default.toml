@@ -57,6 +57,7 @@ enable_cex_trading = true         # Enable CEX trading
 enable_dex_trading = true         # Enable DEX trading
 blacklist_tokens = []             # No blacklisted tokens
 priority_tokens = ["WETH", "USDC", "USDT", "DAI", "WBTC"]  # Priority tokens
+runtime_blacklist_ttl_secs = 900  # 15분 TTL
 
 # Exchange configurations for micro arbitrage
 [[strategies.micro_arbitrage.exchanges]]

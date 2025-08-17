@@ -89,6 +89,8 @@ pub struct MicroArbitrageConfig {
     pub enable_dex_trading: bool, // DEX 거래 활성화
     pub blacklist_tokens: Vec<String>, // 거래 금지 토큰들
     pub priority_tokens: Vec<String>, // 우선순위 토큰들
+    /// 런타임 블랙리스트 TTL(초) - 만료 후 자동 해제
+    pub runtime_blacklist_ttl_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -276,6 +278,7 @@ impl Config {
                     enable_dex_trading: true,
                     blacklist_tokens: vec!["SHIB".to_string(), "DOGE".to_string()], // 고변동성 토큰 제외
                     priority_tokens: vec!["WETH".to_string(), "WBTC".to_string(), "USDC".to_string(), "USDT".to_string()],
+                    runtime_blacklist_ttl_secs: 900,
                 },
             },
             flashbots: FlashbotsConfig {

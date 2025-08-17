@@ -8,6 +8,8 @@ use tokio::time::{sleep, Duration, Instant, timeout};
 use rust_decimal::Decimal;
 use chrono::Utc;
 use uuid::Uuid;
+use serde::Deserialize;
+use std::str::FromStr;
 
 use crate::config::{Config, ExchangeConfig, ExchangeType};
 use crate::types::{
@@ -79,6 +81,8 @@ pub struct OrderExecutor {
     
     // 거래소별 연결 정보
     exchange_clients: HashMap<String, Arc<dyn ExchangeClient>>,
+    // 거래소 설정 조회용 메타
+    exchange_config_by_name: HashMap<String, ExchangeConfig>,
     
     // 동시 실행 제한
     execution_semaphore: Arc<Semaphore>,
@@ -86,6 +90,8 @@ pub struct OrderExecutor {
     // 주문 추적
     active_orders: Arc<Mutex<HashMap<String, OrderExecutionContext>>>,
     order_history: Arc<Mutex<Vec<OrderExecutionResult>>>,
+    // 런타임 블랙리스트 (동적) — TTL 지원 위해 삽입 시각 저장
+    runtime_blacklist: Arc<Mutex<HashMap<String, Instant>>>,
     
     // 성능 통계
     stats: Arc<Mutex<ExecutionStats>>,
@@ -226,11 +232,13 @@ impl OrderExecutor {
         
         // 거래소 클라이언트 초기화
         let mut exchange_clients = HashMap::new();
+        let mut exchange_config_by_name = HashMap::new();
         
         for exchange_config in &config.strategies.micro_arbitrage.exchanges {
             if exchange_config.enabled {
                 let client = Self::create_exchange_client(exchange_config).await?;
                 exchange_clients.insert(exchange_config.name.clone(), client);
+                exchange_config_by_name.insert(exchange_config.name.clone(), exchange_config.clone());
             }
         }
         
@@ -244,9 +252,11 @@ impl OrderExecutor {
             config,
             is_running: Arc::new(AtomicBool::new(false)),
             exchange_clients,
+            exchange_config_by_name,
             execution_semaphore: Arc::new(Semaphore::new(max_concurrent)),
             active_orders: Arc::new(Mutex::new(HashMap::new())),
             order_history: Arc::new(Mutex::new(Vec::new())),
+            runtime_blacklist: Arc::new(Mutex::new(HashMap::new())),
             stats: Arc::new(Mutex::new(ExecutionStats {
                 total_executions: 0,
                 successful_executions: 0,
@@ -302,6 +312,9 @@ impl OrderExecutor {
         
         // 주문 정리 태스크 시작
         self.start_order_cleanup().await;
+        
+        // 런타임 블랙리스트 만료 청소 태스크 시작
+        self.start_blacklist_cleaner().await;
         
         info!("✅ 주문 실행 시스템 시작 완료");
         Ok(())
@@ -790,6 +803,33 @@ impl OrderExecutor {
             }
         });
     }
+
+    /// 런타임 블랙리스트 주기적 만료 정리
+    async fn start_blacklist_cleaner(&self) {
+        let is_running = Arc::clone(&self.is_running);
+        let runtime_blacklist = Arc::clone(&self.runtime_blacklist);
+        let ttl_secs = self.config.strategies.micro_arbitrage.runtime_blacklist_ttl_secs;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            while is_running.load(Ordering::SeqCst) {
+                interval.tick().await;
+                let now = Instant::now();
+                let mut guard = runtime_blacklist.lock().await;
+                let before = guard.len();
+                guard.retain(|symbol, inserted_at| {
+                    let keep = now.duration_since(*inserted_at).as_secs() < ttl_secs;
+                    if !keep {
+                        debug!("🧯 블랙리스트 만료 해제: {}", symbol);
+                    }
+                    keep
+                });
+                let after = guard.len();
+                if before != after {
+                    info!("🧹 블랙리스트 정리: {} → {}", before, after);
+                }
+            }
+        });
+    }
     
     /// 실행 통계 업데이트
     async fn update_execution_stats(&self, success: bool, execution_time_ms: f64) {
@@ -920,9 +960,12 @@ impl OrderExecutor {
             RiskLevel::High => {
                 // 중간 위험 - 해당 토큰쌍만 거래 중단 (블랙리스트)
                 warn!("⚠️ 경고: {} 거래쌍 일시 중단", opportunity.token_symbol);
-                // 구성의 블랙리스트에 동적으로 추가 (런타임 스코프 내에서만 효과)
-                // 주: 불변 Config을 직접 수정하지 않고 실행 중 블랙리스트 캐시를 두는 것이 안전하나,
-                // 여기서는 간소화하여 로그 및 힌트만 남김
+                // 런타임 블랙리스트에 TTL과 함께 추가
+                {
+                    let mut bl = self.runtime_blacklist.lock().await;
+                    bl.insert(opportunity.token_symbol.clone(), Instant::now());
+                }
+                info!("🛑 런타임 블랙리스트 추가됨: {} (TTL {}s)", opportunity.token_symbol, self.config.strategies.micro_arbitrage.runtime_blacklist_ttl_secs);
             },
             RiskLevel::Low => {
                 // 낮은 위험 - 로깅만 하고 계속 진행
@@ -954,6 +997,33 @@ impl OrderExecutor {
         self.order_history.lock().await.push(result);
         
         info!("✅ 부분 체결 처리 완료");
+    }
+
+    /// 런타임 블랙리스트 여부 확인
+    async fn is_pair_blacklisted_runtime(&self, symbol: &str) -> bool {
+        // TTL 기반 만료 처리
+        {
+            let ttl_secs = self.config.strategies.micro_arbitrage.runtime_blacklist_ttl_secs;
+            let mut guard = self.runtime_blacklist.lock().await;
+            if let Some(inserted_at) = guard.get(symbol).cloned() {
+                let elapsed = inserted_at.elapsed().as_secs();
+                if elapsed >= ttl_secs {
+                    // TTL 초과 → 블랙리스트에서 제거
+                    guard.remove(symbol);
+                }
+            }
+            if guard.contains_key(symbol) {
+                return true;
+            }
+        }
+        // 정적 구성 블랙리스트도 참조
+        let upper = symbol.to_uppercase();
+        for t in &self.config.strategies.micro_arbitrage.blacklist_tokens {
+            if upper.contains(&t.to_uppercase()) {
+                return true;
+            }
+        }
+        false
     }
     
     /// 부분 체결 위험도 평가
@@ -1006,15 +1076,51 @@ impl OrderExecutor {
         let symbol = order.symbol.to_uppercase();
         let unified_symbol = if symbol.contains('/') { symbol } else { format!("{}/USDC", symbol) };
 
-        // 우선순위: DEX 우선 후 CEX로 폴백
+        // 런타임/정적 블랙리스트 확인 (TTL 적용 포함)
+        if self.is_pair_blacklisted_runtime(&unified_symbol).await {
+            return Err(anyhow!("symbol blacklisted: {}", unified_symbol));
+        }
+
+        // 우선순위: priority_tokens 우선, 이후 거래소 선호도(DEX 우선 후 CEX 폴백)
         let mut last_err: Option<anyhow::Error> = None;
-        for (_name, client) in self.exchange_clients.iter() {
+        let is_priority = self
+            .config
+            .strategies
+            .micro_arbitrage
+            .priority_tokens
+            .iter()
+            .any(|t| unified_symbol.contains(&t.to_uppercase()));
+
+        // 거래소 순회 순서 구성 (DEX 우선, 우선순위 토큰이면 fast 지원 우선)
+        let mut entries: Vec<(&String, &ExchangeConfig)> = self
+            .exchange_clients
+            .keys()
+            .filter_map(|name| self.exchange_config_by_name.get(name).map(|cfg| (name, cfg)))
+            .collect();
+        entries.sort_by_key(|(_name, cfg)| {
+            let dex_rank = match cfg.exchange_type {
+                ExchangeType::DEX => 0,
+                ExchangeType::CEX => 1,
+            };
+            let fast_rank = if is_priority {
+                if cfg.supports_fast_execution { 0 } else { 1 }
+            } else { 1 };
+            (dex_rank, fast_rank)
+        });
+
+        for (name, _cfg) in entries {
+            let client = match self.exchange_clients.get(name) { Some(c) => c, None => continue };
             // 연결 상태가 아니면 스킵
             if !client.is_connected() { continue; }
 
             // 현재가 조회로 기초 점검
             let price_check = client.get_current_price(&unified_symbol).await;
-            if price_check.is_err() {
+            let pd = match price_check {
+                Ok(pd) => pd,
+                Err(_) => { last_err = Some(anyhow!("price check failed")); continue; }
+            };
+            // 기본 가격 품질 체크
+            if pd.bid <= Decimal::ZERO || pd.ask <= pd.bid {
                 last_err = Some(anyhow!("price check failed"));
                 continue;
             }
@@ -1070,6 +1176,27 @@ impl DexClient {
             average_latency: Arc::new(Mutex::new(20)), // 기본 20ms
             is_connected: Arc::new(AtomicBool::new(true)),
         })
+    }
+    
+    async fn fetch_dexscreener_price(symbol: &str) -> Result<Decimal> {
+        let parts: Vec<&str> = symbol.split('/').collect();
+        if parts.len() != 2 { return Err(anyhow!("invalid pair")); }
+        let base = parts[0].to_uppercase();
+        let url = format!("https://api.dexscreener.com/latest/dex/search?q={}", base);
+        let http = reqwest::Client::builder().timeout(Duration::from_millis(1500)).build()?;
+        let resp = http.get(&url).send().await?;
+        if !resp.status().is_success() { return Err(anyhow!("HTTP {}", resp.status())); }
+        #[derive(Debug, Deserialize)]
+        struct Pair { #[serde(rename = "priceUsd")] price_usd: Option<String> }
+        #[derive(Debug, Deserialize)]
+        struct Resp { pairs: Option<Vec<Pair>> }
+        let body: Resp = resp.json().await?;
+        if let Some(ps) = body.pairs {
+            for p in ps {
+                if let Some(s) = p.price_usd { if let Ok(d) = Decimal::from_str(&s) { return Ok(d); } }
+            }
+        }
+        Err(anyhow!("price not found"))
     }
 }
 
@@ -1141,9 +1268,22 @@ impl ExchangeClient for DexClient {
                 sequence: fastrand::u64(..),
             });
         }
-        
-        // TODO: 실제 DEX 가격 조회 구현
-        Err(anyhow!("Real DEX price check not implemented"))
+        // DexScreener 가격 사용 (USD 기준), synthetic bid/ask 구성
+        let last = Self::fetch_dexscreener_price(symbol).await?;
+        let spread = Decimal::from_str("0.001").unwrap_or(Decimal::ZERO); // 0.1%
+        let one = Decimal::ONE;
+        let bid = last * (one - spread/Decimal::from(2u8));
+        let ask = last * (one + spread/Decimal::from(2u8));
+        Ok(PriceData {
+            symbol: symbol.to_string(),
+            exchange: self.exchange_name.clone(),
+            bid,
+            ask,
+            last_price: last,
+            volume_24h: U256::from(0u64),
+            timestamp: Utc::now(),
+            sequence: fastrand::u64(..),
+        })
     }
     
     async fn place_buy_order(&self, symbol: &str, amount: U256, price: Decimal) -> Result<String> {
@@ -1231,6 +1371,33 @@ impl CexClient {
             is_connected: Arc::new(AtomicBool::new(true)),
         })
     }
+    
+    fn to_binance_symbol(pair: &str) -> Option<String> {
+        let parts: Vec<&str> = pair.split('/').collect();
+        if parts.len() != 2 { return None; }
+        let base_input = parts[0].to_uppercase();
+        let base = match base_input.as_str() {
+            "WETH" => "ETH",
+            "WBTC" => "BTC",
+            other => other,
+        };
+        let quote = parts[1].to_uppercase();
+        Some(format!("{}{}", base, quote))
+    }
+    
+    async fn fetch_binance_book_ticker(symbol: &str) -> Result<(Decimal, Decimal, Decimal)> {
+        #[derive(Debug, Deserialize)]
+        struct Ticker { #[serde(rename="bidPrice")] bid_price: String, #[serde(rename="askPrice")] ask_price: String }
+        let url = format!("https://api.binance.com/api/v3/ticker/bookTicker?symbol={}", symbol);
+        let http = reqwest::Client::builder().timeout(Duration::from_millis(1500)).build()?;
+        let resp = http.get(&url).send().await?;
+        if !resp.status().is_success() { return Err(anyhow!("HTTP {}", resp.status())); }
+        let data: Ticker = resp.json().await?;
+        let bid = Decimal::from_str(&data.bid_price).unwrap_or(Decimal::ZERO);
+        let ask = Decimal::from_str(&data.ask_price).unwrap_or(Decimal::ZERO);
+        let last = if bid > Decimal::ZERO && ask > Decimal::ZERO { (bid + ask)/Decimal::from(2u8) } else { bid.max(ask) };
+        Ok((bid, ask, last))
+    }
 }
 
 #[async_trait::async_trait]
@@ -1307,9 +1474,19 @@ impl ExchangeClient for CexClient {
                 sequence: fastrand::u64(..),
             });
         }
-        
-        // TODO: 실제 CEX 가격 조회 구현
-        Err(anyhow!("Real CEX price check not implemented"))
+        // Binance 호환 엔드포인트로 현재가 조회
+        let binance_symbol = Self::to_binance_symbol(symbol).ok_or_else(|| anyhow!("invalid symbol"))?;
+        let (bid, ask, last) = Self::fetch_binance_book_ticker(&binance_symbol).await?;
+        Ok(PriceData {
+            symbol: symbol.to_string(),
+            exchange: self.exchange_name.clone(),
+            bid,
+            ask,
+            last_price: last,
+            volume_24h: U256::from(0u64),
+            timestamp: Utc::now(),
+            sequence: fastrand::u64(..),
+        })
     }
     
     async fn place_buy_order(&self, symbol: &str, amount: U256, price: Decimal) -> Result<String> {

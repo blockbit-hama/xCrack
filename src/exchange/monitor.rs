@@ -7,10 +7,37 @@ use std::collections::HashMap;
 use tokio::time::{sleep, Duration, interval};
 use rust_decimal::Decimal;
 use chrono::Utc;
+use serde::Deserialize;
+use std::str::FromStr;
 
 use crate::config::{Config, ExchangeConfig, ExchangeType};
 use crate::types::{PriceData, OrderBookSnapshot, OrderBookLevel, ExchangeInfo};
 use alloy::primitives::U256;
+
+#[derive(Debug, Deserialize)]
+struct BinanceBookTicker {
+    symbol: String,
+    #[serde(rename = "bidPrice")] bid_price: String,
+    #[serde(rename = "bidQty")] bid_qty: String,
+    #[serde(rename = "askPrice")] ask_price: String,
+    #[serde(rename = "askQty")] ask_qty: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DexScreenerPair {
+    #[serde(rename = "priceUsd")] price_usd: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DexScreenerResponse {
+    pairs: Option<Vec<DexScreenerPair>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BinanceDepth {
+    bids: Vec<[String; 2]>,
+    asks: Vec<[String; 2]>,
+}
 
 /// 여러 거래소를 동시에 모니터링하는 시스템
 /// 
@@ -224,53 +251,56 @@ impl ExchangeMonitor {
                         }
                     }
                 } else {
-                    // 실제 DEX API 호출: 최소 REST 가격 엔드포인트 시도 (엔드포인트 형식은 예시이며, 구성값 사용)
-                    let endpoint = exchange_config.api_endpoint.clone();
-                    // 예시: 단순 티커 엔드포인트 가정 -> 가격/오더북 스냅샷 생성
-                    let url = format!("{}/ticker", endpoint.trim_end_matches('/'));
-                    match reqwest::get(&url).await {
-                        Ok(resp) => {
-                            if resp.status().is_success() {
-                                // 최소한의 가격/오더북 더미 생성(실제 매핑은 거래소별로 구현 필요)
-                                for pair in &filtered_pairs {
-                                    let mid = 100.0 + (fastrand::f64() - 0.5) * 2.0; // placeholder
-                                    let bid = mid * 0.9995;
-                                    let ask = mid * 1.0005;
-                                    let price = PriceData {
-                                        symbol: pair.clone(),
-                                        exchange: exchange_name.clone(),
-                                        bid: rust_decimal::Decimal::from_f64_retain(bid).unwrap_or_default(),
-                                        ask: rust_decimal::Decimal::from_f64_retain(ask).unwrap_or_default(),
-                                        last_price: rust_decimal::Decimal::from_f64_retain(mid).unwrap_or_default(),
-                                        volume_24h: U256::from(100000u64),
-                                        timestamp: Utc::now(),
-                                        sequence,
-                                    };
-                                    let ob = OrderBookSnapshot {
-                                        exchange: exchange_name.clone(),
-                                        symbol: pair.clone(),
-                                        bids: vec![OrderBookLevel { price: price.bid, quantity: U256::from(1000u64) }],
-                                        asks: vec![OrderBookLevel { price: price.ask, quantity: U256::from(1000u64) }],
-                                        timestamp: Utc::now(),
-                                        sequence,
-                                    };
-                                    let _ = price_sender.send(price);
-                                    let _ = orderbook_sender.send(ob);
-                                }
-                                Self::update_connection_status(&connection_status, &exchange_name, true, 100).await;
-                                Self::update_monitoring_stats(&stats, filtered_pairs.len() as u64, filtered_pairs.len() as u64).await;
-                                sequence += 1;
-                            } else {
-                                warn!("DEX 티커 응답 비정상: {} {}", exchange_name, resp.status());
-                                Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
-                                reconnect_attempts += 1;
+                    // 실제 DEX 데이터: DexScreener를 통해 심볼 기반 가격을 조회하고 synthetic orderbook 구성
+                    let http = reqwest::Client::builder()
+                        .timeout(Duration::from_millis(2000))
+                        .build()
+                        .unwrap();
+                    let mut any_success = false;
+                    let spread = 0.001; // 0.1% synthetic spread
+                    for pair in &filtered_pairs {
+                        match Self::fetch_dexscreener_price(&http, pair).await {
+                            Ok(last) => {
+                                let bid = last * Decimal::from_str(&format!("{:.6}", 1.0 - spread / 2.0)).unwrap_or(Decimal::ONE);
+                                let ask = last * Decimal::from_str(&format!("{:.6}", 1.0 + spread / 2.0)).unwrap_or(Decimal::ONE);
+                                let price = PriceData {
+                                    symbol: pair.clone(),
+                                    exchange: exchange_name.clone(),
+                                    bid,
+                                    ask,
+                                    last_price: last,
+                                    volume_24h: U256::from(0u64),
+                                    timestamp: Utc::now(),
+                                    sequence,
+                                };
+                                // 얕은 synthetic 오더북
+                                let bids = vec![OrderBookLevel { price: bid, quantity: U256::from(1000u64) }];
+                                let asks = vec![OrderBookLevel { price: ask, quantity: U256::from(1000u64) }];
+                                let ob = OrderBookSnapshot {
+                                    exchange: exchange_name.clone(),
+                                    symbol: pair.clone(),
+                                    bids,
+                                    asks,
+                                    timestamp: Utc::now(),
+                                    sequence,
+                                };
+                                let _ = price_sender.send(price);
+                                let _ = orderbook_sender.send(ob);
+                                any_success = true;
+                            }
+                            Err(err) => {
+                                debug!("DexScreener 가격 조회 실패 {}: {}", pair, err);
                             }
                         }
-                        Err(e) => {
-                            warn!("실제 DEX API 호출 실패: {} - {}", exchange_name, e);
-                            Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
-                            reconnect_attempts += 1;
-                        }
+                    }
+                    if any_success {
+                        Self::update_connection_status(&connection_status, &exchange_name, true, 90).await;
+                        Self::update_monitoring_stats(&stats, filtered_pairs.len() as u64, filtered_pairs.len() as u64).await;
+                        sequence += 1;
+                    } else {
+                        warn!("{} 실제 DEX 데이터 수집 실패 (모든 페어)", exchange_name);
+                        Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
+                        reconnect_attempts += 1;
                     }
                 }
                 
@@ -298,6 +328,7 @@ impl ExchangeMonitor {
             .cloned()
             .collect();
         let update_interval = Duration::from_millis(self.config.strategies.micro_arbitrage.price_update_interval_ms);
+        let orderbook_depth = self.config.strategies.micro_arbitrage.order_book_depth as usize;
         
         info!("🏛️ CEX 모니터링 시작: {}", exchange_name);
         
@@ -305,6 +336,10 @@ impl ExchangeMonitor {
         tokio::spawn(async move {
             let mut sequence = 0u64;
             let mut reconnect_attempts = 0u32;
+            let http = reqwest::Client::builder()
+                .timeout(Duration::from_millis(1500))
+                .build()
+                .unwrap();
             
             while is_running.load(Ordering::SeqCst) {
                 // Mock 모드에서는 시뮬레이션된 데이터 생성
@@ -339,51 +374,57 @@ impl ExchangeMonitor {
                         }
                     }
                 } else {
-                    // 실제 CEX API 호출: 최소 REST 가격 엔드포인트 시도
-                    let endpoint = exchange_config.api_endpoint.clone();
-                    let url = format!("{}/ticker", endpoint.trim_end_matches('/'));
-                    match reqwest::get(&url).await {
-                        Ok(resp) => {
-                            if resp.status().is_success() {
-                                for pair in &filtered_pairs {
-                                    let mid = 100.0 + (fastrand::f64() - 0.5) * 1.0; // placeholder
-                                    let bid = mid * 0.9999;
-                                    let ask = mid * 1.0001;
+                    // 실제 CEX API 호출: Binance 호환 엔드포인트 우선 지원
+                    let mut any_success = false;
+                    for pair in &filtered_pairs {
+                        if let Some(binance_symbol) = Self::to_binance_symbol(pair) {
+                            match Self::fetch_binance_book_ticker(&http, &binance_symbol).await {
+                                Ok((bid, ask, last)) => {
+                                    let (bids, asks) = match Self::fetch_binance_orderbook(&http, &binance_symbol, orderbook_depth as u32).await {
+                                        Ok((b, a)) => (b, a),
+                                        Err(_) => (vec![OrderBookLevel { price: bid, quantity: U256::from(0u64) }],
+                                                   vec![OrderBookLevel { price: ask, quantity: U256::from(0u64) }]),
+                                    };
                                     let price = PriceData {
                                         symbol: pair.clone(),
                                         exchange: exchange_name.clone(),
-                                        bid: rust_decimal::Decimal::from_f64_retain(bid).unwrap_or_default(),
-                                        ask: rust_decimal::Decimal::from_f64_retain(ask).unwrap_or_default(),
-                                        last_price: rust_decimal::Decimal::from_f64_retain(mid).unwrap_or_default(),
-                                        volume_24h: U256::from(200000u64),
+                                        bid,
+                                        ask,
+                                        last_price: last,
+                                        volume_24h: U256::from(0u64),
                                         timestamp: Utc::now(),
                                         sequence,
                                     };
                                     let ob = OrderBookSnapshot {
                                         exchange: exchange_name.clone(),
                                         symbol: pair.clone(),
-                                        bids: vec![OrderBookLevel { price: price.bid, quantity: U256::from(2000u64) }],
-                                        asks: vec![OrderBookLevel { price: price.ask, quantity: U256::from(2000u64) }],
+                                        bids,
+                                        asks,
                                         timestamp: Utc::now(),
                                         sequence,
                                     };
                                     let _ = price_sender.send(price);
                                     let _ = orderbook_sender.send(ob);
+                                    any_success = true;
                                 }
-                                Self::update_connection_status(&connection_status, &exchange_name, true, 50).await;
-                                Self::update_monitoring_stats(&stats, filtered_pairs.len() as u64, filtered_pairs.len() as u64).await;
-                                sequence += 1;
-                            } else {
-                                warn!("CEX 티커 응답 비정상: {} {}", exchange_name, resp.status());
-                                Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
-                                reconnect_attempts += 1;
+                                Err(err) => {
+                                    debug!("Binance 티커 실패 {}: {}", binance_symbol, err);
+                                    continue;
+                                }
                             }
+                        } else {
+                            debug!("매핑 불가 CEX 심볼: {} ({}에서 스킵)", pair, exchange_name);
                         }
-                        Err(e) => {
-                            warn!("실제 CEX API 호출 실패: {} - {}", exchange_name, e);
-                            Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
-                            reconnect_attempts += 1;
-                        }
+                    }
+
+                    if any_success {
+                        Self::update_connection_status(&connection_status, &exchange_name, true, 40).await;
+                        Self::update_monitoring_stats(&stats, filtered_pairs.len() as u64, filtered_pairs.len() as u64).await;
+                        sequence += 1;
+                    } else {
+                        warn!("{} 실제 CEX 데이터 수집 실패 (모든 페어)", exchange_name);
+                        Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
+                        reconnect_attempts += 1;
                     }
                 }
                 
@@ -695,6 +736,106 @@ impl ExchangeMonitor {
     /// 실행 중인지 확인
     pub fn is_running(&self) -> bool {
         self.is_running.load(Ordering::SeqCst)
+    }
+}
+
+/// 간단한 Decimal -> U256 변환: 소수부는 무시 (CEX 수량 근사)
+fn decimal_to_u256(value: Decimal) -> U256 {
+    if value.is_sign_negative() {
+        return U256::from(0u64);
+    }
+    let int_part = value.trunc();
+    if let Ok(v) = int_part.to_string().parse::<u128>() {
+        U256::from(v)
+    } else {
+        U256::from(0u64)
+    }
+}
+
+// =========================
+// CEX(Binance) 지원 유틸
+// =========================
+impl ExchangeMonitor {
+    /// 프로젝트 표준 심볼("WETH/USDC")을 Binance 심볼("ETHUSDC")로 변환
+    fn to_binance_symbol(pair: &str) -> Option<String> {
+        let parts: Vec<&str> = pair.split('/').collect();
+        if parts.len() != 2 { return None; }
+        let base_input = parts[0].to_uppercase();
+        let base = match base_input.as_str() {
+            "WETH" => "ETH",
+            "WBTC" => "BTC",
+            other => other,
+        };
+        let quote = parts[1].to_uppercase();
+        Some(format!("{}{}", base, quote))
+    }
+
+    
+
+    async fn fetch_binance_book_ticker(client: &reqwest::Client, symbol: &str) -> Result<(Decimal, Decimal, Decimal)> {
+        let url = format!("https://api.binance.com/api/v3/ticker/bookTicker?symbol={}", symbol);
+        let resp = client.get(&url).send().await?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("HTTP {}", resp.status()));
+        }
+        let data: BinanceBookTicker = resp.json().await?;
+        let bid = Decimal::from_str(&data.bid_price).unwrap_or_default();
+        let ask = Decimal::from_str(&data.ask_price).unwrap_or_default();
+        let last = if bid > Decimal::ZERO && ask > Decimal::ZERO { (bid + ask) / Decimal::from(2u8) } else { bid.max(ask) };
+        Ok((bid, ask, last))
+    }
+
+    async fn fetch_binance_orderbook(client: &reqwest::Client, symbol: &str, depth: u32) -> Result<(Vec<OrderBookLevel>, Vec<OrderBookLevel>)> {
+        let limit = match depth {
+            d if d <= 5 => 5,
+            d if d <= 10 => 10,
+            d if d <= 20 => 20,
+            d if d <= 50 => 50,
+            d if d <= 100 => 100,
+            _ => 100,
+        };
+        let url = format!("https://api.binance.com/api/v3/depth?symbol={}&limit={}", symbol, limit);
+        let resp = client.get(&url).send().await?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("HTTP {}", resp.status()));
+        }
+        let data: BinanceDepth = resp.json().await?;
+        let bids = data.bids.into_iter().take(limit as usize).filter_map(|arr| {
+            let price = Decimal::from_str(&arr[0]).ok()?;
+            let qty_dec = Decimal::from_str(&arr[1]).ok()?;
+            let qty_u256 = decimal_to_u256(qty_dec);
+            Some(OrderBookLevel { price, quantity: qty_u256 })
+        }).collect();
+        let asks = data.asks.into_iter().take(limit as usize).filter_map(|arr| {
+            let price = Decimal::from_str(&arr[0]).ok()?;
+            let qty_dec = Decimal::from_str(&arr[1]).ok()?;
+            let qty_u256 = decimal_to_u256(qty_dec);
+            Some(OrderBookLevel { price, quantity: qty_u256 })
+        }).collect();
+        Ok((bids, asks))
+    }
+
+    /// DexScreener에서 페어 문자열("WETH/USDC")을 기반으로 USD 가격을 조회하고 Decimal로 반환
+    async fn fetch_dexscreener_price(client: &reqwest::Client, pair: &str) -> Result<Decimal> {
+        // 간단히 기본/상대 토큰 심볼만 가져와 심볼 검색 API 사용
+        let parts: Vec<&str> = pair.split('/').collect();
+        if parts.len() != 2 { return Err(anyhow!("invalid pair")); }
+        let base = parts[0].to_uppercase();
+        // DexScreener symbol search
+        let url = format!("https://api.dexscreener.com/latest/dex/search?q={}", base);
+        let resp = client.get(&url).send().await?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("HTTP {}", resp.status()));
+        }
+        let body: DexScreenerResponse = resp.json().await?;
+        if let Some(pairs) = body.pairs {
+            for p in pairs {
+                if let Some(price_str) = p.price_usd {
+                    if let Ok(val) = Decimal::from_str(&price_str) { return Ok(val); }
+                }
+            }
+        }
+        Err(anyhow!("price not found"))
     }
 }
 
