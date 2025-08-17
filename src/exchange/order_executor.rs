@@ -532,6 +532,7 @@ impl OrderExecutor {
                 execution_time: Utc::now(),
                 latency_ms: buy_delay,
                 fees: opportunity.max_amount / U256::from(1000), // 0.1% 수수료
+                strategy_key: Some("micro_arbitrage".to_string()),
             };
             
             let sell_order_result = OrderExecutionResult {
@@ -547,6 +548,7 @@ impl OrderExecutor {
                 execution_time: Utc::now(),
                 latency_ms: sell_delay,
                 fees: opportunity.max_amount / U256::from(1000), // 0.1% 수수료
+                strategy_key: Some("micro_arbitrage".to_string()),
             };
             
             // 주문 이력에 추가
@@ -946,6 +948,7 @@ impl OrderExecutor {
             execution_time: Utc::now(),
             latency_ms: 0,
             fees: U256::ZERO,
+            strategy_key: Some("micro_arbitrage".to_string()),
         };
         
         self.order_history.lock().await.push(result);

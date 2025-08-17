@@ -246,6 +246,8 @@ pub struct OrderExecutionResult {
     pub execution_time: DateTime<Utc>,
     pub latency_ms: u64,
     pub fees: U256,
+    /// Optional strategy identifier to attribute performance
+    pub strategy_key: Option<String>,
 }
 
 /// 주문 방향

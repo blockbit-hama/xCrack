@@ -52,6 +52,16 @@ pub struct MonitoringStats {
 }
 
 impl ExchangeMonitor {
+    /// 블랙리스트 토큰이 포함된 페어인지 확인
+    fn is_pair_blacklisted(&self, pair: &str) -> bool {
+        let upper_pair = pair.to_uppercase();
+        for token in &self.config.strategies.micro_arbitrage.blacklist_tokens {
+            if upper_pair.contains(&token.to_uppercase()) {
+                return true;
+            }
+        }
+        false
+    }
     pub fn new(config: Arc<Config>) -> Self {
         Self {
             config,
@@ -167,6 +177,11 @@ impl ExchangeMonitor {
         let connection_status = Arc::clone(&self.connection_status);
         let stats = Arc::clone(&self.stats);
         let trading_pairs = self.config.strategies.micro_arbitrage.trading_pairs.clone();
+        let filtered_pairs: Vec<String> = trading_pairs
+            .iter()
+            .filter(|p| !self.is_pair_blacklisted(p))
+            .cloned()
+            .collect();
         let update_interval = Duration::from_millis(self.config.strategies.micro_arbitrage.price_update_interval_ms);
         
         info!("🌐 DEX 모니터링 시작: {}", exchange_name);
@@ -217,7 +232,7 @@ impl ExchangeMonitor {
                         Ok(resp) => {
                             if resp.status().is_success() {
                                 // 최소한의 가격/오더북 더미 생성(실제 매핑은 거래소별로 구현 필요)
-                                for pair in &trading_pairs {
+                                for pair in &filtered_pairs {
                                     let mid = 100.0 + (fastrand::f64() - 0.5) * 2.0; // placeholder
                                     let bid = mid * 0.9995;
                                     let ask = mid * 1.0005;
@@ -243,7 +258,7 @@ impl ExchangeMonitor {
                                     let _ = orderbook_sender.send(ob);
                                 }
                                 Self::update_connection_status(&connection_status, &exchange_name, true, 100).await;
-                                Self::update_monitoring_stats(&stats, trading_pairs.len() as u64, trading_pairs.len() as u64).await;
+                                Self::update_monitoring_stats(&stats, filtered_pairs.len() as u64, filtered_pairs.len() as u64).await;
                                 sequence += 1;
                             } else {
                                 warn!("DEX 티커 응답 비정상: {} {}", exchange_name, resp.status());
@@ -277,6 +292,11 @@ impl ExchangeMonitor {
         let connection_status = Arc::clone(&self.connection_status);
         let stats = Arc::clone(&self.stats);
         let trading_pairs = self.config.strategies.micro_arbitrage.trading_pairs.clone();
+        let filtered_pairs: Vec<String> = trading_pairs
+            .iter()
+            .filter(|p| !self.is_pair_blacklisted(p))
+            .cloned()
+            .collect();
         let update_interval = Duration::from_millis(self.config.strategies.micro_arbitrage.price_update_interval_ms);
         
         info!("🏛️ CEX 모니터링 시작: {}", exchange_name);
@@ -325,7 +345,7 @@ impl ExchangeMonitor {
                     match reqwest::get(&url).await {
                         Ok(resp) => {
                             if resp.status().is_success() {
-                                for pair in &trading_pairs {
+                                for pair in &filtered_pairs {
                                     let mid = 100.0 + (fastrand::f64() - 0.5) * 1.0; // placeholder
                                     let bid = mid * 0.9999;
                                     let ask = mid * 1.0001;
@@ -351,7 +371,7 @@ impl ExchangeMonitor {
                                     let _ = orderbook_sender.send(ob);
                                 }
                                 Self::update_connection_status(&connection_status, &exchange_name, true, 50).await;
-                                Self::update_monitoring_stats(&stats, trading_pairs.len() as u64, trading_pairs.len() as u64).await;
+                                Self::update_monitoring_stats(&stats, filtered_pairs.len() as u64, filtered_pairs.len() as u64).await;
                                 sequence += 1;
                             } else {
                                 warn!("CEX 티커 응답 비정상: {} {}", exchange_name, resp.status());
