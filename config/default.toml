@@ -20,6 +20,9 @@ name = "mainnet"
 rpc_url = "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
 ws_url = "wss://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
 block_time = 12
+flashloan_receiver = "0x0000000000000000000000000000000000000000" # set your deployed FlashLoanReceiver here
+# Optional override if you deploy on different network fork (else code uses default Aave V3 pool const)
+# aave_v3_pool = "0x87870bca3f3fd633543545f15f8073b8a42ad6f8"
 
 [[blockchain.backup_networks]]
 chain_id = 1
