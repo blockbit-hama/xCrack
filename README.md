@@ -1,5 +1,9 @@
 # 🤖 xCrack AI-Powered MEV 서쳐
 
+> 이 저장소는 항상 한국어로 응답합니다. 상세 규칙은 `.cursor/rules.md`를 참고하세요.
+
+[규칙: 한국어 응답/포맷/코딩 가이드](.cursor/rules.md)
+
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
