@@ -1,0 +1,7 @@
+[profile.default]
+src = 'contracts'
+out = 'out'
+libs = ['lib']
+
+[etherscan]
+# optional api keys per network if you want to verify
