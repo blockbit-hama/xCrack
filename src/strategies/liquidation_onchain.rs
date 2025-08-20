@@ -20,6 +20,7 @@ use crate::utils::abi::ABICodec;
 use serde::Deserialize;
 use crate::storage::{Storage, UserPositionRecord, PriceHistoryRecord, LiquidationEvent};
 use crate::strategies::Strategy;
+use crate::flashbots::FlashbotsClient;
 use crate::blockchain::{
     BlockchainClient, ContractFactory, LendingPoolContract, ERC20Contract,
     UserAccountData, ReserveData, TransactionDecoder
@@ -288,6 +289,21 @@ impl OnChainLiquidationStrategy {
         Ok(strategy)
     }
 
+    /// Create and submit a Flashbots bundle for a validated liquidation opportunity
+    pub async fn submit_bundle_for_opportunity(&self, opportunity: &Opportunity) -> Result<bool> {
+        // 1) 번들 생성
+        let bundle = self.create_bundle(opportunity).await?;
+        // 빈 번들이면 제출 스킵
+        if bundle.transactions.is_empty() {
+            tracing::warn!("Liquidation bundle is empty; skipping submission");
+            return Ok(false);
+        }
+
+        // 2) Flashbots 클라이언트 초기화 및 제출
+        let client = FlashbotsClient::new(Arc::clone(&self.config)).await?;
+        let result = client.submit_bundle(&bundle).await?;
+        Ok(result)
+    }
     /// alloy Transaction을 ethers Transaction으로 변환
     fn convert_to_ethers_transaction(&self, tx: &Transaction) -> Result<ethers::types::Transaction> {
         Ok(ethers::types::Transaction {
