@@ -417,8 +417,8 @@ impl CrossChainArbitrageStrategy {
             opportunity.dest_chain.name()
         );
         
-        // 최신 견적 받기
-        let quote = self.bridge_manager.get_best_quote(
+        // 1) 최신 견적 1차 획득 (Balanced)
+        let mut quote = self.bridge_manager.get_best_quote(
             opportunity.source_chain,
             opportunity.dest_chain,
             &opportunity.token,
@@ -426,19 +426,94 @@ impl CrossChainArbitrageStrategy {
             0.5,
             Some(RouteStrategy::Balanced),
         ).await?;
-        
-        if !quote.is_valid() {
-            warn!("❌ 견적이 만료됨");
-            return Ok(false);
+
+        // 1-1) 견적 만료/임박 재검증: 만료이거나 유효시간이 30초 미만이면 재조회 1회
+        let now = chrono::Utc::now();
+        let time_left = (quote.expires_at - now).num_seconds();
+        if !quote.is_valid() || time_left < 30 {
+            warn!("⚠️ 견적이 만료/임박({}s), 재조회 시도", time_left);
+            quote = self.bridge_manager.get_best_quote(
+                opportunity.source_chain,
+                opportunity.dest_chain,
+                &opportunity.token,
+                opportunity.amount,
+                0.5,
+                Some(RouteStrategy::Balanced),
+            ).await?;
+            if !quote.is_valid() {
+                warn!("❌ 재조회 견적도 유효하지 않음");
+                return Ok(false);
+            }
         }
         
-        // 거래 실행
-        let execution = self.bridge_manager.execute_bridge(
-            opportunity.bridge_protocol.clone(),
+        // 2) 1차 거래 실행 (quote의 라우트 기반 프로토콜 우선)
+        let primary_protocol = self.get_bridge_protocol_from_quote(&quote);
+        let mut execution = self.bridge_manager.execute_bridge(
+            primary_protocol.clone(),
             &quote,
-        ).await?;
+        ).await;
         
-        let success = matches!(execution.status, crate::bridges::traits::BridgeExecutionStatus::Completed);
+        // 3) 실패/대기 시 1회 백업 경로 재시도
+        let mut success = match &execution {
+            Ok(exec) => matches!(exec.status, crate::bridges::traits::BridgeExecutionStatus::Completed),
+            Err(_) => false,
+        };
+
+        if !success {
+            // 표준화 로그
+            match &execution {
+                Ok(exec) => warn!(
+                    "❌ 1차 실행 미완료(status={:?}) | protocol={:?}",
+                    exec.status, primary_protocol
+                ),
+                Err(e) => warn!(
+                    "❌ 1차 실행 오류: {} | protocol={:?}",
+                    e, primary_protocol
+                ),
+            }
+
+            // 3-1) 모든 견적 조회 후, 다른 프로토콜로 1회 재시도
+            let mut all_quotes = self.bridge_manager.get_all_quotes(
+                opportunity.source_chain,
+                opportunity.dest_chain,
+                &opportunity.token,
+                opportunity.amount,
+                0.5,
+            ).await.unwrap_or_default();
+
+            // 우선순위: 높은 net_profit / 낮은 total_cost, 기존 프로토콜 제외
+            all_quotes.retain(|(p, _)| p != &primary_protocol);
+            all_quotes.sort_by(|a, b| {
+                let na = a.1.net_profit();
+                let nb = b.1.net_profit();
+                nb.cmp(&na)
+                    .then_with(|| a.1.total_cost().cmp(&b.1.total_cost()))
+            });
+
+            if let Some((fallback_protocol, fallback_quote)) = all_quotes.first() {
+                info!(
+                    "🔁 백업 경로 재시도: protocol={} net_profit={} cost={}",
+                    fallback_protocol.name(),
+                    fallback_quote.net_profit(),
+                    fallback_quote.total_cost()
+                );
+
+                let exec2 = self.bridge_manager.execute_bridge(
+                    fallback_protocol.clone(),
+                    fallback_quote,
+                ).await;
+
+                success = match exec2 {
+                    Ok(exec) => matches!(exec.status, crate::bridges::traits::BridgeExecutionStatus::Completed),
+                    Err(e) => {
+                        warn!("❌ 백업 경로 실행 오류: {} | protocol={}", e, fallback_protocol.name());
+                        false
+                    }
+                };
+            } else {
+                warn!("⚠️ 사용할 수 있는 백업 경로가 없음");
+            }
+        }
         
         if success {
             info!("✅ 실제 크로스체인 거래 성공: ${:.2} 수익", 
@@ -454,7 +529,12 @@ impl CrossChainArbitrageStrategy {
             metrics.success_rate = metrics.successful_trades as f64 / metrics.total_trades_executed as f64;
             
         } else {
-            warn!("❌ 실제 크로스체인 거래 실패: {:?}", execution.error_message);
+            // 표준화 실패 로그
+            let err_msg = match execution {
+                Ok(exec) => format!("status={:?}", exec.status),
+                Err(e) => e.to_string(),
+            };
+            warn!("❌ 실제 크로스체인 거래 실패: {}", err_msg);
             
             // 실패 메트릭 업데이트
             let mut metrics = self.performance_metrics.write().unwrap();
