@@ -131,3 +131,7 @@ Cargo.lock
 *.pdb
 
 # End of https://www.toptal.com/developers/gitignore/api/clion,rust
+
+# macOS
+.DS_Store
+**/.DS_Store
