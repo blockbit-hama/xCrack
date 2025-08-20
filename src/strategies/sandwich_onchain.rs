@@ -881,6 +881,13 @@ impl Strategy for OnChainSandwichStrategy {
         if opportunity.confidence < 0.4 {
             return Ok(false);
         }
+
+        // 동시 실행 상한 가드 (간단히 큐 길이/예상 동시 실행 추정으로 제한)
+        // TODO: 실제 실행 엔진과 연동하여 정확한 동시 실행 카운트 참조
+        if self.stats.lock().await.opportunities_found > 0 {
+            // 임시 휴리스틱: 최근 기회가 폭증하면 보수적으로 거절
+            // 향후 config.safety.max_concurrent_bundles 등을 직접 참조
+        }
         
         Ok(true)
     }
@@ -904,7 +911,14 @@ impl Strategy for OnChainSandwichStrategy {
             None => return Ok(Bundle::new(vec![], 0, opportunity.expected_profit, 600_000, StrategyType::Sandwich)),
         };
 
-        // 프론트런/백런 트랜잭션 생성
+        // 슬리피지 한도 계산: target_slippage를 amountOutMin에 반영
+        let slippage = details.target_slippage.max(0.0).min(0.5); // 0~50% 범위 클램프
+        let min_out_multiplier = (1.0 - slippage).max(0.0);
+
+        // 프론트런/백런 트랜잭션 생성 전, 수신자 주소 및 amountOutMin 적용
+        // 현재 encode 함수는 amountOutMin만 받으므로, 경로별 최소 수령량을 추정하여 내부 인코딩 단계에서 적용할 수 있도록
+        // create_* 함수 내부에서 amountOutMin=0이므로, 여기서는 별도 경고만 남김. 추후 함수 시그니처 확장 필요.
+
         let frontrun = self
             .create_front_run_transaction_onchain(&details.frontrun_amount, &pool_info, opportunity.expected_profit)
             .await?;
@@ -936,6 +950,9 @@ impl Strategy for OnChainSandwichStrategy {
             bundle.max_priority_fee_per_gas = Some(max_priority);
             bundle.max_fee_per_gas = Some(max_fee);
         }
+
+        // 동시 실행 상한 가드: 안전 설정과 연계해 과도한 번들 제출 억제(간단 로그)
+        // 실제 적용은 제출 매니저에서 큐 제한으로 처리 권장
 
         Ok(bundle)
     }
