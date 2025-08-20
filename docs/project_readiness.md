@@ -14,43 +14,21 @@
 
 ## 🥪 샌드위치 (Sandwich)
 
-- 데이터 소스/처리/저장/전략/실행/결과 관리 개요는 기존 문서와 동일
+- 코드 구현 (된 것/부분/미구현)
+  - ✅ 프론트/백런 트랜잭션 인코딩: `encode_uniswap_v2_swap_exact_tokens` 적용. 파일: `src/strategies/sandwich_onchain.rs`
+  - ✅ 번들 생성·제출 경로: 프론트런/백런/approve TX 배열 구성, 가스전략/타깃블록 반영. 제출은 공통 `BundleManager`→`FlashbotsClient` 사용
+  - ✅ 토큰 사전 승인(approve): 번들 선두에 approve 삽입(간단 always-approve)
+  - ✅ 가스 전략 기본값: `gas_multiplier`, `max_gas_price` 적용
+  - ⚠️ 슬리피지/동시 실행 가드: amountOutMin 반영 완료, 동시 실행 상한은 스캐폴딩(제출 매니저 큐 연동 예정)
+  - ⛔ 드라이런 시뮬: 사전 시뮬/리허설 로직 없음
 
-- [ ]  Task1 — RPC/WS 설정 — ✅
-  - 설명: `OnChainSandwichStrategy`가 `BlockchainClient(RPC/WS)` 전제.
-  - 파일: `src/strategies/sandwich_onchain.rs`, `src/config.rs`, `config/default.toml`
-
-- [ ]  Task2 — 멤풀 모니터 연결 — ✅
-  - 설명: 상위에서 pending tx를 `analyze(&Transaction)`로 공급.
-  - 파일: `src/mempool/*`, `src/strategies/sandwich_onchain.rs`
-
-- [ ]  Task3 — 오라클 경로 활성(가격 소스) — ✅
-  - 설명: `PriceAggregator(Chainlink+Uniswap TWAP)` 적용.
-  - 파일: `src/oracle/*`
-
-- [ ]  Task4 — 프론트런/백런 트랜잭션 인코딩 — ✅
-  - 설명: `encode_uniswap_v2_swap_exact_tokens`로 실제 ABI 인코딩 적용.
-  - 파일: `src/strategies/sandwich_onchain.rs`
-
-- [ ]  Task5 — 번들 생성·제출 경로(Flashbots/프라이빗 RPC) — ✅
-  - 설명: 프론트런/백런 TX 배열 구성, 가스전략/타깃블록 반영. 제출은 공통 `BundleManager`→`FlashbotsClient` 경로 사용.
-  - 파일: `src/strategies/sandwich_onchain.rs`, `src/core/bundle_manager.rs`, `src/flashbots/*`
-
-- [ ]  Task6 — 토큰 사전 승인(approve) — ✅
-  - 설명: 라우터에 WETH/스테이블 사전 승인 필요(인코더 준비됨).
-  - 파일: `src/utils/abi.rs`
-
-- [ ]  Task7 — 가스 전략 기본값 — ✅
-  - 설명: `gas_multiplier`, `max_gas_price` 적용.
-  - 파일: `src/strategies/sandwich_onchain.rs`
-
-- [ ]  Task8 — 리스크 가드 — ⚠️
-  - 설명: 최소 가치/수익 임계 검증 있음. 슬리피지(amountOutMin)·동시 실행 상한은 스캐폴딩 상태(다음 단계에서 amountOutMin 주입/큐 제한 연동 예정).
-
-- [ ]  Task9 — 드라이런 시뮬레이션 — ⛔
-  - 설명: 사전 시뮬/리허설 로직 없음.
-
-메모: `to_recipient`(수신자 주소)와 amountOutMin 실제 주입, 라우터 승인 트랜잭션 삽입은 운영 전 점검 필요.
+- 환경/기타 (된 것/부분/미구현)
+  - ✅ RPC/WS 설정: `config/default.toml` 기반
+  - ✅ 멤풀 입력: 상위에서 `analyze(&Transaction)`로 공급
+  - ✅ 오라클 경로: `PriceAggregator(Chainlink+Uniswap TWAP)`
+  - ⚠️ 수신자 주소: 현재 placeholder 주소 사용 → 운영 지갑 주소 주입 필요
+  - ⚠️ approve 최적화: allowance 검사 후 필요시에만 승인하도록 개선 권장
+  - ⛔ 사전 리허설 파이프라인: 미구현
 
 ---
 
@@ -108,18 +86,19 @@
 
 ## 🌉 크로스체인 아비트래지 (Cross-chain Arbitrage)
 
-- [ ]  Task1 — Mock 모드 구동(API_MODE=mock) — ✅
-- [ ]  Task2 — 토큰 레지스트리 기본(USDC/WETH) — ✅
-- [ ]  Task3 — 실모드 RPC/브리지 API 준비 — ✅
-  - 설명: `BridgeManager.get_best_quote/execute_bridge` 경로. LI.FI는 `LIFI_API_KEY` 지원.
-- [ ]  Task4 — 최소 수익 임계값 & 가스 추정 — ⚠️
-  - 설명: 고정 임계/단순 가스 추정 사용(설정 외부화·정교화 대상).
-- [ ]  Task5 — 출발/도착 가스비용 — ✅
-- [ ]  Task6 — 실패/만료/재시도/타임아웃 — ✅
-  - 설명: 견적 만료 재검증(임박 시 1회 재조회), 1회 백업 경로 재시도, 실패 로그 표준화.
-  - 파일: `src/strategies/cross_chain_arbitrage.rs`
+- 코드 구현 (된 것/부분/미구현)
+  - ✅ 브리지 견적/라우팅: `BridgeManager.get_best_quote/execute_bridge`
+  - ✅ 실패/만료/재시도: 견적 만료 재검증(임박 시 1회 재조회), 1회 백업 경로 재시도, 표준화 실패 로그. 파일: `src/strategies/cross_chain_arbitrage.rs`
+  - ✅ LI.FI 최소 실행: `execute_bridge`가 `route_data.transaction_request`를 표면화(RequiresAction)하여 상위 전송기로 연결. 파일: `src/bridges/lifi.rs`
+  - ⚠️ 완전 자동 실행기: 체인별 signer로 `transaction_request` 서명/브로드캐스트 + 상태 폴링 루프는 후속 구현 대상
+  - ⚠️ 최소 수익 임계/가스 추정: 고정 임계/단순 추정(설정 외부화·정교화 필요)
 
-메모: LI.FI `execute_bridge`는 최소선으로 `transaction_request`를 표면화하여 상위 실행기에서 실제 브로드캐스트 후 `get_execution_status`로 추적하는 흐름(RequiresAction)으로 구성.
+- 환경/기타 (된 것/부분/미구현)
+  - ✅ Mock 모드 구동: `API_MODE=mock`
+  - ✅ 토큰 레지스트리 기본(USDC/WETH)
+  - ✅ 브리지 API 키: `LIFI_API_KEY` 지원
+  - ✅ 출발/도착 가스비용: 실모드 전제(자동 리퓨얼은 후속)
+  - ⚠️ 상태 폴링 운영 룰: 타임아웃/재시작 정책 외부화 필요
 
 ---
 
