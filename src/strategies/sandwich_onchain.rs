@@ -886,14 +886,57 @@ impl Strategy for OnChainSandwichStrategy {
     }
     
     async fn create_bundle(&self, opportunity: &Opportunity) -> Result<Bundle> {
-        let bundle = Bundle::new(
-            vec![], // 실제 트랜잭션들로 채워야 함
-            0,
+        // victim / pool 정보 추출
+        let details = match &opportunity.details {
+            crate::types::OpportunityDetails::Sandwich(d) => d,
+            _ => {
+                return Ok(Bundle::new(vec![], 0, opportunity.expected_profit, 600_000, StrategyType::Sandwich));
+            }
+        };
+
+        // 풀 캐시에서 해당 풀 정보 확보(없으면 실패)
+        let pool_info = {
+            let pools = self.pool_cache.lock().await;
+            pools.get(&details.pool_address).cloned()
+        };
+        let pool_info = match pool_info {
+            Some(p) => p,
+            None => return Ok(Bundle::new(vec![], 0, opportunity.expected_profit, 600_000, StrategyType::Sandwich)),
+        };
+
+        // 프론트런/백런 트랜잭션 생성
+        let frontrun = self
+            .create_front_run_transaction_onchain(&details.frontrun_amount, &pool_info, opportunity.expected_profit)
+            .await?;
+        let backrun = self
+            .create_back_run_transaction_onchain(&details.backrun_amount, &pool_info, opportunity.expected_profit)
+            .await?;
+
+        // 타깃 블록: 현재 블록 + 1 (보수적)
+        let current_block = self.blockchain_client.get_current_block().await.unwrap_or(0);
+        let target_block = current_block + 1;
+
+        // 가스 추정: 프론트런+백런 합산 추정치
+        let gas_estimate = 600_000; // 기본값 유지, 추후 동적 추정 가능
+
+        let mut bundle = Bundle::new(
+            vec![frontrun, backrun],
+            target_block,
             opportunity.expected_profit,
-            600_000,
+            gas_estimate,
             StrategyType::Sandwich,
         );
-        
+
+        // 가스 전략 적용(최대 수수료/우선수수료)
+        if let Ok((base_fee, priority_fee)) = self.blockchain_client.get_gas_price().await {
+            let base_fee_alloy = U256::from_limbs_slice(&base_fee.0);
+            let priority_alloy = U256::from_limbs_slice(&priority_fee.0);
+            let max_priority = std::cmp::min(priority_alloy * U256::from(2u64), self.max_gas_price);
+            let max_fee = std::cmp::min(base_fee_alloy + max_priority * U256::from(2u64), self.max_gas_price);
+            bundle.max_priority_fee_per_gas = Some(max_priority);
+            bundle.max_fee_per_gas = Some(max_fee);
+        }
+
         Ok(bundle)
     }
 }
