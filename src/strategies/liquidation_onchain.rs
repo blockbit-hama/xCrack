@@ -1410,8 +1410,18 @@ impl OnChainLiquidationStrategy {
             sell_amount.to_string()
         );
         let client = reqwest::Client::new();
-        // 대부분의 1inch 엔드포인트는 API 키를 요구. 없으면 best effort로 None 반환
-        let resp = client.get(&url).send().await?;
+
+        // 대부분의 1inch 엔드포인트는 API 키를 요구: Authorization: Bearer <KEY> 또는 apikey 헤더
+        let mut req = client.get(&url).header("accept", "application/json");
+        if let Ok(key) = std::env::var("ONEINCH_API_KEY") {
+            if !key.trim().is_empty() {
+                req = req
+                    .header("Authorization", format!("Bearer {}", key))
+                    .header("apikey", key);
+            }
+        }
+
+        let resp = req.send().await?;
         if !resp.status().is_success() {
             return Ok(None);
         }
