@@ -18,6 +18,7 @@ use crate::blockchain::{
     TransactionDecoder, EventListener, LogParser
 };
 use crate::oracle::{PriceOracle, PriceAggregator, ChainlinkOracle, UniswapTwapOracle};
+use crate::utils::abi::{ABICodec, contracts};
 use crate::oracle::aggregator::AggregationStrategy;
 use crate::opportunity::{OpportunityManager, OpportunityPriority};
 
@@ -666,23 +667,31 @@ impl OnChainSandwichStrategy {
         let competitive_gas = self.blockchain_client.calculate_competitive_gas_price(0.8).await?;
         let competitive_gas_alloy = U256::from_limbs_slice(&competitive_gas.0);
         let gas_price = std::cmp::min(competitive_gas_alloy, self.max_gas_price);
-        
-        // Uniswap V2 Router swapExactTokensForTokens 호출
-        let mut data = vec![0x38, 0xed, 0x17, 0x39]; // swapExactTokensForTokens selector
-        
-        // 실제 ABI 인코딩 구현 필요
-        data.extend_from_slice(&amount.to_be_bytes::<32>());
-        data.extend_from_slice(&U256::ZERO.to_be_bytes::<32>()); // amountOutMin
-        // path, to, deadline 등 추가 인코딩 필요
-        
+        // Encode Uniswap V2 swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline)
+        let codec = ABICodec::new();
+        let amount_in = *amount;
+        let amount_out_min = U256::ZERO; // risk guard can update later
+        let path = vec![pool.token0, pool.token1];
+        let to_recipient = alloy::primitives::Address::ZERO; // replace with searcher wallet if available
+        let deadline = U256::from(
+            (chrono::Utc::now().timestamp() as u64) + 120 // +120s
+        );
+        let calldata = codec.encode_uniswap_v2_swap_exact_tokens(
+            amount_in,
+            amount_out_min,
+            path,
+            to_recipient,
+            deadline,
+        )?;
+
         Ok(Transaction {
             hash: B256::ZERO,
             from: alloy::primitives::Address::ZERO, // 실제 지갑 주소
-            to: Some("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse()?), // Uniswap V2 Router
-            value: *amount,
+            to: Some(*contracts::UNISWAP_V2_ROUTER), // Uniswap V2 Router
+            value: U256::ZERO,
             gas_price: U256::from_be_bytes(gas_price.to_be_bytes::<32>()),
             gas_limit: U256::from(300_000u64),
-            data,
+            data: calldata.to_vec(),
             nonce: 0,
             timestamp: chrono::Utc::now(),
             block_number: Some(self.blockchain_client.get_current_block().await?),
@@ -699,21 +708,32 @@ impl OnChainSandwichStrategy {
         let competitive_gas = self.blockchain_client.calculate_competitive_gas_price(0.7).await?;
         let competitive_gas_alloy = U256::from_limbs_slice(&competitive_gas.0);
         let gas_price = std::cmp::min(competitive_gas_alloy, self.max_gas_price);
-        
-        let mut data = vec![0x18, 0xcb, 0xaf, 0x05]; // swapExactTokensForETH selector
-        
-        // 실제 ABI 인코딩 구현 필요
-        data.extend_from_slice(&amount.to_be_bytes::<32>());
-        data.extend_from_slice(&U256::ZERO.to_be_bytes::<32>()); // amountOutMin
-        
+
+        // Encode Uniswap V2 swapExactTokensForTokens (reverse path to unwind)
+        let codec = ABICodec::new();
+        let amount_in = *amount;
+        let amount_out_min = U256::ZERO; // can be tightened via slippage guard
+        let path = vec![pool.token1, pool.token0];
+        let to_recipient = alloy::primitives::Address::ZERO; // replace with wallet if available
+        let deadline = U256::from(
+            (chrono::Utc::now().timestamp() as u64) + 120
+        );
+        let calldata = codec.encode_uniswap_v2_swap_exact_tokens(
+            amount_in,
+            amount_out_min,
+            path,
+            to_recipient,
+            deadline,
+        )?;
+
         Ok(Transaction {
             hash: B256::ZERO,
             from: alloy::primitives::Address::ZERO,
-            to: Some("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse()?),
+            to: Some(*contracts::UNISWAP_V2_ROUTER),
             value: U256::ZERO,
             gas_price: U256::from_be_bytes(gas_price.to_be_bytes::<32>()),
             gas_limit: U256::from(300_000u64),
-            data,
+            data: calldata.to_vec(),
             nonce: 0,
             timestamp: chrono::Utc::now(),
             block_number: Some(self.blockchain_client.get_current_block().await?),
