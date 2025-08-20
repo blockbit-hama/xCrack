@@ -596,24 +596,38 @@ impl Bridge for LiFiBridge {
         &self,
         quote: &BridgeQuote,
     ) -> BridgeResult<BridgeExecution> {
-        // In production, this would submit the transaction
-        // For now, return a mock execution
-        
+        // 최소 실구현: LI.FI quote의 transaction_request를 추출하여
+        // 호출자에게 실제 전송에 필요한 정보를 전달(RequiresAction)합니다.
+        // 외부 전송자가 트랜잭션을 브로드캐스트 후, get_execution_status로 추적합니다.
+
         info!("Executing bridge via LI.FI: {} from {:?} to {:?}", 
             quote.token.symbol, quote.source_chain, quote.destination_chain);
-        
-        let execution_id = Uuid::new_v4().to_string();
-        
+
+        // route_data를 LI.FI 응답 형태로 파싱
+        let lifi_quote: LiFiQuoteResponse = serde_json::from_value(quote.route_data.clone())
+            .map_err(|e| BridgeError::ApiError { message: format!("Invalid LI.FI route_data: {}", e) })?;
+
+        // 트랜잭션 요청이 포함되어 있는지 확인
+        if lifi_quote.transaction_request.is_none() {
+            return Err(BridgeError::ApiError { message: "LI.FI response missing transaction_request".to_string() });
+        }
+
+        let tx_req = lifi_quote.transaction_request.as_ref().unwrap();
+        debug!("LI.FI tx_request to={} data_len={}", tx_req.to, tx_req.data.len());
+
+        // 실제 체인 전송은 상위 실행기에서 수행해야 하므로, RequiresAction으로 반환
+        let execution_id = lifi_quote.id.clone();
+
         Ok(BridgeExecution {
-            execution_id: execution_id.clone(),
-            source_tx_hash: format!("0x{}", "a".repeat(64)),
+            execution_id,
+            source_tx_hash: "0x".to_string(), // 아직 브로드캐스트 전
             destination_tx_hash: None,
-            status: BridgeExecutionStatus::Pending,
+            status: BridgeExecutionStatus::RequiresAction,
             amount_received: None,
-            fees_paid: U256::ZERO,
+            fees_paid: quote.total_cost(),
             started_at: Utc::now(),
             completed_at: None,
-            error_message: None,
+            error_message: Some("Submit transaction_request on source chain, then poll status".to_string()),
         })
     }
     
