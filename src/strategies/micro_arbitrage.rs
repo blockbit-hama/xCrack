@@ -449,13 +449,38 @@ impl MicroArbitrageStrategy {
         info!("  매수: {} @ {}", opportunity.buy_exchange, opportunity.buy_price);
         info!("  매도: {} @ {}", opportunity.sell_exchange, opportunity.sell_price);
         
-        // 거래소 클라이언트 생성 (실제 환경에서는 설정에서 API 키 로드)
+        // 필수 API 키 존재 여부 확인 (실행 전 가드)
+        let check_api = |name: &str| -> Result<()> {
+            let lname = name.to_lowercase();
+            if lname.contains("binance") {
+                let k = std::env::var("BINANCE_API_KEY").unwrap_or_default();
+                let s = std::env::var("BINANCE_SECRET_KEY").unwrap_or_default();
+                if k.trim().is_empty() || s.trim().is_empty() {
+                    return Err(anyhow::anyhow!("BINANCE_API_KEY/SECRET env missing"));
+                }
+            } else if lname.contains("coinbase") {
+                let k = std::env::var("COINBASE_API_KEY").unwrap_or_default();
+                let s = std::env::var("COINBASE_SECRET_KEY").unwrap_or_default();
+                let p = std::env::var("COINBASE_PASSPHRASE").unwrap_or_default();
+                if k.trim().is_empty() || s.trim().is_empty() || p.trim().is_empty() {
+                    return Err(anyhow::anyhow!("COINBASE_API_KEY/SECRET/PASSPHRASE env missing"));
+                }
+            }
+            Ok(())
+        };
+        check_api(&opportunity.buy_exchange)?;
+        check_api(&opportunity.sell_exchange)?;
+
+        // 거래소 클라이언트 생성 (환경 변수에서 API 키 로드)
         let buy_client = self.create_exchange_client(&opportunity.buy_exchange).await?;
         let sell_client = self.create_exchange_client(&opportunity.sell_exchange).await?;
         
         // 연결 상태 확인
+        let symbol = format!("{}USDT", "ETH"); // 아래에서 실제 심볼로 대체됨
+        let _ = buy_client.get_current_price(&symbol).await; // warm-up
+        let _ = sell_client.get_current_price(&symbol).await; // warm-up
         if !buy_client.is_connected() || !sell_client.is_connected() {
-            return Err(anyhow::anyhow!("거래소 연결 실패"));
+            return Err(anyhow::anyhow!("거래소 연결 실패(핑 실패)"));
         }
         
         // 잔고 확인
