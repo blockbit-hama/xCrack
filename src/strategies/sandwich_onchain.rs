@@ -466,8 +466,8 @@ impl OnChainSandwichStrategy {
         }
         
         // 프론트런/백런 트랜잭션 생성
-        let front_run_tx = self.create_front_run_transaction_onchain(&optimal_size, &updated_pool, tx.gas_price).await?;
-        let back_run_tx = self.create_back_run_transaction_onchain(&optimal_size, &updated_pool, tx.gas_price).await?;
+        let front_run_tx = self.create_front_run_transaction_onchain(&optimal_size, &updated_pool, tx.gas_price, 0.99, Address::ZERO).await?;
+        let back_run_tx = self.create_back_run_transaction_onchain(&optimal_size, &updated_pool, tx.gas_price, 0.99, Address::ZERO).await?;
         
         info!("🎯 온체인 샌드위치 기회 발견!");
         info!("  💰 예상 수익: {} ETH", format_eth_amount(net_profit));
@@ -662,7 +662,9 @@ impl OnChainSandwichStrategy {
         &self,
         amount: &U256,
         pool: &PoolInfo,
-        target_gas_price: U256
+        target_gas_price: U256,
+        min_out_multiplier: f64,
+        to_recipient: Address
     ) -> Result<Transaction> {
         let competitive_gas = self.blockchain_client.calculate_competitive_gas_price(0.8).await?;
         let competitive_gas_alloy = U256::from_limbs_slice(&competitive_gas.0);
@@ -670,9 +672,12 @@ impl OnChainSandwichStrategy {
         // Encode Uniswap V2 swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline)
         let codec = ABICodec::new();
         let amount_in = *amount;
-        let amount_out_min = U256::ZERO; // risk guard can update later
+        let amount_out_min = {
+            let mul = (min_out_multiplier * 10_000.0).round() as u64;
+            amount_in * U256::from(mul) / U256::from(10_000u64)
+        };
         let path = vec![pool.token0, pool.token1];
-        let to_recipient = alloy::primitives::Address::ZERO; // replace with searcher wallet if available
+        let to_recipient = to_recipient;
         let deadline = U256::from(
             (chrono::Utc::now().timestamp() as u64) + 120 // +120s
         );
@@ -703,7 +708,9 @@ impl OnChainSandwichStrategy {
         &self,
         amount: &U256,
         pool: &PoolInfo,
-        target_gas_price: U256
+        target_gas_price: U256,
+        min_out_multiplier: f64,
+        to_recipient: Address
     ) -> Result<Transaction> {
         let competitive_gas = self.blockchain_client.calculate_competitive_gas_price(0.7).await?;
         let competitive_gas_alloy = U256::from_limbs_slice(&competitive_gas.0);
@@ -712,9 +719,12 @@ impl OnChainSandwichStrategy {
         // Encode Uniswap V2 swapExactTokensForTokens (reverse path to unwind)
         let codec = ABICodec::new();
         let amount_in = *amount;
-        let amount_out_min = U256::ZERO; // can be tightened via slippage guard
+        let amount_out_min = {
+            let mul = (min_out_multiplier * 10_000.0).round() as u64;
+            amount_in * U256::from(mul) / U256::from(10_000u64)
+        };
         let path = vec![pool.token1, pool.token0];
-        let to_recipient = alloy::primitives::Address::ZERO; // replace with wallet if available
+        let to_recipient = to_recipient;
         let deadline = U256::from(
             (chrono::Utc::now().timestamp() as u64) + 120
         );
@@ -919,11 +929,14 @@ impl Strategy for OnChainSandwichStrategy {
         // 현재 encode 함수는 amountOutMin만 받으므로, 경로별 최소 수령량을 추정하여 내부 인코딩 단계에서 적용할 수 있도록
         // create_* 함수 내부에서 amountOutMin=0이므로, 여기서는 별도 경고만 남김. 추후 함수 시그니처 확장 필요.
 
+        // 실행 지갑 주소(수신자) 설정: 운영 시 config에서 주입 권장
+        let to_recipient: Address = "0x000000000000000000000000000000000000dead".parse().unwrap_or(Address::ZERO);
+
         let frontrun = self
-            .create_front_run_transaction_onchain(&details.frontrun_amount, &pool_info, opportunity.expected_profit)
+            .create_front_run_transaction_onchain(&details.frontrun_amount, &pool_info, opportunity.expected_profit, min_out_multiplier, to_recipient)
             .await?;
         let backrun = self
-            .create_back_run_transaction_onchain(&details.backrun_amount, &pool_info, opportunity.expected_profit)
+            .create_back_run_transaction_onchain(&details.backrun_amount, &pool_info, opportunity.expected_profit, min_out_multiplier, to_recipient)
             .await?;
 
         // 타깃 블록: 현재 블록 + 1 (보수적)
@@ -933,11 +946,28 @@ impl Strategy for OnChainSandwichStrategy {
         // 가스 추정: 프론트런+백런 합산 추정치
         let gas_estimate = 600_000; // 기본값 유지, 추후 동적 추정 가능
 
+        // 승인 트랜잭션 삽입: allowance 부족 시 approve 추가 (간단: 항상 선행 승인으로 처리)
+        // 주의: 운영 시 allowance 검사 후 필요시에만 추가하도록 개선 권장
+        let codec = ABICodec::new();
+        let approve_calldata = codec.encode_erc20_approve(*contracts::UNISWAP_V2_ROUTER, U256::from(u128::MAX))?;
+        let approve_tx = Transaction {
+            hash: B256::ZERO,
+            from: Address::ZERO,
+            to: Some(pool_info.token0),
+            value: U256::ZERO,
+            gas_price: U256::from(20_000_000_000u64),
+            gas_limit: U256::from(60_000u64),
+            data: approve_calldata.to_vec(),
+            nonce: 0,
+            timestamp: chrono::Utc::now(),
+            block_number: None,
+        };
+
         let mut bundle = Bundle::new(
-            vec![frontrun, backrun],
+            vec![approve_tx, frontrun, backrun],
             target_block,
             opportunity.expected_profit,
-            gas_estimate,
+            gas_estimate + 60_000,
             StrategyType::Sandwich,
         );
 
