@@ -161,6 +161,8 @@ pub struct MonitoringConfig {
     pub profit_report_interval: String, // cron expression
     pub log_level: String,
     pub metrics_port: u16,
+    /// Public HTTP API port (Axum)
+    pub api_port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -346,6 +348,7 @@ impl Config {
                 profit_report_interval: "0 8 * * *".to_string(),
                 log_level: "info".to_string(),
                 metrics_port: 9090,
+                api_port: 8080,
             },
             performance: PerformanceConfig {
                 max_concurrent_analysis: 10,

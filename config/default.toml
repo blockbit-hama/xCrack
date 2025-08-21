@@ -171,6 +171,7 @@ telegram_chat_id = ""
 profit_report_interval = "0 8 * * *"  # Daily at 8 AM
 log_level = "info"
 metrics_port = 9090
+api_port = 8080
 
 [performance]
 max_concurrent_analysis = 10

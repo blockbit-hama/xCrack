@@ -2,6 +2,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::{routing::get, Router};
 use axum::response::IntoResponse;
+use axum::Json;
 use serde::Serialize;
 use crate::config::Config;
 use crate::core::performance_tracker::PerformanceTracker;
@@ -21,8 +22,11 @@ impl MonitoringManager {
 
     pub async fn start(&self) -> Result<()> {
         let tracker = Arc::clone(&self.tracker);
+        let api_tracker = Arc::clone(&self.tracker);
         let app = Router::new()
-            .route("/metrics", get(move || metrics_handler(Arc::clone(&tracker))));
+            .route("/metrics", get(move || metrics_handler(Arc::clone(&tracker))))
+            .route("/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
+            .route("/status", get(move || status_handler(Arc::clone(&api_tracker))));
 
         let port = self.config.monitoring.metrics_port;
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -61,5 +65,21 @@ async fn metrics_handler(tracker: Arc<PerformanceTracker>) -> impl IntoResponse 
         avg_analysis_time_ms: metrics.avg_analysis_time,
         avg_submission_time_ms: metrics.avg_submission_time,
     };
-    axum::Json(body)
+    Json(body)
+}
+
+#[derive(Serialize)]
+struct StatusJson {
+    uptime_seconds: u64,
+    bundles_submitted: u64,
+    bundles_included: u64,
+}
+
+async fn status_handler(tracker: Arc<PerformanceTracker>) -> impl IntoResponse {
+    let m = tracker.get_metrics().await;
+    Json(StatusJson {
+        uptime_seconds: m.uptime,
+        bundles_submitted: m.bundles_submitted,
+        bundles_included: m.bundles_included,
+    })
 }

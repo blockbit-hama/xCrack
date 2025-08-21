@@ -24,6 +24,7 @@ mod blockchain;
 mod oracle;      // 🆕 가격 오라클 시스템
 mod opportunity; // 🆕 기회 관리 시스템
 mod storage;     // 🆕 Redis 기반 스토리지
+mod api;         // 🆕 Public HTTP API (Axum)
 
 use config::Config;
 use core::SearcherCore;
@@ -171,6 +172,10 @@ async fn main() -> Result<()> {
     // -> 내부에서 strategy_manager,bundle_manager,mempool_monitor,performance_tracker 초기화
     info!("🔧 SearcherCore 초기화 중...");
     let searcher_core = SearcherCore::new(Arc::clone(&config), Arc::clone(&provider)).await?;
+
+    // Public API 서버 시작 (백그라운드)
+    let api_server = api::ApiServer::new(Arc::clone(&config), searcher_core.clone());
+    api_server.start().await?;
 
     // 메트릭 서버 시작 (백그라운드)
     let monitoring_manager = MonitoringManager::new(Arc::clone(&config)).await?;

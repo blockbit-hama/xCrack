@@ -489,6 +489,25 @@ impl SearcherCore {
     }
 }
 
+impl Clone for SearcherCore {
+    fn clone(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            provider: Arc::clone(&self.provider),
+            is_running: Arc::clone(&self.is_running),
+            metrics: Arc::clone(&self.metrics),
+            strategy_manager: Arc::clone(&self.strategy_manager),
+            bundle_manager: Arc::clone(&self.bundle_manager),
+            mempool_monitor: Arc::clone(&self.mempool_monitor),
+            performance_tracker: Arc::clone(&self.performance_tracker),
+            micro_arbitrage_orchestrator: self.micro_arbitrage_orchestrator.as_ref().map(Arc::clone),
+            tx_sender: self.tx_sender.clone(),
+            opportunity_sender: self.opportunity_sender.clone(),
+            bundle_sender: self.bundle_sender.clone(),
+        }
+    }
+}
+
 impl std::fmt::Debug for SearcherCore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SearcherCore")
