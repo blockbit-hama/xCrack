@@ -31,6 +31,10 @@ impl ApiServer {
         let core_report = self.core.clone();
         let core_logs = self.core.clone();
 
+        let config_for_settings = Arc::clone(&self.config);
+        let core_for_settings_get = self.core.clone();
+        let core_for_settings_post = self.core.clone();
+
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
             .route("/api/status", get(move || get_status(core_status.clone())))
@@ -38,7 +42,9 @@ impl ApiServer {
             .route("/api/strategies/toggle", post(move |payload| toggle_strategy(core_toggle.clone(), payload)))
             .route("/api/bundles", get(move || get_bundles(core_bundles.clone())))
             .route("/api/report", get(move || get_report(core_report.clone())))
-            .route("/api/stream/logs", get(move || sse_logs(core_logs.clone())));
+            .route("/api/stream/logs", get(move || sse_logs(core_logs.clone())))
+            .route("/api/settings", get(move || get_settings(Arc::clone(&config_for_settings), core_for_settings_get.clone())))
+            .route("/api/settings", post(move |payload| post_settings(core_for_settings_post.clone(), payload)));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
         tracing::info!("🛰️ API server listening on http://{}", addr);
@@ -194,4 +200,44 @@ async fn sse_logs(core: SearcherCore) -> Sse<impl Stream<Item = Result<Event, st
         }
     });
     Sse::new(stream)
+}
+
+#[derive(Serialize)]
+struct SettingsResponse {
+    strategies: std::collections::HashMap<crate::types::StrategyType, bool>,
+    api_port: u16,
+    metrics_port: u16,
+}
+
+async fn get_settings(config: Arc<crate::config::Config>, core: SearcherCore) -> Json<SettingsResponse> {
+    let strategies = core.strategy_manager.get_strategy_enabled_map().await;
+    Json(SettingsResponse {
+        strategies,
+        api_port: config.monitoring.api_port,
+        metrics_port: config.monitoring.metrics_port,
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct SettingsActionPayload {
+    action: String,
+}
+
+async fn post_settings(core: SearcherCore, Json(payload): Json<SettingsActionPayload>) -> Json<serde_json::Value> {
+    match payload.action.as_str() {
+        "reset_stats" => {
+            if let Err(e) = core.reset_stats().await {
+                return Json(serde_json::json!({"ok": false, "error": e.to_string()}));
+            }
+            Json(serde_json::json!({"ok": true}))
+        }
+        "ack_all_alerts" => {
+            let alerts = core.get_alerts(true).await;
+            for a in alerts {
+                let _ = core.acknowledge_alert(&a.id).await;
+            }
+            Json(serde_json::json!({"ok": true}))
+        }
+        _ => Json(serde_json::json!({"ok": false, "error": "unknown action"})),
+    }
 }
