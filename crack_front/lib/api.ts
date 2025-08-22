@@ -52,6 +52,12 @@ export type PerformanceReport = {
   recommendations: string[];
 };
 
+export type StrategyStats = Record<string, {
+  transactions_analyzed: number;
+  opportunities_found: number;
+  avg_analysis_time_ms: number;
+}>;
+
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
 export async function getStatus(): Promise<Status> {
@@ -113,6 +119,13 @@ export async function toggleStrategy(key: StrategyKey, enabled: boolean): Promis
   if (!res.ok) return false;
   const json = await res.json();
   return !!json.ok;
+}
+
+export async function getStrategyStats(): Promise<StrategyStats> {
+  const res = await fetch(`${BASE}/api/strategies/stats`, { cache: 'no-cache' });
+  if (!res.ok) return {};
+  const json = await res.json();
+  return json.stats || {};
 }
 
 // ---- Bundles API ----

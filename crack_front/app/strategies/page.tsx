@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Strategies, StrategyKey } from "@/lib/api";
-import { getStrategies, toggleStrategy } from "@/lib/api";
+import { getStrategies, toggleStrategy, getStrategyStats } from "@/lib/api";
 
 export default function StrategiesPage() {
   const [strategies, setStrategies] = useState<Strategies>({
@@ -12,14 +12,18 @@ export default function StrategiesPage() {
     cross: false,
   });
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<Record<string, { transactions_analyzed: number; opportunities_found: number; avg_analysis_time_ms: number }>>({});
   const [saving, setSaving] = useState<StrategyKey | null>(null);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const s = await getStrategies();
-        setStrategies(s);
+        const [s, st] = await Promise.all([
+          getStrategies(),
+          getStrategyStats().catch(() => ({})),
+        ]);
+        setStrategies(s); setStats(st);
       } finally {
         setLoading(false);
       }
@@ -58,6 +62,17 @@ export default function StrategiesPage() {
                 <div>
                   <div style={{ fontWeight: 700 }}>{it.name}</div>
                   <div style={{ fontSize: 12, color: '#888' }}>{it.desc}</div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#555' }}>
+                    {(() => {
+                      const k = it.name;
+                      const st = (stats as any)[k] || (stats as any)[it.key] || (stats as any)[it.name] || undefined;
+                      return st ? (
+                        <span>
+                          분석 {st.transactions_analyzed} / 발견 {st.opportunities_found} · 평균 {st.avg_analysis_time_ms.toFixed(1)}ms
+                        </span>
+                      ) : <span>지표 없음</span>;
+                    })()}
+                  </div>
                 </div>
                 <button
                   disabled={saving === it.key}

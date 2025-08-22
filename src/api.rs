@@ -30,6 +30,7 @@ impl ApiServer {
         let core_bundles = self.core.clone();
         let core_report = self.core.clone();
         let core_logs = self.core.clone();
+        let core_stats = self.core.clone();
 
         let config_for_settings = Arc::clone(&self.config);
         let core_for_settings_get = self.core.clone();
@@ -40,6 +41,7 @@ impl ApiServer {
             .route("/api/status", get(move || get_status(core_status.clone())))
             .route("/api/strategies", get(move || get_strategies(core_strategies.clone())))
             .route("/api/strategies/toggle", post(move |payload| toggle_strategy(core_toggle.clone(), payload)))
+            .route("/api/strategies/stats", get(move || get_strategy_stats(core_stats.clone())))
             .route("/api/bundles", get(move || get_bundles(core_bundles.clone())))
             .route("/api/report", get(move || get_report(core_report.clone())))
             .route("/api/stream/logs", get(move || sse_logs(core_logs.clone())))
@@ -147,6 +149,34 @@ async fn toggle_strategy(core: SearcherCore, Json(payload): Json<TogglePayload>)
         return Json(serde_json::json!({"ok": false, "error": e.to_string()}));
     }
     Json(serde_json::json!({"ok": true}))
+}
+
+#[derive(Serialize)]
+struct StrategyStatsOut {
+    transactions_analyzed: u64,
+    opportunities_found: u64,
+    avg_analysis_time_ms: f64,
+}
+
+#[derive(Serialize)]
+struct StrategyStatsResp {
+    stats: std::collections::HashMap<String, StrategyStatsOut>,
+}
+
+async fn get_strategy_stats(core: SearcherCore) -> Json<StrategyStatsResp> {
+    let internal = core.get_strategy_stats().await;
+    let mut stats: std::collections::HashMap<String, StrategyStatsOut> = std::collections::HashMap::new();
+    for (ty, s) in internal {
+        stats.insert(
+            ty.to_string(),
+            StrategyStatsOut {
+                transactions_analyzed: s.transactions_analyzed,
+                opportunities_found: s.opportunities_found,
+                avg_analysis_time_ms: s.avg_analysis_time_ms,
+            },
+        );
+    }
+    Json(StrategyStatsResp { stats })
 }
 
 #[derive(Serialize)]
