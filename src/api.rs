@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use axum::{routing::{get, post}, Json, Router};
+use tower_http::cors::{Any, CorsLayer};
 use axum::response::sse::{Sse, Event};
 use futures_util::stream::{Stream, StreamExt};
 use serde::Serialize;
@@ -36,6 +37,11 @@ impl ApiServer {
         let core_for_settings_get = self.core.clone();
         let core_for_settings_post = self.core.clone();
 
+        let cors = CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
             .route("/api/status", get(move || get_status(core_status.clone())))
@@ -46,7 +52,8 @@ impl ApiServer {
             .route("/api/report", get(move || get_report(core_report.clone())))
             .route("/api/stream/logs", get(move || sse_logs(core_logs.clone())))
             .route("/api/settings", get(move || get_settings(Arc::clone(&config_for_settings), core_for_settings_get.clone())))
-            .route("/api/settings", post(move |payload| post_settings(core_for_settings_post.clone(), payload)));
+            .route("/api/settings", post(move |payload| post_settings(core_for_settings_post.clone(), payload)))
+            .layer(cors);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
         tracing::info!("🛰️ API server listening on http://{}", addr);
