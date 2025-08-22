@@ -1,8 +1,109 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+
+type AlertLevel = "Info" | "Warning" | "Error" | "Critical";
+type Alert = {
+  id: string;
+  level: AlertLevel;
+  message: string;
+  timestamp: number;
+  acknowledged: boolean;
+};
+
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080";
+
 export default function LogsPage() {
+  const [connected, setConnected] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [level, setLevel] = useState<"ALL" | AlertLevel>("ALL");
+  const [q, setQ] = useState("");
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const esRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    if (paused) return;
+    const es = new EventSource(`${BACKEND}/api/stream/logs`);
+    esRef.current = es;
+    es.onopen = () => setConnected(true);
+    es.onerror = () => setConnected(false);
+    es.addEventListener("alerts", (ev: MessageEvent) => {
+      try {
+        const json: Alert[] = JSON.parse(ev.data || "[]");
+        if (Array.isArray(json) && json.length) {
+          setAlerts((prev) => {
+            const merged = [...json, ...prev];
+            return merged.slice(0, 200); // keep last 200
+          });
+        }
+      } catch (_) {
+        // ignore parse errors
+      }
+    });
+    return () => {
+      es.close();
+      esRef.current = null;
+      setConnected(false);
+    };
+  }, [paused]);
+
+  const filtered = useMemo(() => {
+    return alerts.filter((a) => {
+      const okLevel = level === "ALL" ? true : a.level === level;
+      const okText = q ? (a.message || "").toLowerCase().includes(q.toLowerCase()) : true;
+      return okLevel && okText;
+    });
+  }, [alerts, level, q]);
+
   return (
     <main>
-      <h2>로그 스트림</h2>
-      <p>추후 WebSocket 연결 또는 SSE로 실시간 로그를 표시합니다.</p>
+      <h2 style={{ marginBottom: 12 }}>실시간 로그</h2>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center' }}>
+        <span>상태: {connected ? '연결됨' : '연결 끊김'} {paused && '(일시정지)'}</span>
+        <button onClick={() => setPaused((p) => !p)} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer' }}>
+          {paused ? '재개' : '일시정지'}
+        </button>
+        <select value={level} onChange={(e) => setLevel(e.target.value as any)} style={{ padding: 6, borderRadius: 6, border: '1px solid #ddd' }}>
+          <option value="ALL">ALL</option>
+          <option value="Info">Info</option>
+          <option value="Warning">Warning</option>
+          <option value="Error">Error</option>
+          <option value="Critical">Critical</option>
+        </select>
+        <input
+          placeholder="메시지 검색…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{ flex: 1, padding: 6, borderRadius: 6, border: '1px solid #ddd' }}
+        />
+        <button onClick={() => setAlerts([])} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer' }}>지우기</button>
+      </div>
+
+      <div style={{ border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: 8 }}>시간</th>
+              <th style={{ textAlign: 'left', padding: 8 }}>레벨</th>
+              <th style={{ textAlign: 'left', padding: 8 }}>메시지</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((a) => (
+              <tr key={a.id}>
+                <td style={{ padding: 8, borderTop: '1px solid #f5f5f5', whiteSpace: 'nowrap' }}>{new Date(a.timestamp * 1000).toLocaleString()}</td>
+                <td style={{ padding: 8, borderTop: '1px solid #f5f5f5' }}>{a.level}</td>
+                <td style={{ padding: 8, borderTop: '1px solid #f5f5f5' }}>{a.message}</td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={3} style={{ padding: 12, color: '#888' }}>표시할 로그가 없습니다</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </main>
   );
 }
