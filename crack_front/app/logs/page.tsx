@@ -20,6 +20,7 @@ export default function LogsPage() {
   const [q, setQ] = useState("");
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const esRef = useRef<EventSource | null>(null);
+  const [msg, setMsg] = useState("");
 
   useEffect(() => {
     if (paused) return;
@@ -77,7 +78,32 @@ export default function LogsPage() {
           style={{ flex: 1, padding: 6, borderRadius: 6, border: '1px solid #ddd' }}
         />
         <button onClick={() => setAlerts([])} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer' }}>지우기</button>
+        <button
+          onClick={async () => {
+            setMsg("");
+            try {
+              const res = await fetch(`${BACKEND}/api/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'ack_all_alerts' }) });
+              const j = await res.json();
+              if (!j.ok) throw new Error(j.error || 'failed');
+              setMsg('알림 전체 확인 완료');
+            } catch (e: any) { setMsg(`실패: ${e.message || e}`); }
+          }}
+          style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer' }}
+        >알림 전체 확인</button>
+        <button
+          onClick={async () => {
+            setMsg("");
+            try {
+              const res = await fetch(`${BACKEND}/api/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reset_stats' }) });
+              const j = await res.json();
+              if (!j.ok) throw new Error(j.error || 'failed');
+              setMsg('통계 초기화 완료');
+            } catch (e: any) { setMsg(`실패: ${e.message || e}`); }
+          }}
+          style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer' }}
+        >통계 초기화</button>
       </div>
+      {msg && <div style={{ marginBottom: 8, color: '#2563eb' }}>{msg}</div>}
 
       <div style={{ border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
