@@ -42,11 +42,11 @@ export default function StrategiesPage() {
     }
   };
 
-  const items: { key: StrategyKey; name: string; desc: string }[] = [
-    { key: "sandwich", name: "Sandwich", desc: "프론트/백런 번들 기반" },
-    { key: "liquidation", name: "Liquidation", desc: "Aave/Compound/Maker 청산" },
-    { key: "micro", name: "Micro Arbitrage", desc: "CEX/DEX 미세차익" },
-    { key: "cross", name: "Cross-Chain", desc: "브리지 기반 크로스체인" },
+  const items: { key: StrategyKey; name: string; desc: string; href: string }[] = [
+    { key: "sandwich", name: "Sandwich", desc: "프론트/백런 번들 기반", href: "/strategies/sandwich" },
+    { key: "liquidation", name: "Liquidation", desc: "Aave/Compound/Maker 청산", href: "/strategies/liquidation" },
+    { key: "micro", name: "Micro Arbitrage", desc: "CEX/DEX 미세차익", href: "/strategies/micro" },
+    { key: "cross", name: "Cross-Chain", desc: "브리지 기반 크로스체인", href: "/strategies/cross" },
   ];
 
   return (
@@ -60,7 +60,7 @@ export default function StrategiesPage() {
             <li key={it.key} style={{ border: '1px solid #eee', borderRadius: 8, padding: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontWeight: 700 }}>{it.name}</div>
+                  <a href={it.href} style={{ fontWeight: 700, textDecoration: 'none' }}>{it.name}</a>
                   <div style={{ fontSize: 12, color: '#888' }}>{it.desc}</div>
                   <div style={{ marginTop: 6, fontSize: 12, color: '#555' }}>
                     {(() => {
