@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::config::Config;
+use serde::Serialize;
 use crate::types::{Bundle, Opportunity, Priority, StrategyType};
 use alloy::primitives::{Address, B256, U256};
 use crate::flashbots::FlashbotsClient;
@@ -20,7 +21,7 @@ pub struct BundleManager {
     bundle_stats: Arc<Mutex<BundleStats>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BundleStats {
     pub total_created: u64,
     pub total_submitted: u64,

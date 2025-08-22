@@ -473,6 +473,16 @@ impl SearcherCore {
         self.bundle_manager.get_bundle_stats().await
     }
 
+    /// 제출된 번들 목록 조회(노출용)
+    pub async fn list_submitted_bundles(&self) -> Vec<Bundle> {
+        self.bundle_manager.get_submitted_bundles().await
+    }
+
+    /// 대기 번들 목록 조회(노출용)
+    pub async fn list_pending_bundles(&self) -> Vec<Bundle> {
+        self.bundle_manager.get_pending_bundles().await
+    }
+
     /// 통계 초기화
     pub async fn reset_stats(&self) -> Result<()> {
         self.performance_tracker.reset_stats().await

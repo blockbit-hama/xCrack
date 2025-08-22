@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::config::Config;
 use crate::core::SearcherCore;
+use crate::core::bundle_manager::BundleStats;
 
 #[derive(Clone)]
 pub struct ApiServer {
@@ -23,12 +24,14 @@ impl ApiServer {
         let core_status = self.core.clone();
         let core_strategies = self.core.clone();
         let core_toggle = self.core.clone();
+        let core_bundles = self.core.clone();
 
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
             .route("/api/status", get(move || get_status(core_status.clone())))
             .route("/api/strategies", get(move || get_strategies(core_strategies.clone())))
-            .route("/api/strategies/toggle", post(move |payload| toggle_strategy(core_toggle.clone(), payload)));
+            .route("/api/strategies/toggle", post(move |payload| toggle_strategy(core_toggle.clone(), payload)))
+            .route("/api/bundles", get(move || get_bundles(core_bundles.clone())));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
         tracing::info!("🛰️ API server listening on http://{}", addr);
@@ -131,4 +134,18 @@ async fn toggle_strategy(core: SearcherCore, Json(payload): Json<TogglePayload>)
         return Json(serde_json::json!({"ok": false, "error": e.to_string()}));
     }
     Json(serde_json::json!({"ok": true}))
+}
+
+#[derive(Serialize)]
+struct BundlesResponse {
+    stats: BundleStats,
+    submitted: Vec<crate::types::Bundle>,
+    pending: Vec<crate::types::Bundle>,
+}
+
+async fn get_bundles(core: SearcherCore) -> Json<BundlesResponse> {
+    let stats = core.get_bundle_stats().await;
+    let submitted = core.list_submitted_bundles().await;
+    let pending = core.list_pending_bundles().await;
+    Json(BundlesResponse { stats, submitted, pending })
 }
