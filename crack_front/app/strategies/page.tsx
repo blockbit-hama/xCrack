@@ -28,6 +28,15 @@ export default function StrategiesPage() {
         setLoading(false);
       }
     })();
+    const id = setInterval(async () => {
+      const [s, st] = await Promise.all([
+        getStrategies().catch(() => strategies),
+        getStrategyStats().catch(() => ({})),
+      ]);
+      setStrategies(s); setStats(st);
+    }, 10000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onToggle = async (key: StrategyKey) => {
