@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use axum::{routing::{get, post}, Json, Router};
+use axum::response::sse::{Sse, Event};
+use futures_util::stream::{Stream, StreamExt};
 use serde::Serialize;
 
 use crate::config::Config;
@@ -27,6 +29,7 @@ impl ApiServer {
         let core_toggle = self.core.clone();
         let core_bundles = self.core.clone();
         let core_report = self.core.clone();
+        let core_logs = self.core.clone();
 
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
@@ -34,7 +37,8 @@ impl ApiServer {
             .route("/api/strategies", get(move || get_strategies(core_strategies.clone())))
             .route("/api/strategies/toggle", post(move |payload| toggle_strategy(core_toggle.clone(), payload)))
             .route("/api/bundles", get(move || get_bundles(core_bundles.clone())))
-            .route("/api/report", get(move || get_report(core_report.clone())));
+            .route("/api/report", get(move || get_report(core_report.clone())))
+            .route("/api/stream/logs", get(move || sse_logs(core_logs.clone())));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
         tracing::info!("🛰️ API server listening on http://{}", addr);
@@ -175,4 +179,19 @@ async fn get_report(core: SearcherCore) -> Json<PerformanceReport> {
         },
     };
     Json(report)
+}
+
+async fn sse_logs(core: SearcherCore) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
+    use tokio::time::{sleep, Duration};
+    let stream = futures_util::stream::unfold((), move |_| {
+        let core_clone = core.clone();
+        async move {
+            sleep(Duration::from_secs(2)).await;
+            let alerts = core_clone.get_alerts(true).await;
+            let json = serde_json::to_string(&alerts).unwrap_or_else(|_| "[]".to_string());
+            let ev = Event::default().event("alerts").data(json);
+            Some((Ok(ev), ()))
+        }
+    });
+    Sse::new(stream)
 }
