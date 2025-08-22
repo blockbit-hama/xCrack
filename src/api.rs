@@ -9,6 +9,7 @@ use futures_util::stream::{Stream, StreamExt};
 use serde::Serialize;
 
 use crate::config::Config;
+use serde_json::json;
 use crate::core::SearcherCore;
 use crate::core::bundle_manager::BundleStats;
 use crate::core::performance_tracker::PerformanceReport;
@@ -285,5 +286,90 @@ async fn post_settings(core: SearcherCore, Json(payload): Json<SettingsActionPay
             Json(serde_json::json!({"ok": true}))
         }
         _ => Json(serde_json::json!({"ok": false, "error": "unknown action"})),
+    }
+}
+
+#[derive(Serialize)]
+struct StrategyParamsResponse {
+    sandwich: crate::config::SandwichConfig,
+    liquidation: crate::config::LiquidationConfig,
+    micro_arbitrage: crate::config::MicroArbitrageConfig,
+}
+
+async fn get_strategy_params(config: Arc<crate::config::Config>) -> Json<StrategyParamsResponse> {
+    Json(StrategyParamsResponse {
+        sandwich: config.strategies.sandwich.clone(),
+        liquidation: config.strategies.liquidation.clone(),
+        micro_arbitrage: config.strategies.micro_arbitrage.clone(),
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct StrategyParamsUpdatePayload {
+    strategy: String,
+    updates: serde_json::Value,
+    #[serde(default)]
+    config_path: Option<String>,
+}
+
+async fn post_strategy_params(config: Arc<crate::config::Config>, Json(payload): Json<StrategyParamsUpdatePayload>) -> Json<serde_json::Value> {
+    // Clone Config to modify and save; runtime config remains unchanged until restart
+    let mut updated = (*config).clone();
+
+    // Merge helper
+    fn merge_into<T: serde::de::DeserializeOwned + serde::Serialize + Clone>(original: &T, updates: &serde_json::Value) -> Result<T, String> {
+        let mut val = serde_json::to_value(original).map_err(|e| e.to_string())?;
+        merge_json(&mut val, updates);
+        serde_json::from_value(val).map_err(|e| e.to_string())
+    }
+
+    // Shallow JSON merge (recursive for objects)
+    fn merge_json(base: &mut serde_json::Value, updates: &serde_json::Value) {
+        use serde_json::Value;
+        match (base, updates) {
+            (Value::Object(base_map), Value::Object(update_map)) => {
+                for (k, v) in update_map.iter() {
+                    match base_map.get_mut(k) {
+                        Some(b) => merge_json(b, v),
+                        None => { base_map.insert(k.clone(), v.clone()); },
+                    }
+                }
+            }
+            (base_slot, new_val) => { *base_slot = new_val.clone(); }
+        }
+    }
+
+    let result = match payload.strategy.as_str() {
+        "sandwich" => {
+            match merge_into(&updated.strategies.sandwich, &payload.updates) {
+                Ok(new_section) => { updated.strategies.sandwich = new_section; Ok(()) }
+                Err(e) => Err(e)
+            }
+        }
+        , "liquidation" => {
+            match merge_into(&updated.strategies.liquidation, &payload.updates) {
+                Ok(new_section) => { updated.strategies.liquidation = new_section; Ok(()) }
+                Err(e) => Err(e)
+            }
+        }
+        , "micro" | "micro_arbitrage" => {
+            match merge_into(&updated.strategies.micro_arbitrage, &payload.updates) {
+                Ok(new_section) => { updated.strategies.micro_arbitrage = new_section; Ok(()) }
+                Err(e) => Err(e)
+            }
+        }
+        _ => Err("unknown strategy".to_string()),
+    };
+
+    if let Err(err) = result { return Json(json!({"ok": false, "error": err})); }
+
+    // Attempt to save to file
+    let path = payload.config_path
+        .or_else(|| std::env::var("XCRACK_CONFIG_PATH").ok())
+        .unwrap_or_else(|| "config/default.toml".to_string());
+
+    match updated.save(&path).await {
+        Ok(_) => Json(json!({"ok": true, "saved": true, "path": path, "restart_required": true})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }
 }

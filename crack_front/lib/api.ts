@@ -58,6 +58,76 @@ export type StrategyStats = Record<string, {
   avg_analysis_time_ms: number;
 }>;
 
+// ---- Strategy Params ----
+export type SandwichParams = {
+  enabled: boolean;
+  min_target_value: string;
+  max_slippage: number;
+  max_frontrun_size: string;
+  min_profit_eth: string;
+  min_profit_percentage: number;
+  gas_multiplier: number;
+  max_gas_price_gwei: string;
+};
+
+export type LiquidationParams = {
+  enabled: boolean;
+  protocols: string[];
+  min_health_factor: number;
+  max_liquidation_amount: string;
+  min_profit_eth: string;
+  min_liquidation_amount: string;
+  gas_multiplier: number;
+  max_gas_price_gwei: string;
+  health_factor_threshold: number;
+  max_liquidation_size: string;
+};
+
+export type MicroParams = {
+  enabled: boolean;
+  exchanges: any[];
+  trading_pairs: string[];
+  min_profit_percentage: number;
+  min_profit_usd: string;
+  max_position_size: string;
+  max_concurrent_trades: number;
+  execution_timeout_ms: number;
+  latency_threshold_ms: number;
+  price_update_interval_ms: number;
+  order_book_depth: number;
+  slippage_tolerance: number;
+  fee_tolerance: number;
+  risk_limit_per_trade: string;
+  daily_volume_limit: string;
+  enable_cex_trading: boolean;
+  enable_dex_trading: boolean;
+  blacklist_tokens: string[];
+  priority_tokens: string[];
+  runtime_blacklist_ttl_secs: number;
+};
+
+export type StrategyParamsResp = {
+  sandwich: SandwichParams;
+  liquidation: LiquidationParams;
+  micro_arbitrage: MicroParams;
+}
+
+export async function getStrategyParams(): Promise<StrategyParamsResp | null> {
+  const res = await fetch(`${BASE}/api/strategies/params`, { cache: 'no-cache' });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function updateStrategyParams(strategy: 'sandwich'|'liquidation'|'micro', updates: Record<string, any>): Promise<{ ok: boolean; restart_required?: boolean; error?: string; }> {
+  const res = await fetch(`${BASE}/api/strategies/params`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ strategy, updates }),
+  });
+  if (!res.ok) return { ok: false, error: 'request failed' };
+  return res.json();
+}
+
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
 export async function getStatus(): Promise<Status> {
