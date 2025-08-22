@@ -309,6 +309,16 @@ impl StrategyManager {
         strategies.values().filter(|s| s.is_enabled()).count()
     }
 
+    /// 전략별 활성 여부 맵 조회
+    pub async fn get_strategy_enabled_map(&self) -> HashMap<StrategyType, bool> {
+        let strategies = self.strategies.read().await;
+        let mut map = HashMap::new();
+        for (ty, strat) in strategies.iter() {
+            map.insert(*ty, strat.is_enabled());
+        }
+        map
+    }
+
     /// 특정 전략 조회
     pub async fn get_strategy(&self, strategy_type: StrategyType) -> Option<Arc<dyn Strategy + Send + Sync>> {
         let strategies = self.strategies.read().await;

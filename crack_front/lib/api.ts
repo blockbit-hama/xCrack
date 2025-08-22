@@ -7,6 +7,9 @@ type Status = {
   uptime_seconds: number;
 };
 
+export type StrategyKey = 'sandwich' | 'liquidation' | 'micro' | 'cross';
+export type Strategies = Record<StrategyKey, boolean>;
+
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
 export async function getStatus(): Promise<Status> {
@@ -29,4 +32,43 @@ export function defaultStatus(): Status {
     success_rate: 0,
     uptime_seconds: 0,
   };
+}
+
+// ---- Strategies API ----
+function normalizeStrategiesMap(input: Record<string, boolean>): Strategies {
+  // Backend enum keys: Sandwich, Liquidation, MicroArbitrage, CrossChainArbitrage
+  const map: Strategies = { sandwich: false, liquidation: false, micro: false, cross: false };
+  Object.entries(input || {}).forEach(([k, v]) => {
+    switch (k) {
+      case 'Sandwich':
+        map.sandwich = v; break;
+      case 'Liquidation':
+        map.liquidation = v; break;
+      case 'MicroArbitrage':
+        map.micro = v; break;
+      case 'CrossChainArbitrage':
+        map.cross = v; break;
+      default:
+        break;
+    }
+  });
+  return map;
+}
+
+export async function getStrategies(): Promise<Strategies> {
+  const res = await fetch(`${BASE}/api/strategies`, { cache: 'no-cache' });
+  if (!res.ok) return { sandwich: false, liquidation: false, micro: false, cross: false };
+  const json = await res.json();
+  return normalizeStrategiesMap(json.enabled || {});
+}
+
+export async function toggleStrategy(key: StrategyKey, enabled: boolean): Promise<boolean> {
+  const res = await fetch(`${BASE}/api/strategies/toggle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ strategy: key, enabled }),
+  });
+  if (!res.ok) return false;
+  const json = await res.json();
+  return !!json.ok;
 }

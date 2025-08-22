@@ -36,7 +36,7 @@ pub struct SearcherCore {
     metrics: Arc<RwLock<PerformanceMetrics>>,
     
     // 핵심 컴포넌트들
-    strategy_manager: Arc<StrategyManager>,
+    pub(crate) strategy_manager: Arc<StrategyManager>,
     bundle_manager: Arc<BundleManager>,
     mempool_monitor: Arc<CoreMempoolMonitor>,
     performance_tracker: Arc<PerformanceTracker>,

@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::{routing::get, Json, Router};
+use axum::{routing::{get, post}, Json, Router};
 use serde::Serialize;
 
 use crate::config::Config;
@@ -20,11 +20,15 @@ impl ApiServer {
     }
 
     pub async fn start(&self) -> Result<()> {
-        let core = self.core.clone();
+        let core_status = self.core.clone();
+        let core_strategies = self.core.clone();
+        let core_toggle = self.core.clone();
 
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
-            .route("/api/status", get(move || get_status(core.clone())));
+            .route("/api/status", get(move || get_status(core_status.clone())))
+            .route("/api/strategies", get(move || get_strategies(core_strategies.clone())))
+            .route("/api/strategies/toggle", post(move |payload| toggle_strategy(core_toggle.clone(), payload)));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
         tracing::info!("🛰️ API server listening on http://{}", addr);
@@ -92,4 +96,39 @@ async fn get_status(core: SearcherCore) -> Json<StatusResponse> {
         success_rate: status.performance_metrics.success_rate,
         uptime_seconds: status.uptime_seconds,
     })
+}
+
+#[derive(Serialize)]
+struct StrategiesResponse {
+    enabled: std::collections::HashMap<crate::types::StrategyType, bool>,
+}
+
+async fn get_strategies(core: SearcherCore) -> Json<StrategiesResponse> {
+    let map = core
+        .strategy_manager
+        .get_strategy_enabled_map()
+        .await;
+    Json(StrategiesResponse { enabled: map })
+}
+
+#[derive(serde::Deserialize)]
+struct TogglePayload {
+    strategy: String,
+    enabled: bool,
+}
+
+async fn toggle_strategy(core: SearcherCore, Json(payload): Json<TogglePayload>) -> Json<serde_json::Value> {
+    use crate::types::StrategyType;
+    let ty = match payload.strategy.as_str() {
+        "sandwich" => StrategyType::Sandwich,
+        "liquidation" => StrategyType::Liquidation,
+        "micro" | "micro_arbitrage" => StrategyType::MicroArbitrage,
+        "cross" | "cross_chain" => StrategyType::CrossChainArbitrage,
+        _ => return Json(serde_json::json!({"ok": false, "error": "unknown strategy"})),
+    };
+
+    if let Err(e) = core.set_strategy_enabled(ty, payload.enabled).await {
+        return Json(serde_json::json!({"ok": false, "error": e.to_string()}));
+    }
+    Json(serde_json::json!({"ok": true}))
 }
