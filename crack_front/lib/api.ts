@@ -27,6 +27,15 @@ export type BundlesSummary = {
   pending_count: number;
 };
 
+export type BundleRow = {
+  id: string;
+  strategy: string;
+  expected_profit: string;
+  gas_estimate: number;
+  timestamp: string;
+  state: 'submitted' | 'pending';
+};
+
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
 export async function getStatus(): Promise<Status> {
@@ -113,4 +122,21 @@ export async function getBundlesSummary(): Promise<BundlesSummary> {
   const submitted_count = Array.isArray(json.submitted) ? json.submitted.length : 0;
   const pending_count = Array.isArray(json.pending) ? json.pending.length : 0;
   return { stats: json.stats || {}, submitted_count, pending_count } as BundlesSummary;
+}
+
+export async function getBundlesRecent(limit = 5): Promise<BundleRow[]> {
+  const res = await fetch(`${BASE}/api/bundles`, { cache: 'no-cache' });
+  if (!res.ok) return [];
+  const json = await res.json();
+  const mapList = (arr: any[], state: 'submitted' | 'pending'): BundleRow[] =>
+    (arr || []).slice(0, limit).map((b: any) => ({
+      id: b.id,
+      strategy: String(b.strategy || ''),
+      expected_profit: typeof b.expected_profit === 'string' ? b.expected_profit : JSON.stringify(b.expected_profit ?? '0'),
+      gas_estimate: Number(b.gas_estimate || 0),
+      timestamp: b.timestamp || '',
+      state,
+    }));
+  return [...mapList(json.submitted, 'submitted'), ...mapList(json.pending, 'pending')]
+    .slice(0, limit);
 }
