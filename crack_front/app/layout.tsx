@@ -13,6 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav style={{ display: 'flex', gap: 12 }}>
               <a href="/" style={{ textDecoration: 'none' }}>대시보드</a>
               <a href="/strategies" style={{ textDecoration: 'none' }}>전략</a>
+              <a href="/bundles" style={{ textDecoration: 'none' }}>번들</a>
               <a href="/logs" style={{ textDecoration: 'none' }}>로그</a>
               <a href="/settings" style={{ textDecoration: 'none' }}>설정</a>
             </nav>
