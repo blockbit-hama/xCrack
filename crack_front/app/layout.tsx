@@ -4,6 +4,7 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const ApiHealth = require('./components/ApiHealth').default;
   return (
     <html lang="ko">
       <body style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial' }}>
@@ -17,6 +18,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/logs" style={{ textDecoration: 'none' }}>로그</a>
               <a href="/settings" style={{ textDecoration: 'none' }}>설정</a>
             </nav>
+            <div>
+              <ApiHealth />
+            </div>
           </header>
           {children}
         </div>
