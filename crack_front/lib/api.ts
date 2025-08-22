@@ -10,6 +10,23 @@ type Status = {
 export type StrategyKey = 'sandwich' | 'liquidation' | 'micro' | 'cross';
 export type Strategies = Record<StrategyKey, boolean>;
 
+export type BundleStatsInfo = {
+  total_created: number;
+  total_submitted: number;
+  total_included: number;
+  total_failed: number;
+  total_profit: unknown;
+  total_gas_spent: unknown;
+  avg_submission_time_ms: number;
+  success_rate: number;
+};
+
+export type BundlesSummary = {
+  stats: BundleStatsInfo;
+  submitted_count: number;
+  pending_count: number;
+};
+
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
 export async function getStatus(): Promise<Status> {
@@ -71,4 +88,29 @@ export async function toggleStrategy(key: StrategyKey, enabled: boolean): Promis
   if (!res.ok) return false;
   const json = await res.json();
   return !!json.ok;
+}
+
+// ---- Bundles API ----
+export async function getBundlesSummary(): Promise<BundlesSummary> {
+  const res = await fetch(`${BASE}/api/bundles`, { cache: 'no-cache' });
+  if (!res.ok) {
+    return {
+      stats: {
+        total_created: 0,
+        total_submitted: 0,
+        total_included: 0,
+        total_failed: 0,
+        total_profit: 0,
+        total_gas_spent: 0,
+        avg_submission_time_ms: 0,
+        success_rate: 0,
+      },
+      submitted_count: 0,
+      pending_count: 0,
+    };
+  }
+  const json = await res.json();
+  const submitted_count = Array.isArray(json.submitted) ? json.submitted.length : 0;
+  const pending_count = Array.isArray(json.pending) ? json.pending.length : 0;
+  return { stats: json.stats || {}, submitted_count, pending_count } as BundlesSummary;
 }
