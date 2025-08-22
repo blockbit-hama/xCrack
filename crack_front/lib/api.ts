@@ -36,6 +36,22 @@ export type BundleRow = {
   state: 'submitted' | 'pending';
 };
 
+export type PerformanceReportSummary = {
+  transactions_processed: number;
+  opportunities_found: number;
+  bundles_submitted: number;
+  bundles_included: number;
+  total_profit_eth: string;
+  success_rate: number;
+  avg_analysis_time_ms: number;
+  avg_submission_time_ms: number;
+};
+
+export type PerformanceReport = {
+  summary: PerformanceReportSummary;
+  recommendations: string[];
+};
+
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
 export async function getStatus(): Promise<Status> {
@@ -139,4 +155,26 @@ export async function getBundlesRecent(limit = 5): Promise<BundleRow[]> {
     }));
   return [...mapList(json.submitted, 'submitted'), ...mapList(json.pending, 'pending')]
     .slice(0, limit);
+}
+
+// ---- Report API ----
+export async function getReport(): Promise<PerformanceReport> {
+  const res = await fetch(`${BASE}/api/report`, { cache: 'no-cache' });
+  if (!res.ok) {
+    return {
+      summary: {
+        transactions_processed: 0,
+        opportunities_found: 0,
+        bundles_submitted: 0,
+        bundles_included: 0,
+        total_profit_eth: '0',
+        success_rate: 0,
+        avg_analysis_time_ms: 0,
+        avg_submission_time_ms: 0,
+      },
+      recommendations: [],
+    };
+  }
+  const json = await res.json();
+  return { summary: json.summary, recommendations: json.recommendations } as PerformanceReport;
 }

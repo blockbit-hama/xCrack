@@ -1,12 +1,13 @@
-import { getStatus, defaultStatus, getBundlesSummary, getBundlesRecent } from "../lib/api";
+import { getStatus, defaultStatus, getBundlesSummary, getBundlesRecent, getReport } from "../lib/api";
 
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
-  const [status, bundles, recent] = await Promise.all([
+  const [status, bundles, recent, report] = await Promise.all([
     getStatus().catch(() => defaultStatus()),
     getBundlesSummary().catch(() => ({ stats: { total_created: 0, total_submitted: 0, total_included: 0, total_failed: 0, total_profit: 0, total_gas_spent: 0, avg_submission_time_ms: 0, success_rate: 0 }, submitted_count: 0, pending_count: 0 })),
     getBundlesRecent(5).catch(() => []),
+    getReport().catch(() => ({ summary: { transactions_processed: 0, opportunities_found: 0, bundles_submitted: 0, bundles_included: 0, total_profit_eth: '0', success_rate: 0, avg_analysis_time_ms: 0, avg_submission_time_ms: 0 }, recommendations: [] })),
   ]);
 
   return (
@@ -63,6 +64,20 @@ export default async function Page() {
       <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 16 }}>
         <h3>가동 시간</h3>
         <p>{status.uptime_seconds}s</p>
+      </div>
+      <div style={{ gridColumn: 'span 3', border: '1px solid #eee', borderRadius: 8, padding: 16 }}>
+        <h3>요약 지표 & 권장사항</h3>
+        <div style={{ display: 'flex', gap: 24, marginBottom: 12 }}>
+          <div>평균 분석 시간: {report.summary.avg_analysis_time_ms.toFixed(2)} ms</div>
+          <div>평균 제출 시간: {report.summary.avg_submission_time_ms.toFixed(2)} ms</div>
+          <div>성공률: {(report.summary.success_rate * 100).toFixed(2)}%</div>
+        </div>
+        <ul>
+          {report.recommendations.slice(0, 3).map((r, i) => (
+            <li key={i}>• {r}</li>
+          ))}
+          {report.recommendations.length === 0 && <li>권장사항 없음</li>}
+        </ul>
       </div>
     </main>
   );
