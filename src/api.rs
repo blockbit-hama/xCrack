@@ -8,6 +8,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::core::SearcherCore;
 use crate::core::bundle_manager::BundleStats;
+use crate::core::performance_tracker::PerformanceReport;
 
 #[derive(Clone)]
 pub struct ApiServer {
@@ -25,13 +26,15 @@ impl ApiServer {
         let core_strategies = self.core.clone();
         let core_toggle = self.core.clone();
         let core_bundles = self.core.clone();
+        let core_report = self.core.clone();
 
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
             .route("/api/status", get(move || get_status(core_status.clone())))
             .route("/api/strategies", get(move || get_strategies(core_strategies.clone())))
             .route("/api/strategies/toggle", post(move |payload| toggle_strategy(core_toggle.clone(), payload)))
-            .route("/api/bundles", get(move || get_bundles(core_bundles.clone())));
+            .route("/api/bundles", get(move || get_bundles(core_bundles.clone())))
+            .route("/api/report", get(move || get_report(core_report.clone())));
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
         tracing::info!("🛰️ API server listening on http://{}", addr);
@@ -148,4 +151,28 @@ async fn get_bundles(core: SearcherCore) -> Json<BundlesResponse> {
     let submitted = core.list_submitted_bundles().await;
     let pending = core.list_pending_bundles().await;
     Json(BundlesResponse { stats, submitted, pending })
+}
+
+async fn get_report(core: SearcherCore) -> Json<PerformanceReport> {
+    let report = match core.generate_performance_report().await {
+        Ok(r) => r,
+        Err(_) => crate::core::performance_tracker::PerformanceReport {
+            timestamp: 0,
+            uptime_seconds: 0,
+            summary: crate::core::performance_tracker::PerformanceSummary {
+                transactions_processed: 0,
+                opportunities_found: 0,
+                bundles_submitted: 0,
+                bundles_included: 0,
+                total_profit_eth: "0".to_string(),
+                success_rate: 0.0,
+                avg_analysis_time_ms: 0.0,
+                avg_submission_time_ms: 0.0,
+            },
+            detailed_stats: core.get_detailed_stats().await,
+            recent_alerts: vec![],
+            recommendations: vec![],
+        },
+    };
+    Json(report)
 }
