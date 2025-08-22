@@ -19,6 +19,26 @@ export default async function StrategyDetail({ params }: { params: { key: string
   const st: any = (stats as any)[display] || (stats as any)[key] || undefined;
   const bundles = recent.filter((b) => (b.strategy || "").toLowerCase().includes(display.toLowerCase()) || (b.strategy || "").toLowerCase().includes(key.toLowerCase()));
 
+  // Build simple profit trend (last N) for inline sparkline (no deps)
+  const profits = bundles
+    .map((b) => {
+      const s = String(b.expected_profit || "0").replace(/[^0-9.\-eE]/g, "");
+      const v = parseFloat(s || "0");
+      return isNaN(v) ? 0 : v;
+    })
+    .slice(0, 20)
+    .reverse();
+  const maxP = profits.length ? Math.max(...profits) : 1;
+  const minP = profits.length ? Math.min(...profits) : 0;
+  const width = 240;
+  const height = 60;
+  const points = profits.map((p, i) => {
+    const x = (i / Math.max(1, profits.length - 1)) * width;
+    const norm = maxP === minP ? 0.5 : (p - minP) / (maxP - minP);
+    const y = height - norm * height;
+    return `${x},${y}`;
+  }).join(" ");
+
   return (
     <main>
       <div style={{ marginBottom: 12 }}>
@@ -37,6 +57,12 @@ export default async function StrategyDetail({ params }: { params: { key: string
         <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 12 }}>
           <div style={{ fontSize: 12, color: '#888' }}>평균 분석 시간</div>
           <div style={{ fontWeight: 700 }}>{st ? `${st.avg_analysis_time_ms.toFixed(1)} ms` : '-'}</div>
+        </div>
+        <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 12 }}>
+          <div style={{ fontSize: 12, color: '#888' }}>최근 수익 추세</div>
+          <svg width={width} height={height} style={{ display: 'block' }}>
+            <polyline fill="none" stroke="#2563eb" strokeWidth="2" points={points} />
+          </svg>
         </div>
       </div>
 
