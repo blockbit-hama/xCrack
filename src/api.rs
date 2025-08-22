@@ -28,7 +28,8 @@ impl ApiServer {
         let core_status = self.core.clone();
         let core_strategies = self.core.clone();
         let core_toggle = self.core.clone();
-        let core_bundles = self.core.clone();
+        let core_bundles_list = self.core.clone();
+        let core_bundles_detail = self.core.clone();
         let core_report = self.core.clone();
         let core_logs = self.core.clone();
         let core_stats = self.core.clone();
@@ -48,7 +49,8 @@ impl ApiServer {
             .route("/api/strategies", get(move || get_strategies(core_strategies.clone())))
             .route("/api/strategies/toggle", post(move |payload| toggle_strategy(core_toggle.clone(), payload)))
             .route("/api/strategies/stats", get(move || get_strategy_stats(core_stats.clone())))
-            .route("/api/bundles", get(move || get_bundles(core_bundles.clone())))
+            .route("/api/bundles", get(move || get_bundles(core_bundles_list.clone())))
+            .route("/api/bundles/:id", get(move |axum::extract::Path(id): axum::extract::Path<String>| get_bundle_by_id(core_bundles_detail.clone(), id)))
             .route("/api/report", get(move || get_report(core_report.clone())))
             .route("/api/stream/logs", get(move || sse_logs(core_logs.clone())))
             .route("/api/settings", get(move || get_settings(Arc::clone(&config_for_settings), core_for_settings_get.clone())))
@@ -222,6 +224,13 @@ async fn get_report(core: SearcherCore) -> Json<PerformanceReport> {
         },
     };
     Json(report)
+}
+
+async fn get_bundle_by_id(core: SearcherCore, id: String) -> Json<serde_json::Value> {
+    if let Some(b) = core.get_bundle_by_id(&id).await {
+        return Json(serde_json::json!({"ok": true, "bundle": b}));
+    }
+    Json(serde_json::json!({"ok": false, "error": "not_found"}))
 }
 
 async fn sse_logs(core: SearcherCore) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {

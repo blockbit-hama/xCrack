@@ -170,6 +170,14 @@ export async function getBundlesRecent(limit = 5): Promise<BundleRow[]> {
     .slice(0, limit);
 }
 
+// ---- Bundle detail ----
+export async function getBundle(id: string): Promise<any | null> {
+  const res = await fetch(`${BASE}/api/bundles/${id}`, { cache: 'no-cache' });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json.bundle || null;
+}
+
 // ---- Report API ----
 export async function getReport(): Promise<PerformanceReport> {
   const res = await fetch(`${BASE}/api/report`, { cache: 'no-cache' });

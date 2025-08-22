@@ -314,6 +314,19 @@ impl BundleManager {
         submitted.values().cloned().collect()
     }
 
+    /// 번들 ID로 조회 (대기/제출 모두 검색)
+    pub async fn get_bundle_by_id(&self, id: &str) -> Option<Bundle> {
+        {
+            let pending = self.pending_bundles.lock().await;
+            if let Some(b) = pending.get(id) { return Some(b.clone()); }
+        }
+        {
+            let submitted = self.submitted_bundles.lock().await;
+            if let Some(b) = submitted.get(id) { return Some(b.clone()); }
+        }
+        None
+    }
+
     /// 번들 정리 (만료된 번들 제거)
     pub async fn cleanup_expired_bundles(&self) -> Result<()> {
         let mut pending = self.pending_bundles.lock().await;

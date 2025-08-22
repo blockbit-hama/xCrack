@@ -483,6 +483,11 @@ impl SearcherCore {
         self.bundle_manager.get_pending_bundles().await
     }
 
+    /// 번들 ID로 단일 조회(노출용)
+    pub async fn get_bundle_by_id(&self, id: &str) -> Option<Bundle> {
+        self.bundle_manager.get_bundle_by_id(id).await
+    }
+
     /// 통계 초기화
     pub async fn reset_stats(&self) -> Result<()> {
         self.performance_tracker.reset_stats().await
