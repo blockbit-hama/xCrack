@@ -200,8 +200,29 @@ export async function getStrategyStats(): Promise<StrategyStats> {
 
 // ---- Bundles API ----
 export async function getBundlesSummary(): Promise<BundlesSummary> {
-  const res = await fetch(`${BASE}/api/bundles`, { cache: 'no-cache' });
-  if (!res.ok) {
+  try {
+    const res = await fetch(`${BASE}/api/bundles`, { cache: 'no-cache' });
+    if (!res.ok) {
+      return {
+        stats: {
+          total_created: 0,
+          total_submitted: 0,
+          total_included: 0,
+          total_failed: 0,
+          total_profit: 0,
+          total_gas_spent: 0,
+          avg_submission_time_ms: 0,
+          success_rate: 0,
+        },
+        submitted_count: 0,
+        pending_count: 0,
+      };
+    }
+    const json = await res.json();
+    const submitted_count = Array.isArray(json.submitted) ? json.submitted.length : 0;
+    const pending_count = Array.isArray(json.pending) ? json.pending.length : 0;
+    return { stats: json.stats || {}, submitted_count, pending_count } as BundlesSummary;
+  } catch {
     return {
       stats: {
         total_created: 0,
@@ -217,35 +238,39 @@ export async function getBundlesSummary(): Promise<BundlesSummary> {
       pending_count: 0,
     };
   }
-  const json = await res.json();
-  const submitted_count = Array.isArray(json.submitted) ? json.submitted.length : 0;
-  const pending_count = Array.isArray(json.pending) ? json.pending.length : 0;
-  return { stats: json.stats || {}, submitted_count, pending_count } as BundlesSummary;
 }
 
 export async function getBundlesRecent(limit = 5): Promise<BundleRow[]> {
-  const res = await fetch(`${BASE}/api/bundles`, { cache: 'no-cache' });
-  if (!res.ok) return [];
-  const json = await res.json();
-  const mapList = (arr: any[], state: 'submitted' | 'pending'): BundleRow[] =>
-    (arr || []).slice(0, limit).map((b: any) => ({
-      id: b.id,
-      strategy: String(b.strategy || ''),
-      expected_profit: typeof b.expected_profit === 'string' ? b.expected_profit : JSON.stringify(b.expected_profit ?? '0'),
-      gas_estimate: Number(b.gas_estimate || 0),
-      timestamp: b.timestamp || '',
-      state,
-    }));
-  return [...mapList(json.submitted, 'submitted'), ...mapList(json.pending, 'pending')]
-    .slice(0, limit);
+  try {
+    const res = await fetch(`${BASE}/api/bundles`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const mapList = (arr: any[], state: 'submitted' | 'pending'): BundleRow[] =>
+      (arr || []).slice(0, limit).map((b: any) => ({
+        id: b.id,
+        strategy: String(b.strategy || ''),
+        expected_profit: typeof b.expected_profit === 'string' ? b.expected_profit : JSON.stringify(b.expected_profit ?? '0'),
+        gas_estimate: Number(b.gas_estimate || 0),
+        timestamp: b.timestamp || '',
+        state,
+      }));
+    return [...mapList(json.submitted, 'submitted'), ...mapList(json.pending, 'pending')]
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
 }
 
 // ---- Bundle detail ----
 export async function getBundle(id: string): Promise<any | null> {
-  const res = await fetch(`${BASE}/api/bundles/${id}`, { cache: 'no-cache' });
-  if (!res.ok) return null;
-  const json = await res.json();
-  return json.bundle || null;
+  try {
+    const res = await fetch(`${BASE}/api/bundles/${id}`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.bundle || null;
+  } catch {
+    return null;
+  }
 }
 
 // ---- Report API ----

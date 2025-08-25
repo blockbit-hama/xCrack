@@ -58,13 +58,13 @@ export default function LogsPage() {
 
   return (
     <main>
-      <h2 style={{ marginBottom: 12 }}>실시간 로그</h2>
-      <div style={{ display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center' }}>
+      <h2 className="text-xl font-semibold mb-3">실시간 로그</h2>
+      <div className="flex flex-wrap gap-3 mb-3 items-center">
         <span>상태: {connected ? '연결됨' : '연결 끊김'} {paused && '(일시정지)'}</span>
-        <button onClick={() => setPaused((p) => !p)} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer' }}>
+        <button onClick={() => setPaused((p) => !p)} className="px-3 py-2 rounded-md border border-gray-300 cursor-pointer">
           {paused ? '재개' : '일시정지'}
         </button>
-        <select value={level} onChange={(e) => setLevel(e.target.value as any)} style={{ padding: 6, borderRadius: 6, border: '1px solid #ddd' }}>
+        <select value={level} onChange={(e) => setLevel(e.target.value as any)} className="px-3 py-2 rounded-md border border-gray-300">
           <option value="ALL">ALL</option>
           <option value="Info">Info</option>
           <option value="Warning">Warning</option>
@@ -75,9 +75,9 @@ export default function LogsPage() {
           placeholder="메시지 검색…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          style={{ flex: 1, padding: 6, borderRadius: 6, border: '1px solid #ddd' }}
+          className="flex-1 min-w-[200px] px-3 py-2 rounded-md border border-gray-300"
         />
-        <button onClick={() => setAlerts([])} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer' }}>지우기</button>
+        <button onClick={() => setAlerts([])} className="px-3 py-2 rounded-md border border-gray-300 cursor-pointer">지우기</button>
         <button
           onClick={async () => {
             setMsg("");
@@ -88,7 +88,7 @@ export default function LogsPage() {
               setMsg('알림 전체 확인 완료');
             } catch (e: any) { setMsg(`실패: ${e.message || e}`); }
           }}
-          style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer' }}
+          className="px-3 py-2 rounded-md border border-gray-300 cursor-pointer"
         >알림 전체 확인</button>
         <button
           onClick={async () => {
@@ -100,31 +100,31 @@ export default function LogsPage() {
               setMsg('통계 초기화 완료');
             } catch (e: any) { setMsg(`실패: ${e.message || e}`); }
           }}
-          style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ddd', cursor: 'pointer' }}
+          className="px-3 py-2 rounded-md border border-gray-300 cursor-pointer"
         >통계 초기화</button>
       </div>
-      {msg && <div style={{ marginBottom: 8, color: '#2563eb' }}>{msg}</div>}
+      {msg && <div className="mb-2 text-blue-600">{msg}</div>}
 
-      <div style={{ border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div className="border rounded-lg overflow-hidden">
+        <table className="w-full border-collapse">
           <thead>
-            <tr>
-              <th style={{ textAlign: 'left', padding: 8 }}>시간</th>
-              <th style={{ textAlign: 'left', padding: 8 }}>레벨</th>
-              <th style={{ textAlign: 'left', padding: 8 }}>메시지</th>
+            <tr className="text-left">
+              <th className="p-2">시간</th>
+              <th className="p-2">레벨</th>
+              <th className="p-2">메시지</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((a) => (
-              <tr key={a.id}>
-                <td style={{ padding: 8, borderTop: '1px solid #f5f5f5', whiteSpace: 'nowrap' }}>{new Date(a.timestamp * 1000).toLocaleString()}</td>
-                <td style={{ padding: 8, borderTop: '1px solid #f5f5f5' }}>{a.level}</td>
-                <td style={{ padding: 8, borderTop: '1px solid #f5f5f5' }}>{a.message}</td>
+              <tr key={a.id} className="border-t">
+                <td className="p-2 whitespace-nowrap">{new Date(a.timestamp * 1000).toLocaleString()}</td>
+                <td className="p-2">{a.level}</td>
+                <td className="p-2">{a.message}</td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={3} style={{ padding: 12, color: '#888' }}>표시할 로그가 없습니다</td>
+                <td colSpan={3} className="p-3 text-gray-500">표시할 로그가 없습니다</td>
               </tr>
             )}
           </tbody>
