@@ -26,13 +26,13 @@
 cd crack_front
 npm install
 npm run dev
-# → http://localhost:3000
+# → http://localhost:7777
 ```
 - 프로덕션 빌드/실행:
 ```bash
 npm run build
 npm start
-# → http://localhost:3000
+# → http://localhost:7777
 ```
 - 백엔드 URL 설정(옵션):
 ```bash

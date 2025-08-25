@@ -90,14 +90,14 @@ npm install
 
 # 개발 모드
 npm run dev
-# → http://localhost:3000 접속
+# → http://localhost:7777 접속
 ```
 
 프로덕션 빌드/실행:
 ```bash
 npm run build
 npm start
-# → http://localhost:3000
+# → http://localhost:7777
 ```
 
 백엔드 API 주소 설정:
