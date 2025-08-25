@@ -82,7 +82,30 @@ export async function getSystemInfo(): Promise<SystemInfo | null> {
   try {
     const res = await fetch(`${BASE}/api/system`, { cache: 'no-cache' });
     if (!res.ok) return null;
-    return res.json();
+    const data = await res.json();
+    // Normalize legacy string array format -> rich object format
+    if (Array.isArray(data?.external_apis)) {
+      data.external_apis = data.external_apis.map((item: any) => {
+        if (typeof item === 'string') {
+          return {
+            name: item,
+            category: 'external',
+            description: item,
+            docs: null,
+            env: [],
+          } as ExternalApiInfo;
+        }
+        // Ensure required fields exist
+        return {
+          name: item?.name ?? 'Unknown',
+          category: item?.category ?? 'external',
+          description: item?.description ?? item?.name ?? '',
+          docs: item?.docs ?? null,
+          env: Array.isArray(item?.env) ? item.env : [],
+        } as ExternalApiInfo;
+      });
+    }
+    return data as SystemInfo;
   } catch {
     return null;
   }
