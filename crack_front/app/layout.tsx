@@ -1,3 +1,4 @@
+import './globals.css';
 export const metadata = {
   title: 'xCrack Dashboard',
   description: 'xCrack MEV Searcher UI',
@@ -9,22 +10,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ko">
       <body style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial', margin: 0 }}>
         <div style={{ display: 'flex', minHeight: '100vh' }}>
-          <aside style={{ width: 220, background: '#0b0b0c', color: '#fff', padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <aside className="w-[220px] bg-black text-white p-4 flex flex-col gap-4">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ fontWeight: 800, fontSize: 16 }}>xCrack</div>
             </div>
-            <nav style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <a href="/" style={{ color: '#fff', textDecoration: 'none', padding: '8px 10px', borderRadius: 8, background: 'transparent' }}>대시보드</a>
-              <a href="/strategies" style={{ color: '#fff', textDecoration: 'none', padding: '8px 10px', borderRadius: 8, background: 'transparent' }}>전략</a>
-              <a href="/bundles" style={{ color: '#fff', textDecoration: 'none', padding: '8px 10px', borderRadius: 8, background: 'transparent' }}>번들</a>
-              <a href="/logs" style={{ color: '#fff', textDecoration: 'none', padding: '8px 10px', borderRadius: 8, background: 'transparent' }}>로그</a>
-              <a href="/settings" style={{ color: '#fff', textDecoration: 'none', padding: '8px 10px', borderRadius: 8, background: 'transparent' }}>설정</a>
+            <nav className="flex flex-col gap-2">
+              <a href="/" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">대시보드</a>
+              <a href="/strategies" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">전략</a>
+              <a href="/bundles" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">번들</a>
+              <a href="/logs" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">로그</a>
+              <a href="/settings" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">설정</a>
             </nav>
-            <div style={{ marginTop: 'auto' }}>
+            <div className="mt-auto">
               <ApiHealth />
             </div>
           </aside>
-          <main style={{ flex: 1, padding: 24 }}>
+          <main className="flex-1 p-6">
             {children}
           </main>
         </div>
