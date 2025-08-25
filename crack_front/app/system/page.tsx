@@ -29,11 +29,38 @@ export default async function SystemPage() {
             <div className="text-sm break-all">{sys.flashbots_relay_url}</div>
           </div>
           <div className="border rounded-lg p-4 md:col-span-2">
-            <div className="text-gray-500 text-sm">외부 API</div>
-            <ul className="list-disc pl-5 text-sm">
-              {sys.external_apis.map((e, i) => <li key={i}>{e}</li>)}
-              {sys.external_apis.length === 0 && <li>없음</li>}
-            </ul>
+            <div className="text-gray-500 text-sm mb-2">외부 API</div>
+            {sys.external_apis.length === 0 ? (
+              <div className="text-sm text-gray-500">없음</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {sys.external_apis.map((api, i) => (
+                  <div key={i} className="border rounded p-3">
+                    <div className="font-semibold text-sm">{api.name}</div>
+                    <div className="text-xs text-gray-500">{api.category}</div>
+                    <div className="text-sm mt-1">{api.description}</div>
+                    {api.docs && (
+                      <div className="text-xs mt-1">
+                        문서: <a className="text-blue-600 underline" href={api.docs} target="_blank">{api.docs}</a>
+                      </div>
+                    )}
+                    {api.env?.length ? (
+                      <div className="mt-2">
+                        <div className="text-xs text-gray-500">관련 환경변수</div>
+                        <ul className="text-xs mt-1">
+                          {api.env.map((v, j) => (
+                            <li key={j} className="flex items-center gap-2">
+                              <code className="bg-gray-100 px-1 rounded">{v.key}</code>
+                              <span className={v.set ? 'text-emerald-600' : 'text-gray-400'}>{v.set ? '설정됨' : '미설정'}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

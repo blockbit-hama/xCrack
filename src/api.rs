@@ -14,6 +14,18 @@ use crate::core::SearcherCore;
 use crate::core::bundle_manager::BundleStats;
 use crate::core::performance_tracker::PerformanceReport;
 #[derive(Serialize)]
+struct EnvVarStatus { key: String, set: bool }
+
+#[derive(Serialize)]
+struct ExternalApiInfo {
+    name: String,
+    category: String,
+    description: String,
+    docs: Option<String>,
+    env: Vec<EnvVarStatus>,
+}
+
+#[derive(Serialize)]
 struct SystemInfoResponse {
     api_mode: String,
     network: String,
@@ -21,20 +33,57 @@ struct SystemInfoResponse {
     ws_url: Option<String>,
     flashbots_relay_url: String,
     simulation_mode: bool,
-    external_apis: Vec<String>,
+    external_apis: Vec<ExternalApiInfo>,
 }
 
 async fn get_system(config: Arc<crate::config::Config>, _core: SearcherCore) -> Json<SystemInfoResponse> {
     // Derive API_MODE from env observed at startup context is not tracked; expose guess by simulation flag
     let api_mode = if config.flashbots.simulation_mode { "mock" } else { "real" }.to_string();
-    let mut external = Vec::new();
-    // Presence hints
-    if !config.flashbots.relay_url.is_empty() { external.push(format!("Flashbots: {}", config.flashbots.relay_url)); }
-    // Strategy related external API hints (not all may be used at runtime)
-    external.push("0x (quotes)".to_string());
-    external.push("1inch (quotes)".to_string());
-    external.push("Chainlink / Uniswap TWAP (oracle)".to_string());
-    external.push("LiFi (bridge)".to_string());
+    fn env_status(keys: &[&str]) -> Vec<EnvVarStatus> {
+        keys.iter().map(|k| EnvVarStatus { key: k.to_string(), set: std::env::var(k).is_ok() }).collect()
+    }
+
+    let mut external: Vec<ExternalApiInfo> = Vec::new();
+    // Flashbots
+    external.push(ExternalApiInfo {
+        name: "Flashbots Relay".to_string(),
+        category: "MEV bundle submission".to_string(),
+        description: "Flashbots 리레이를 통해 프라이빗 번들을 제출합니다. 사용 전략: Sandwich, Liquidation (번들 제출)".to_string(),
+        docs: Some("https://docs.flashbots.net".to_string()),
+        env: env_status(&["FLASHBOTS_RELAY_URL", "PRIVATE_KEY"]),
+    });
+    // 0x
+    external.push(ExternalApiInfo {
+        name: "0x Quotes".to_string(),
+        category: "DEX aggregation".to_string(),
+        description: "0x Aggregator API로 스왑 경로 견적을 조회합니다. 사용 전략: Sandwich(백업/슬리피지 검증), Liquidation(담보 매각 경로 견적)".to_string(),
+        docs: Some("https://docs.0x.org/".to_string()),
+        env: env_status(&[]),
+    });
+    // 1inch
+    external.push(ExternalApiInfo {
+        name: "1inch Quotes".to_string(),
+        category: "DEX aggregation".to_string(),
+        description: "1inch API로 최적 스왑 견적을 조회합니다(일부 네트워크는 API 키 필요). 사용 전략: Liquidation(담보 매각), Sandwich(경로 비교)".to_string(),
+        docs: Some("https://docs.1inch.io".to_string()),
+        env: env_status(&["ONEINCH_API_KEY"]),
+    });
+    // Oracles
+    external.push(ExternalApiInfo {
+        name: "Oracles (Chainlink / Uniswap TWAP)".to_string(),
+        category: "Price oracles".to_string(),
+        description: "체인링크 피드와 Uniswap TWAP을 조합해 가격을 산출합니다. 사용 전략: Liquidation(건전성/청산 트리거), Sandwich(리스크 가드)".to_string(),
+        docs: Some("https://docs.chain.link/".to_string()),
+        env: env_status(&[]),
+    });
+    // LiFi
+    external.push(ExternalApiInfo {
+        name: "LiFi Bridge".to_string(),
+        category: "Cross-chain bridging".to_string(),
+        description: "Li.Fi로 체인 간 브리지 경로/수수료/유효시간을 조회·실행합니다. 사용 전략: Cross-Chain Arbitrage".to_string(),
+        docs: Some("https://docs.li.fi".to_string()),
+        env: env_status(&["LIFI_API_KEY"]),
+    });
 
     Json(SystemInfoResponse {
         api_mode,

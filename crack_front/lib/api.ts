@@ -59,6 +59,15 @@ export type StrategyStats = Record<string, {
 }>;
 
 // ---- System Info ----
+export type EnvVarStatus = { key: string; set: boolean };
+export type ExternalApiInfo = {
+  name: string;
+  category: string;
+  description: string;
+  docs?: string | null;
+  env: EnvVarStatus[];
+};
+
 export type SystemInfo = {
   api_mode: string;
   network: string;
@@ -66,7 +75,7 @@ export type SystemInfo = {
   ws_url?: string | null;
   flashbots_relay_url: string;
   simulation_mode: boolean;
-  external_apis: string[];
+  external_apis: ExternalApiInfo[];
 };
 
 export async function getSystemInfo(): Promise<SystemInfo | null> {
