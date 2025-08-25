@@ -20,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/bundles" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">번들</a>
               <a href="/logs" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">로그</a>
               <a href="/settings" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">설정</a>
+              <a href="/system" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">시스템</a>
             </nav>
             <div className="mt-auto">
               <ApiHealth />

@@ -58,6 +58,27 @@ export type StrategyStats = Record<string, {
   avg_analysis_time_ms: number;
 }>;
 
+// ---- System Info ----
+export type SystemInfo = {
+  api_mode: string;
+  network: string;
+  rpc_url: string;
+  ws_url?: string | null;
+  flashbots_relay_url: string;
+  simulation_mode: boolean;
+  external_apis: string[];
+};
+
+export async function getSystemInfo(): Promise<SystemInfo | null> {
+  try {
+    const res = await fetch(`${BASE}/api/system`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 // ---- Strategy Params ----
 export type SandwichParams = {
   enabled: boolean;

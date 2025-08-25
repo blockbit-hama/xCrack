@@ -13,6 +13,39 @@ use serde_json::json;
 use crate::core::SearcherCore;
 use crate::core::bundle_manager::BundleStats;
 use crate::core::performance_tracker::PerformanceReport;
+#[derive(Serialize)]
+struct SystemInfoResponse {
+    api_mode: String,
+    network: String,
+    rpc_url: String,
+    ws_url: Option<String>,
+    flashbots_relay_url: String,
+    simulation_mode: bool,
+    external_apis: Vec<String>,
+}
+
+async fn get_system(config: Arc<crate::config::Config>, _core: SearcherCore) -> Json<SystemInfoResponse> {
+    // Derive API_MODE from env observed at startup context is not tracked; expose guess by simulation flag
+    let api_mode = if config.flashbots.simulation_mode { "mock" } else { "real" }.to_string();
+    let mut external = Vec::new();
+    // Presence hints
+    if !config.flashbots.relay_url.is_empty() { external.push(format!("Flashbots: {}", config.flashbots.relay_url)); }
+    // Strategy related external API hints (not all may be used at runtime)
+    external.push("0x (quotes)".to_string());
+    external.push("1inch (quotes)".to_string());
+    external.push("Chainlink / Uniswap TWAP (oracle)".to_string());
+    external.push("LiFi (bridge)".to_string());
+
+    Json(SystemInfoResponse {
+        api_mode,
+        network: config.network.name.clone(),
+        rpc_url: config.network.rpc_url.clone(),
+        ws_url: config.network.ws_url.clone(),
+        flashbots_relay_url: config.flashbots.relay_url.clone(),
+        simulation_mode: config.flashbots.simulation_mode,
+        external_apis: external,
+    })
+}
 
 #[derive(Clone)]
 pub struct ApiServer {
@@ -34,10 +67,12 @@ impl ApiServer {
         let core_report = self.core.clone();
         let core_logs = self.core.clone();
         let core_stats = self.core.clone();
+        let core_system = self.core.clone();
 
         let config_for_settings = Arc::clone(&self.config);
         let core_for_settings_get = self.core.clone();
         let core_for_settings_post = self.core.clone();
+        let config_for_system = Arc::clone(&self.config);
 
         let cors = CorsLayer::new()
             .allow_origin(Any)
@@ -56,6 +91,7 @@ impl ApiServer {
             .route("/api/stream/logs", get(move || sse_logs(core_logs.clone())))
             .route("/api/settings", get(move || get_settings(Arc::clone(&config_for_settings), core_for_settings_get.clone())))
             .route("/api/settings", post(move |payload| post_settings(core_for_settings_post.clone(), payload)))
+            .route("/api/system", get(move || get_system(Arc::clone(&config_for_system), core_system.clone())))
             .layer(cors);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
