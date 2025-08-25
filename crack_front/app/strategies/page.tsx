@@ -60,18 +60,18 @@ export default function StrategiesPage() {
 
   return (
     <main>
-      <h2 style={{ marginBottom: 12 }}>전략 보드</h2>
+      <h2 className="text-xl font-semibold mb-3">전략 보드</h2>
       {loading ? (
         <div>로딩 중…</div>
       ) : (
-        <ul style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+        <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {items.map((it) => (
-            <li key={it.key} style={{ border: '1px solid #eee', borderRadius: 8, padding: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <li key={it.key} className="border rounded-lg p-4">
+              <div className="flex items-center justify-between">
                 <div>
-                  <a href={it.href} style={{ fontWeight: 700, textDecoration: 'none' }}>{it.name}</a>
-                  <div style={{ fontSize: 12, color: '#888' }}>{it.desc}</div>
-                  <div style={{ marginTop: 6, fontSize: 12, color: '#555' }}>
+                  <a href={it.href} className="font-semibold no-underline hover:underline">{it.name}</a>
+                  <div className="text-xs text-gray-500">{it.desc}</div>
+                  <div className="mt-1.5 text-xs text-gray-600">
                     {(() => {
                       const k = it.name;
                       const st = (stats as any)[k] || (stats as any)[it.key] || (stats as any)[it.name] || undefined;
@@ -86,15 +86,7 @@ export default function StrategiesPage() {
                 <button
                   disabled={saving === it.key}
                   onClick={() => onToggle(it.key)}
-                  style={{
-                    background: strategies[it.key] ? '#10b981' : '#e5e7eb',
-                    color: strategies[it.key] ? 'white' : '#111827',
-                    border: 'none',
-                    borderRadius: 6,
-                    padding: '8px 12px',
-                    minWidth: 80,
-                    cursor: 'pointer',
-                  }}
+                  className={`px-3 py-2 rounded-md min-w-20 ${strategies[it.key] ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-900'} ${saving === it.key ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                   {saving === it.key ? '저장…' : strategies[it.key] ? 'ON' : 'OFF'}
                 </button>
