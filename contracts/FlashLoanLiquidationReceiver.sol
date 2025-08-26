@@ -42,6 +42,9 @@ contract FlashLoanLiquidationReceiver {
     bytes4 constant EXECUTE_SANDWICH_SELECTOR = bytes4(keccak256(
         "executeSandwich(address,bytes,bytes,address,uint256)"
     ));
+    bytes4 constant EXECUTE_ARBITRAGE_SELECTOR = bytes4(keccak256(
+        "executeArbitrage(address,bytes,address,bytes,address,uint256)"
+    ));
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -144,6 +147,41 @@ contract FlashLoanLiquidationReceiver {
             if (!ok) revert ExternalCallFailed(data);
 
             // Ensure we can repay flashloan (asset balance >= amount+premium)
+            uint256 need = amount + premium;
+            uint256 have = IERC20(asset).balanceOf(address(this));
+            if (have < need) revert InsufficientRepay(have, need);
+            _safeApprove(asset, AAVE_POOL, need);
+            return true;
+        } else if (sel == EXECUTE_ARBITRAGE_SELECTOR) {
+            (
+                address routerBuy,
+                bytes memory buyCalldata,
+                address routerSell,
+                bytes memory sellCalldata,
+                address assetParam,
+                uint256 amountParam
+            ) = abi.decode(params[4:], (address, bytes, address, bytes, address, uint256));
+
+            if (asset != assetParam || amountParam != amount) revert InvalidAsset();
+
+            // Approve routers
+            _safeApprove(asset, routerBuy, type(uint256).max);
+            address sellInput = _decodeUniswapV2PathInput(sellCalldata);
+            if (sellInput != address(0) && sellInput != asset) {
+                _safeApprove(sellInput, routerSell, type(uint256).max);
+            } else {
+                _safeApprove(asset, routerSell, type(uint256).max);
+            }
+
+            // Execute buy on routerBuy
+            (bool ok, bytes memory data) = routerBuy.call(buyCalldata);
+            if (!ok) revert ExternalCallFailed(data);
+
+            // Execute sell on routerSell
+            (ok, data) = routerSell.call(sellCalldata);
+            if (!ok) revert ExternalCallFailed(data);
+
+            // Repay
             uint256 need = amount + premium;
             uint256 have = IERC20(asset).balanceOf(address(this));
             if (have < need) revert InsufficientRepay(have, need);

@@ -32,6 +32,16 @@ sol! {
             address asset,
             uint256 amount
         ) external;
+
+        // For on-chain DEX arbitrage: buy on routerBuy, then sell on routerSell, repay
+        function executeArbitrage(
+            address routerBuy,
+            bytes buyCalldata,
+            address routerSell,
+            bytes sellCalldata,
+            address asset,
+            uint256 amount
+        ) external;
     }
 }
 
@@ -288,6 +298,25 @@ impl ABICodec {
         Ok(call.abi_encode().into())
     }
 
+    /// Encode Uniswap V2 swap tokens for exact tokens call
+    pub fn encode_uniswap_v2_swap_tokens_for_exact_tokens(
+        &self,
+        amount_out: U256,
+        amount_in_max: U256,
+        path: Vec<Address>,
+        to: Address,
+        deadline: U256,
+    ) -> Result<Bytes> {
+        let call = IUniswapV2Router::swapTokensForExactTokensCall {
+            amountOut: amount_out,
+            amountInMax: amount_in_max,
+            path,
+            to,
+            deadline,
+        };
+        Ok(call.abi_encode().into())
+    }
+
     /// Encode Uniswap V3 exact input single swap
     pub fn encode_uniswap_v3_exact_input_single(
         &self,
@@ -440,6 +469,38 @@ impl ABICodec {
             router,
             frontCalldata: front_calldata.into(),
             backCalldata: back_calldata.into(),
+            asset,
+            amount,
+        };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode parameters for two-router arbitrage inside flashloan receiver
+    pub fn encode_flashloan_receiver_arbitrage_params(
+        &self,
+        router_buy: Address,
+        buy_calldata: Bytes,
+        router_sell: Address,
+        sell_calldata: Bytes,
+        asset: Address,
+        amount: U256,
+    ) -> Result<Bytes> {
+        // Reuse a distinct selector name to avoid ambiguity; matches Solidity implementation
+        #[allow(non_snake_case)]
+        struct ExecuteArbitrageParams {
+            routerBuy: Address,
+            buyCalldata: Bytes,
+            routerSell: Address,
+            sellCalldata: Bytes,
+            asset: Address,
+            amount: U256,
+        }
+        // Manually compose via abi-encoding using sol! interface call
+        let call = IFlashLoanReceiverHelper::executeArbitrageCall {
+            routerBuy: router_buy,
+            buyCalldata: buy_calldata.into(),
+            routerSell: router_sell,
+            sellCalldata: sell_calldata.into(),
             asset,
             amount,
         };
