@@ -10,6 +10,7 @@ use uuid::Uuid;
 use tracing::{info, debug, warn};
 use chrono::{DateTime, Utc, Duration as ChronoDuration};
 use async_trait::async_trait;
+use alloy::primitives::{Address as AlloyAddress, U256 as AlloyU256, Bytes as AlloyBytes};
 
 use crate::{
     config::Config,
@@ -454,8 +455,23 @@ impl CrossChainArbitrageStrategy {
             }
         }
         
-        // 2) 1차 거래 실행 (quote의 라우트 기반 프로토콜 우선)
+        // 1-2) 최소 수익/시간 가드 (보수적): 순이익 <= 0 이거나 예상 시간 15분 초과 시 스킵
+        if !quote.is_profitable() {
+            warn!("⚠️ 순이익이 0 이하로 추정, 실행 스킵");
+            return Ok(false);
+        }
+        if quote.estimated_time > 900 { // 15분 초과
+            warn!("⚠️ 예상 소요시간이 15분을 초과, 실행 스킵 ({}s)", quote.estimated_time);
+            return Ok(false);
+        }
+
+        // 2) 플래시론 보조 경로: 크로스체인은 원자성 한계로 실제 사용 비권장. 현재는 로깅만 수행.
         let primary_protocol = self.get_bridge_protocol_from_quote(&quote);
+        if self.config.strategies.cross_chain_arbitrage.use_flashloan {
+            warn!("⚠️ use_flashloan=true (cross-chain): 원자적 상환이 불가하므로 실제 경로는 비활성. 일반 경로로 진행");
+        }
+
+        // 2) 1차 거래 실행 (quote의 라우트 기반 프로토콜 우선)
         // 실행 타임아웃(보수적으로 quote.estimated_time + 60초)
         let exec_timeout_secs = quote.estimated_time.saturating_add(60).max(60);
         let mut execution = match tokio_timeout(

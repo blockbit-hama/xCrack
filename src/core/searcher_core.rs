@@ -178,6 +178,21 @@ impl SearcherCore {
             });
         }
         
+        // 3.2. 크로스체인 주기 스캐너 시작 (핵심 백엔드 기능, UI 제외)
+        if let Some(cross_strategy) = self.strategy_manager.get_cross_chain_strategy() {
+            let cross = Arc::clone(&cross_strategy);
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(30));
+                loop {
+                    interval.tick().await;
+                    if let Err(e) = cross.scan_opportunities().await {
+                        tracing::warn!("cross-scan error: {}", e);
+                    }
+                }
+            });
+            info!("🌉 크로스체인 기회 주기 스캐너 시작(30s interval)");
+        }
+
         // 4. 메인 처리 루프 실행
         info!("🔄 메인 처리 루프 시작 중...");
         self.run_main_loop(

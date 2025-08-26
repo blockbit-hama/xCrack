@@ -42,6 +42,8 @@ sol! {
             address asset,
             uint256 amount
         ) external;
+
+        // (reserved) executeCrossChain: cross-chain assisted path; not used here
     }
 }
 
@@ -506,6 +508,8 @@ impl ABICodec {
         };
         Ok(call.abi_encode().into())
     }
+
+    // Note: cross-chain helper intentionally omitted in this build
 
     /// Decode Uniswap V2 swap transaction
     pub fn decode_uniswap_v2_swap(&self, calldata: &[u8]) -> Result<SwapTransaction> {
