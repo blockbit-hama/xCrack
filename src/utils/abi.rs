@@ -23,6 +23,15 @@ sol! {
             address collateralAsset,
             uint256 minOut
         ) external;
+
+        // For Sandwich strategy: perform frontrun swap, then backrun swap, and repay
+        function executeSandwich(
+            address router,
+            bytes frontCalldata,
+            bytes backCalldata,
+            address asset,
+            uint256 amount
+        ) external;
     }
 }
 
@@ -414,6 +423,25 @@ impl ABICodec {
             amount,
             collateralAsset: collateral_asset,
             minOut: min_out,
+        };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode parameters for sandwich execution inside flashloan receiver
+    pub fn encode_flashloan_receiver_sandwich_params(
+        &self,
+        router: Address,
+        front_calldata: Bytes,
+        back_calldata: Bytes,
+        asset: Address,
+        amount: U256,
+    ) -> Result<Bytes> {
+        let call = IFlashLoanReceiverHelper::executeSandwichCall {
+            router,
+            frontCalldata: front_calldata.into(),
+            backCalldata: back_calldata.into(),
+            asset,
+            amount,
         };
         Ok(call.abi_encode().into())
     }
