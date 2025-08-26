@@ -851,6 +851,29 @@ export async function getOnChainAnalytics(): Promise<OnChainAnalytics | null> {
   }
 }
 
+// ---- Cross-Chain Dashboard API ----
+export type CrossDashboard = {
+  summary: {
+    total_opportunities: number;
+    trades_executed: number;
+    success_rate: number;
+    total_profit: number;
+    avg_execution_time: number;
+    failed_trades: number;
+  };
+  recent_routes: { protocol: string; from: string; to: string; avg_time: number; success_rate: number }[];
+};
+
+export async function getCrossDashboard(): Promise<CrossDashboard | null> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/cross/dashboard`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function getTokenAnalysis(tokenAddress: string): Promise<TokenInfo | null> {
   try {
     const res = await fetch(`${BASE}/api/onchain/token/${tokenAddress}`, { cache: 'no-cache' });
