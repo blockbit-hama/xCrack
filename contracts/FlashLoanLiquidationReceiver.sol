@@ -21,8 +21,10 @@ interface IAaveV3Pool {
     ) external;
 }
 
-/// Receiver for Aave V3 flashLoanSimple that executes liquidation and optional sell, then repays.
-/// Expected params come from the Rust encoder (IFlashLoanReceiverHelper.executeLiquidation signature).
+/// Receiver for Aave V3 flashLoanSimple that executes:
+/// - Liquidation + optional sell (executeLiquidation params)
+/// - Sandwich front/back swaps (executeSandwich params)
+/// Then repays the flashloan.
 contract FlashLoanLiquidationReceiver {
     address public owner;
     address public immutable AAVE_POOL;
@@ -34,8 +36,11 @@ contract FlashLoanLiquidationReceiver {
     error ExternalCallFailed(bytes data);
     error InsufficientRepay(uint256 have, uint256 need);
 
-    bytes4 constant EXECUTE_SELECTOR = bytes4(keccak256(
+    bytes4 constant EXECUTE_LIQ_SELECTOR = bytes4(keccak256(
         "executeLiquidation(address,bytes,address,bytes,address,address,uint256,address,uint256)"
+    ));
+    bytes4 constant EXECUTE_SANDWICH_SELECTOR = bytes4(keccak256(
+        "executeSandwich(address,bytes,bytes,address,uint256)"
     ));
 
     modifier onlyOwner() {
@@ -67,47 +72,86 @@ contract FlashLoanLiquidationReceiver {
         if (msg.sender != AAVE_POOL) revert NotPool();
 
         // Params were encoded as a full function call. First 4 bytes are selector.
-        if (params.length < 4 || bytes4(params[:4]) != EXECUTE_SELECTOR) revert DecodeFailed();
+        if (params.length < 4) revert DecodeFailed();
+        bytes4 sel = bytes4(params[:4]);
 
-        (
-            address liquidationTarget,
-            bytes memory liquidationCalldata,
-            address sellTarget,
-            bytes memory sellCalldata,
-            address sellSpender,
-            address debtAsset,
-            uint256 debtAmount,
-            address collateralAsset,
-            uint256 minOut
-        ) = abi.decode(params[4:], (address, bytes, address, bytes, address, address, uint256, address, uint256));
+        if (sel == EXECUTE_LIQ_SELECTOR) {
+            (
+                address liquidationTarget,
+                bytes memory liquidationCalldata,
+                address sellTarget,
+                bytes memory sellCalldata,
+                address sellSpender,
+                address debtAsset,
+                uint256 debtAmount,
+                address collateralAsset,
+                uint256 minOut
+            ) = abi.decode(params[4:], (address, bytes, address, bytes, address, address, uint256, address, uint256));
 
-        if (asset != debtAsset) revert InvalidAsset();
+            if (asset != debtAsset) revert InvalidAsset();
 
-        // Approve the liquidation target to pull debt (covers Aave Pool.liquidationCall or other targets)
-        _safeApprove(debtAsset, liquidationTarget, type(uint256).max);
+            // Approve the liquidation target to pull debt (covers Aave Pool.liquidationCall or other targets)
+            _safeApprove(debtAsset, liquidationTarget, type(uint256).max);
 
-        // Execute liquidation
-        (bool ok, bytes memory data) = liquidationTarget.call(liquidationCalldata);
-        if (!ok) revert ExternalCallFailed(data);
-
-        // Optional sell path
-        if (sellTarget != address(0) && sellCalldata.length > 0) {
-            // Approve spender (0x allowanceTarget) if provided; otherwise approve router/target
-            address spender = sellSpender != address(0) ? sellSpender : sellTarget;
-            _safeApprove(collateralAsset, spender, type(uint256).max);
-
-            (ok, data) = sellTarget.call(sellCalldata);
+            // Execute liquidation
+            (bool ok, bytes memory data) = liquidationTarget.call(liquidationCalldata);
             if (!ok) revert ExternalCallFailed(data);
+
+            // Optional sell path
+            if (sellTarget != address(0) && sellCalldata.length > 0) {
+                // Approve spender (0x allowanceTarget) if provided; otherwise approve router/target
+                address spender = sellSpender != address(0) ? sellSpender : sellTarget;
+                _safeApprove(collateralAsset, spender, type(uint256).max);
+
+                (ok, data) = sellTarget.call(sellCalldata);
+                if (!ok) revert ExternalCallFailed(data);
+            }
+
+            // Ensure we can repay flashloan
+            uint256 need = debtAmount + premium;
+            uint256 have = IERC20(debtAsset).balanceOf(address(this));
+            if (have < need || have < minOut) revert InsufficientRepay(have, need);
+
+            // Approve pool to pull repayment
+            _safeApprove(debtAsset, AAVE_POOL, need);
+            return true;
+        } else if (sel == EXECUTE_SANDWICH_SELECTOR) {
+            (
+                address router,
+                bytes memory frontCalldata,
+                bytes memory backCalldata,
+                address assetParam,
+                uint256 amountParam
+            ) = abi.decode(params[4:], (address, bytes, bytes, address, uint256));
+
+            if (asset != assetParam || amountParam != amount) revert InvalidAsset();
+
+            // Approve router for the borrowed asset
+            _safeApprove(asset, router, type(uint256).max);
+
+            // Decode back path[0] to approve its input token as well
+            address backInput = _decodeUniswapV2PathInput(backCalldata);
+            if (backInput != address(0) && backInput != asset) {
+                _safeApprove(backInput, router, type(uint256).max);
+            }
+
+            // Execute front run swap
+            (bool ok, bytes memory data) = router.call(frontCalldata);
+            if (!ok) revert ExternalCallFailed(data);
+
+            // Execute back run swap
+            (ok, data) = router.call(backCalldata);
+            if (!ok) revert ExternalCallFailed(data);
+
+            // Ensure we can repay flashloan (asset balance >= amount+premium)
+            uint256 need = amount + premium;
+            uint256 have = IERC20(asset).balanceOf(address(this));
+            if (have < need) revert InsufficientRepay(have, need);
+            _safeApprove(asset, AAVE_POOL, need);
+            return true;
+        } else {
+            revert DecodeFailed();
         }
-
-        // Ensure we can repay flashloan
-        uint256 need = amount + premium;
-        uint256 have = IERC20(debtAsset).balanceOf(address(this));
-        if (have < need || have < minOut) revert InsufficientRepay(have, need);
-
-        // Approve pool to pull repayment
-        _safeApprove(debtAsset, AAVE_POOL, need);
-        return true;
     }
 
     function rescue(address token, uint256 amount, address to) external onlyOwner {
@@ -123,5 +167,17 @@ contract FlashLoanLiquidationReceiver {
             require(erc.approve(spender, 0));
         }
         require(erc.approve(spender, amount));
+    }
+
+    /// Decode UniswapV2 swapExactTokensForTokens calldata and return input token (path[0])
+    function _decodeUniswapV2PathInput(bytes memory callData) internal pure returns (address tokenIn) {
+        if (callData.length < 4) return address(0);
+        // selector 0x38ed1739 for swapExactTokensForTokens
+        bytes4 sel = bytes4(callData[:4]);
+        if (sel != 0x38ed1739) return address(0);
+        (uint256 /*amountIn*/, uint256 /*amountOutMin*/, address[] memory path, address /*to*/, uint256 /*deadline*/) =
+            abi.decode(callData[4:], (uint256, uint256, address[], address, uint256));
+        if (path.length == 0) return address(0);
+        return path[0];
     }
 }
