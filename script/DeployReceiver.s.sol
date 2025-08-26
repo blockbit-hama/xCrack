@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "forge-std/Script.sol";
+import {FlashLoanLiquidationReceiver} from "contracts/FlashLoanLiquidationReceiver.sol";
 
 interface IReceiver {
     function setOwner(address) external;
@@ -19,17 +20,10 @@ contract DeployReceiver is Script {
         address pool = vm.envOr("AAVE_POOL", AAVE_POOL_MAINNET);
         address owner = vm.envOr("OWNER", deployer);
 
-        bytes memory bytecode = abi.encodePacked(
-            type(FlashLoanLiquidationReceiver).creationCode,
-            abi.encode(pool, owner)
-        );
-        address receiver;
-        assembly {
-            receiver := create(0, add(bytecode, 0x20), mload(bytecode))
-        }
+        FlashLoanLiquidationReceiver receiver = new FlashLoanLiquidationReceiver(pool, owner);
         require(receiver != address(0), "deploy failed");
 
-        console2.log("Receiver:", receiver);
+        console2.log("Receiver:", address(receiver));
         vm.stopBroadcast();
     }
 }
