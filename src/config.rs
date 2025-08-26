@@ -13,6 +13,13 @@ pub struct NetworkConfig {
     pub base_fee: Option<U256>,
     #[serde(default)]
     pub flashloan_receiver: Option<H160>,
+    /// Strategy-specific flashloan executor contracts (preferred over generic receiver)
+    #[serde(default)]
+    pub arbitrage_contract: Option<H160>,
+    #[serde(default)]
+    pub liquidation_contract: Option<H160>,
+    #[serde(default)]
+    pub sandwich_contract: Option<H160>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,6 +234,9 @@ impl Config {
                 block_time: 12,
                 base_fee: None,
                 flashloan_receiver: None,
+                arbitrage_contract: None,
+                liquidation_contract: None,
+                sandwich_contract: None,
             },
             blockchain: BlockchainConfig {
                 primary_network: NetworkConfig {
@@ -237,6 +247,9 @@ impl Config {
                     block_time: 12,
                     base_fee: None,
                     flashloan_receiver: None,
+                    arbitrage_contract: None,
+                    liquidation_contract: None,
+                    sandwich_contract: None,
                 },
                 backup_networks: vec![],
                 enable_onchain_strategies: true,

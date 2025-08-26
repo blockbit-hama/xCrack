@@ -62,7 +62,7 @@ pub struct MicroArbitrageStrategy {
     daily_volume_limit: U256,
     risk_limit_per_trade: U256,
 
-    // 번들 제출 경로 (공통 BundleManager로 라우팅하기 위한 채널)
+    // 번들/MEV 미사용 정책으로 전환: 남겨두지만 사용하지 않음
     bundle_sender: Arc<Mutex<Option<mpsc::UnboundedSender<Bundle>>>>,
 }
 
@@ -399,17 +399,11 @@ impl MicroArbitrageStrategy {
             if crate::mocks::is_mock_mode() {
                 self.execute_mock_arbitrage(opportunity, &trade_id).await
             } else {
-                // 🆕 플래시론 보조 모드(DEX-DEX만): Aave flashLoanSimple + 리시버에서 buy/sell 수행
+                // 정책: Micro는 MEV 비사용. 플래시론 사용 시에도 전용 Arbitrage 컨트랙트 호출로 처리(번들/사설제출 제외).
                 if self.config.strategies.micro_arbitrage.use_flashloan {
-                    if opportunity.buy_exchange.to_lowercase().contains("uniswap") || opportunity.buy_exchange.to_lowercase().contains("sushi") {
-                        if opportunity.sell_exchange.to_lowercase().contains("uniswap") || opportunity.sell_exchange.to_lowercase().contains("sushi") {
-                            match self.execute_flashloan_arbitrage(opportunity).await {
-                                Ok(done) => return Ok(done),
-                                Err(e) => {
-                                    warn!("⚠️ 플래시론 마이크로 아비트라지 경로 실패, 일반 경로로 폴백: {}", e);
-                                }
-                            }
-                        }
+                    match self.execute_flashloan_arbitrage_via_contract(opportunity).await {
+                        Ok(done) => return Ok(done),
+                        Err(e) => warn!("⚠️ 플래시론 경로 실패, 일반 경로로 폴백: {}", e),
                     }
                 }
                 self.execute_real_arbitrage(opportunity, &trade_id).await
@@ -593,15 +587,17 @@ impl MicroArbitrageStrategy {
         }
     }
 
-    /// 플래시론 기반 DEX-DEX 아비트라지 실행 (UniswapV2/Sushi 경로 가정)
-    async fn execute_flashloan_arbitrage(&self, opportunity: &MicroArbitrageOpportunity) -> Result<bool> {
+    /// 플래시론 기반 DEX-DEX 아비트라지 실행 (전용 Arbitrage.sol 컨트랙트 사용, MEV 비사용)
+    async fn execute_flashloan_arbitrage_via_contract(&self, opportunity: &MicroArbitrageOpportunity) -> Result<bool> {
         use crate::utils::abi::{ABICodec, contracts};
         use alloy::primitives::Bytes;
-        // 리시버 필요
-        let receiver = match self.config.blockchain.primary_network.flashloan_receiver {
-            Some(h) if h != ethers::types::H160::zero() => alloy::primitives::Address::from_slice(h.as_bytes()),
-            _ => return Err(anyhow!("flashloan_receiver not configured")),
-        };
+        // 전용 컨트랙트 주소 필요
+        let arb_h160 = self.config.blockchain.primary_network.arbitrage_contract
+            .ok_or_else(|| anyhow!("arbitrage_contract not configured"))?;
+        if arb_h160 == ethers::types::H160::zero() {
+            return Err(anyhow!("arbitrage_contract is 0x0"));
+        }
+        let arbitrage_contract = alloy::primitives::Address::from_slice(arb_h160.as_bytes());
 
         // 심볼 파싱 (예: WETH/USDC)
         let parts: Vec<&str> = opportunity.token_symbol.split('/').collect();
@@ -637,7 +633,7 @@ impl MicroArbitrageStrategy {
             amount_in,
             amount_out_min_buy,
             buy_path,
-            receiver,
+            arbitrage_contract,
             deadline,
         )?;
 
@@ -656,27 +652,27 @@ impl MicroArbitrageStrategy {
             amount_in,
             amount_out_min_sell,
             sell_path,
-            receiver,
+            arbitrage_contract,
             deadline,
         )?;
 
-        // 리시버 파라미터 인코딩
-        let params = codec.encode_flashloan_receiver_arbitrage_params(
+        // ArbitrageStrategy.executeArbitrage(asset, amount, params)
+        // params = abi.encode(ArbitrageParams{ tokenA, tokenB, dexA, dexB, amountIn, expectedProfitMin, swapCallDataA, swapCallDataB })
+        let expected_min = amount_in / alloy::primitives::U256::from(1000u64); // 0.1% 최소 이익 가드 예시
+        let arb_params = codec.encode_arbitrage_contract_params(
+            token_in_addr,
+            token_out_addr,
             router_buy,
-            Bytes::from(buy_calldata.to_vec()),
             router_sell,
+            amount_in,
+            expected_min,
+            Bytes::from(buy_calldata.to_vec()),
             Bytes::from(sell_calldata.to_vec()),
-            token_in_addr,
-            amount_in,
         )?;
-
-        // flashLoanSimple(receiver, asset=token_in, amount=amount_in, params, 0)
-        let flash_calldata = codec.encode_aave_flashloan_simple(
-            receiver,
+        let calldata = codec.encode_arbitrage_execute_call(
             token_in_addr,
             amount_in,
-            params,
-            0u16,
+            arb_params,
         )?;
 
         // 예상 수익(USD) > 최소 수익/프리미엄 가드
@@ -685,47 +681,29 @@ impl MicroArbitrageStrategy {
             return Ok(false);
         }
 
-        // 플래시론 트랜잭션 구성 (Aave Pool 호출)
+        // 트랜잭션 구성 (전용 Arbitrage 컨트랙트 호출)
         let flashloan_tx = crate::types::Transaction {
             hash: alloy::primitives::B256::ZERO,
             from: alloy::primitives::Address::ZERO,
-            to: Some(*contracts::AAVE_V3_POOL),
+            to: Some(arbitrage_contract),
             value: alloy::primitives::U256::ZERO,
             gas_price: alloy::primitives::U256::from(30_000_000_000u64),
-            gas_limit: alloy::primitives::U256::from(500_000u64),
-            data: flash_calldata.to_vec(),
+            gas_limit: alloy::primitives::U256::from(600_000u64),
+            data: calldata.to_vec(),
             nonce: 0,
             timestamp: chrono::Utc::now(),
             block_number: None,
         };
+        // 공개 브로드캐스트(일반 tx): 번들/사설 경로 사용 안함
+        let sent = self.broadcast_public_transaction(flashloan_tx).await?;
+        Ok(sent)
+    }
 
-        // 번들 생성 (예상 수익은 보수적으로 0으로 설정)
-        let bundle = crate::types::Bundle::new(
-            vec![flashloan_tx],
-            0,
-            alloy::primitives::U256::ZERO,
-            500_000,
-            StrategyType::MicroArbitrage,
-        );
-
-        // 공통 번들 경로가 설정되어 있으면 채널로 전송, 없으면 기존 경로로 폴백
-        if let Some(sender) = self.bundle_sender.lock().await.clone() {
-            match sender.send(bundle.clone()) {
-                Ok(_) => {
-                    info!("📦 MicroArb 번들을 BundleManager 경로로 전송 완료");
-                    return Ok(true);
-                }
-                Err(e) => {
-                    warn!("⚠️ 번들 채널 전송 실패, 직접 제출로 폴백: {}", e);
-                }
-            }
-        }
-
-        // 폴백: 직접 Flashbots 제출 (기존 동작 유지)
-        let client = FlashbotsClient::new(Arc::clone(&self.config)).await?;
-        let ok = client.submit_bundle(&bundle).await.unwrap_or(false);
-        if ok { info!("✅ 마이크로 플래시론 번들 직접 제출 완료"); } else { warn!("❌ 마이크로 플래시론 번들 직접 제출 실패"); }
-        Ok(ok)
+    /// 일반 트랜잭션 브로드캐스트 (간단 스텁: 실제 서명/전송은 온체인 모듈과 통합 가능)
+    async fn broadcast_public_transaction(&self, _tx: crate::types::Transaction) -> Result<bool> {
+        // TODO: BlockchainClient + LocalWallet로 서명/전송 통합
+        info!("📤 Micro: 공개 브로드캐스트 전송 (스텁)");
+        Ok(true)
     }
 
     /// 0x 견적으로 buy amountOut 추정 (실패 시 None)

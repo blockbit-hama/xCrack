@@ -7,7 +7,25 @@ use tracing::{debug, warn};
 
 // Define Solidity interfaces using alloy's sol! macro
 
-// Uniswap V2 Router interface
+// Uniswap V2 Router interface and strategy executors
+sol! {
+    /// Arbitrage contract interface (contracts/Arbitrage.sol)
+    interface IArbitrageStrategy {
+        struct ArbitrageParams {
+            address tokenA;
+            address tokenB;
+            address dexA;
+            address dexB;
+            uint256 amountIn;
+            uint256 expectedProfitMin;
+            bytes   swapCallDataA;
+            bytes   swapCallDataB;
+        }
+
+        function executeArbitrage(address asset, uint256 amount, ArbitrageParams calldata params) external;
+    }
+}
+
 sol! {
     /// Helper interface solely to ABI-encode parameters for a FlashLoan receiver
     /// The actual receiver contract should implement a compatible decoder for this signature.
@@ -260,6 +278,45 @@ impl ABICodec {
         Self {
             function_selectors,
         }
+    }
+
+    /// Encode ArbitrageParams for ArbitrageStrategy
+    pub fn encode_arbitrage_contract_params(
+        &self,
+        token_a: Address,
+        token_b: Address,
+        dex_a: Address,
+        dex_b: Address,
+        amount_in: U256,
+        expected_profit_min: U256,
+        swap_a: Bytes,
+        swap_b: Bytes,
+    ) -> Result<Bytes> {
+        let p = IArbitrageStrategy::ArbitrageParams {
+            tokenA: token_a,
+            tokenB: token_b,
+            dexA: dex_a,
+            dexB: dex_b,
+            amountIn: amount_in,
+            expectedProfitMin: expected_profit_min,
+            swapCallDataA: swap_a.into(),
+            swapCallDataB: swap_b.into(),
+        };
+        Ok(p.abi_encode().into())
+    }
+
+    /// Encode call to ArbitrageStrategy.executeArbitrage
+    pub fn encode_arbitrage_execute_call(
+        &self,
+        asset: Address,
+        amount: U256,
+        params: Bytes,
+    ) -> Result<Bytes> {
+        let decoded: IArbitrageStrategy::ArbitrageParams =
+            IArbitrageStrategy::ArbitrageParams::abi_decode(&params)
+                .map_err(|_| anyhow!("invalid arbitrage params encoding"))?;
+        let call = IArbitrageStrategy::executeArbitrageCall { asset, amount, params: decoded };
+        Ok(call.abi_encode().into())
     }
 
     /// Encode Uniswap V2 swap exact tokens for tokens call
