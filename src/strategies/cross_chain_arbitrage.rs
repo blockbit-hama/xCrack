@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Mutex;
+use tokio::time::timeout as tokio_timeout;
 use uuid::Uuid;
 use tracing::{info, debug, warn};
 use chrono::{DateTime, Utc, Duration as ChronoDuration};
@@ -455,10 +456,18 @@ impl CrossChainArbitrageStrategy {
         
         // 2) 1차 거래 실행 (quote의 라우트 기반 프로토콜 우선)
         let primary_protocol = self.get_bridge_protocol_from_quote(&quote);
-        let mut execution = self.bridge_manager.execute_bridge(
-            primary_protocol.clone(),
-            &quote,
-        ).await;
+        // 실행 타임아웃(보수적으로 quote.estimated_time + 60초)
+        let exec_timeout_secs = quote.estimated_time.saturating_add(60).max(60);
+        let mut execution = match tokio_timeout(
+            Duration::from_secs(exec_timeout_secs as u64),
+            self.bridge_manager.execute_bridge(primary_protocol.clone(), &quote),
+        ).await {
+            Ok(res) => res,
+            Err(_) => {
+                warn!("⏰ 1차 실행 타임아웃({}s) | protocol={:?}", exec_timeout_secs, primary_protocol);
+                Err(crate::bridges::traits::BridgeError::ApiError { message: "bridge execution timeout".to_string() })
+            }
+        };
         
         // 3) 실패/대기 시 1회 백업 경로 재시도
         let mut success = match &execution {
@@ -479,14 +488,28 @@ impl CrossChainArbitrageStrategy {
                 ),
             }
 
-            // 3-1) 모든 견적 조회 후, 다른 프로토콜로 1회 재시도
-            let mut all_quotes = self.bridge_manager.get_all_quotes(
-                opportunity.source_chain,
-                opportunity.dest_chain,
-                &opportunity.token,
-                opportunity.amount,
-                0.5,
-            ).await.unwrap_or_default();
+            // 3-1) 모든 견적 조회 후, 다른 프로토콜로 1회 재시도 (짧은 타임아웃)
+            let quotes = tokio_timeout(
+                Duration::from_secs(15),
+                self.bridge_manager.get_all_quotes(
+                    opportunity.source_chain,
+                    opportunity.dest_chain,
+                    &opportunity.token,
+                    opportunity.amount,
+                    0.5,
+                ),
+            ).await;
+            let mut all_quotes = match quotes {
+                Ok(Ok(q)) => q,
+                Ok(Err(e)) => {
+                    warn!("⚠️ 백업 견적 조회 실패: {}", e);
+                    Vec::new()
+                }
+                Err(_) => {
+                    warn!("⏰ 백업 견적 조회 타임아웃(15s)");
+                    Vec::new()
+                }
+            };
 
             // 우선순위: 높은 net_profit / 낮은 total_cost, 기존 프로토콜 제외
             all_quotes.retain(|(p, _)| p != &primary_protocol);
@@ -505,10 +528,16 @@ impl CrossChainArbitrageStrategy {
                     fallback_quote.total_cost()
                 );
 
-                let exec2 = self.bridge_manager.execute_bridge(
-                    fallback_protocol.clone(),
-                    fallback_quote,
-                ).await;
+                let exec2 = match tokio_timeout(
+                    Duration::from_secs(exec_timeout_secs as u64),
+                    self.bridge_manager.execute_bridge(fallback_protocol.clone(), fallback_quote),
+                ).await {
+                    Ok(res) => res,
+                    Err(_) => {
+                        warn!("⏰ 백업 경로 실행 타임아웃({}s) | protocol={}", exec_timeout_secs, fallback_protocol.name());
+                        Err(crate::bridges::traits::BridgeError::ApiError { message: "bridge execution timeout (fallback)".to_string() })
+                    }
+                };
 
                 success = match exec2 {
                     Ok(exec) => matches!(exec.status, crate::bridges::traits::BridgeExecutionStatus::Completed),
@@ -549,6 +578,10 @@ impl CrossChainArbitrageStrategy {
             metrics.failed_trades += 1;
             metrics.total_loss += quote.total_cost().to::<u128>() as f64 / 1_000000.0;
             metrics.success_rate = metrics.successful_trades as f64 / metrics.total_trades_executed as f64;
+
+            // 재시도 후에도 실패 시 안전 폴백: 실행 중인 트레이드가 있을 경우 취소/정리 훅(향후 구현 포인트)
+            // 여기서는 로깅만 수행하여 운용 측 알림으로 전파
+            warn!("🧯 안전 폴백: 후속 정리 루틴을 수행해야 할 수 있습니다 (브리지 대기/미포함 처리)");
         }
         
         *self.last_execution.write().unwrap() = Some(Utc::now());
