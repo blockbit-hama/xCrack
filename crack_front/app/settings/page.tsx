@@ -23,13 +23,32 @@ export default function SettingsPage() {
     (async () => {
       setLoading(true);
       try {
+        // 먼저 연결 테스트
+        console.log(`Connecting to backend: ${BACKEND}`);
+        
+        const healthRes = await fetch(`${BACKEND}/api/health`, { cache: 'no-cache' });
+        if (!healthRes.ok) {
+          throw new Error(`Backend not responding: ${healthRes.status}`);
+        }
+        console.log('Backend health check passed');
+        
         const res = await fetch(`${BACKEND}/api/settings`, { cache: 'no-cache' });
+        
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        
         const json = await res.json();
         setData(json);
+        
         const p = await getStrategyParams();
         setParams(p);
-      } catch (e) {
-        setMsg("설정 로드 실패");
+        
+        console.log('Settings loaded successfully:', json);
+        console.log('Strategy params loaded:', p);
+      } catch (e: any) {
+        console.error('설정 로드 오류:', e);
+        setMsg(`설정 로드 실패: ${e.message || e}`);
       } finally {
         setLoading(false);
       }

@@ -568,3 +568,766 @@ export async function dismissAlert(alertId: string): Promise<boolean> {
     return false;
   }
 }
+
+// ---- Micro Arbitrage Specific API ----
+export type TradingPairInfo = {
+  pair: string;
+  base_token: string;
+  quote_token: string;
+  exchanges: string[];
+  spread_percentage: number;
+  volume_24h: string;
+  last_trade_time: string;
+  is_active: boolean;
+};
+
+export type ExchangeInfo = {
+  name: string;
+  type: 'CEX' | 'DEX';
+  connected: boolean;
+  last_ping_ms: number;
+  trading_fee_percentage: number;
+  supported_pairs: string[];
+  volume_24h: string;
+  reliability_score: number;
+};
+
+export type ArbitrageOpportunity = {
+  id: string;
+  pair: string;
+  buy_exchange: string;
+  sell_exchange: string;
+  buy_price: string;
+  sell_price: string;
+  spread_percentage: number;
+  potential_profit_usd: string;
+  required_capital: string;
+  estimated_gas_cost: string;
+  confidence_score: number;
+  expires_at: string;
+  risk_level: 'low' | 'medium' | 'high';
+  execution_time_estimate_ms: number;
+};
+
+export type MicroTradeHistory = {
+  id: string;
+  pair: string;
+  buy_exchange: string;
+  sell_exchange: string;
+  buy_amount: string;
+  sell_amount: string;
+  profit_usd: string;
+  execution_time_ms: number;
+  gas_cost: string;
+  status: 'success' | 'failed' | 'partial';
+  timestamp: string;
+  failure_reason?: string;
+};
+
+export type MicroArbitrageMetrics = {
+  total_trades_today: number;
+  successful_trades_today: number;
+  total_profit_today_usd: string;
+  avg_profit_per_trade: string;
+  avg_execution_time_ms: number;
+  success_rate_percentage: number;
+  active_opportunities: number;
+  monitored_pairs: number;
+  connected_exchanges: number;
+  position_size_utilization: number;
+  daily_volume_limit_used: number;
+  risk_limit_used: number;
+  best_performing_pair: string;
+  worst_performing_pair: string;
+};
+
+export type PriceAnalytics = {
+  pair: string;
+  current_spread: number;
+  avg_spread_1h: number;
+  avg_spread_24h: number;
+  max_spread_24h: number;
+  min_spread_24h: number;
+  spread_volatility: number;
+  price_history: TimeSeriesPoint[];
+  volume_history: TimeSeriesPoint[];
+};
+
+export type MicroArbitrageDashboard = {
+  metrics: MicroArbitrageMetrics;
+  active_opportunities: ArbitrageOpportunity[];
+  recent_trades: MicroTradeHistory[];
+  trading_pairs: TradingPairInfo[];
+  exchanges: ExchangeInfo[];
+  price_analytics: PriceAnalytics[];
+  risk_analysis: {
+    current_exposure_usd: string;
+    max_exposure_usd: string;
+    diversification_score: number;
+    correlation_risk: number;
+    liquidity_risk: number;
+  };
+};
+
+export async function getMicroArbitrageDashboard(): Promise<MicroArbitrageDashboard | null> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/micro/dashboard`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getMicroOpportunities(): Promise<ArbitrageOpportunity[]> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/micro/opportunities`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.opportunities || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getMicroTradeHistory(limit = 50): Promise<MicroTradeHistory[]> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/micro/trades?limit=${limit}`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.trades || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getMicroPairAnalytics(pair: string): Promise<PriceAnalytics | null> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/micro/analytics/${pair}`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+// ---- On-Chain Data Analysis API ----
+export type BlockInfo = {
+  number: number;
+  hash: string;
+  timestamp: string;
+  gas_used: string;
+  gas_limit: string;
+  base_fee: string;
+  miner: string;
+  transaction_count: number;
+  mev_transactions: number;
+  total_mev_value: string;
+};
+
+export type TokenInfo = {
+  address: string;
+  name: string;
+  symbol: string;
+  decimals: number;
+  total_supply: string;
+  market_cap?: string;
+  price_usd?: string;
+  volume_24h?: string;
+  liquidity?: string;
+  verified: boolean;
+};
+
+export type DexPool = {
+  address: string;
+  dex_name: string;
+  token0: TokenInfo;
+  token1: TokenInfo;
+  reserve0: string;
+  reserve1: string;
+  total_liquidity_usd: string;
+  volume_24h_usd: string;
+  fee_tier: string;
+  apy?: number;
+  last_trade_time: string;
+};
+
+export type OnChainTransaction = {
+  hash: string;
+  block_number: number;
+  from: string;
+  to?: string;
+  value: string;
+  gas_used: string;
+  gas_price: string;
+  timestamp: string;
+  function_name?: string;
+  token_transfers: TokenTransfer[];
+  mev_type?: 'sandwich' | 'arbitrage' | 'liquidation' | 'frontrun' | 'backrun';
+  mev_profit?: string;
+  dex_trades?: DexTrade[];
+};
+
+export type TokenTransfer = {
+  token_address: string;
+  token_symbol: string;
+  from: string;
+  to: string;
+  amount: string;
+  amount_usd?: string;
+};
+
+export type DexTrade = {
+  dex_name: string;
+  pool_address: string;
+  token_in: string;
+  token_out: string;
+  amount_in: string;
+  amount_out: string;
+  price_impact: number;
+};
+
+export type GasTracking = {
+  current_base_fee: string;
+  recommended_gas_prices: {
+    slow: string;
+    standard: string;
+    fast: string;
+    instant: string;
+  };
+  gas_price_history: TimeSeriesPoint[];
+  block_utilization: number;
+  next_base_fee_estimate: string;
+};
+
+export type MevMetrics = {
+  total_mev_volume_eth: string;
+  mev_transactions_count: number;
+  sandwich_attacks: number;
+  arbitrage_opportunities: number;
+  liquidations: number;
+  average_mev_per_block: string;
+  top_mev_bots: {
+    address: string;
+    profit_eth: string;
+    transaction_count: number;
+    success_rate: number;
+  }[];
+};
+
+export type LiquidityAnalysis = {
+  total_tvl_usd: string;
+  top_pools: DexPool[];
+  new_pools_24h: number;
+  removed_liquidity_24h: string;
+  added_liquidity_24h: string;
+  impermanent_loss_risk: 'low' | 'medium' | 'high';
+};
+
+export type OnChainAnalytics = {
+  latest_block: BlockInfo;
+  gas_tracking: GasTracking;
+  mev_metrics: MevMetrics;
+  liquidity_analysis: LiquidityAnalysis;
+  trending_tokens: TokenInfo[];
+  whale_transactions: OnChainTransaction[];
+  flash_loan_activities: OnChainTransaction[];
+  protocol_stats: {
+    uniswap_v3_volume: string;
+    uniswap_v2_volume: string;
+    sushiswap_volume: string;
+    aave_tvl: string;
+    compound_tvl: string;
+  };
+};
+
+export async function getOnChainAnalytics(): Promise<OnChainAnalytics | null> {
+  try {
+    const res = await fetch(`${BASE}/api/onchain/analytics`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getTokenAnalysis(tokenAddress: string): Promise<TokenInfo | null> {
+  try {
+    const res = await fetch(`${BASE}/api/onchain/token/${tokenAddress}`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getPoolAnalysis(poolAddress: string): Promise<DexPool | null> {
+  try {
+    const res = await fetch(`${BASE}/api/onchain/pool/${poolAddress}`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getMevTransactions(limit = 20): Promise<OnChainTransaction[]> {
+  try {
+    const res = await fetch(`${BASE}/api/onchain/mev-transactions?limit=${limit}`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.transactions || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getWhaleTransactions(minValueUsd = 100000, limit = 20): Promise<OnChainTransaction[]> {
+  try {
+    const res = await fetch(`${BASE}/api/onchain/whale-transactions?min_value=${minValueUsd}&limit=${limit}`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.transactions || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getFlashLoanActivities(limit = 20): Promise<OnChainTransaction[]> {
+  try {
+    const res = await fetch(`${BASE}/api/onchain/flashloans?limit=${limit}`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.transactions || [];
+  } catch {
+    return [];
+  }
+}
+
+// ---- Network Health Monitor API ----
+export type NodeInfo = {
+  name: string;
+  url: string;
+  type: 'RPC' | 'WebSocket' | 'GraphQL';
+  status: 'healthy' | 'degraded' | 'down' | 'unknown';
+  last_check: string;
+  response_time_ms: number;
+  uptime_percentage: number;
+  block_height: number;
+  syncing: boolean;
+  peer_count: number;
+  version?: string;
+  error_message?: string;
+};
+
+export type NetworkMetrics = {
+  current_block: number;
+  blocks_behind: number;
+  avg_block_time_seconds: number;
+  network_hash_rate: string;
+  difficulty: string;
+  pending_transactions: number;
+  gas_price_gwei: number;
+  total_nodes_monitored: number;
+  healthy_nodes: number;
+  degraded_nodes: number;
+  down_nodes: number;
+};
+
+export type FlashbotsStatus = {
+  relay_status: 'online' | 'offline' | 'degraded';
+  last_bundle_submitted: string;
+  bundle_inclusion_rate: number;
+  avg_bundle_response_time_ms: number;
+  total_bundles_submitted_today: number;
+  successful_bundles_today: number;
+  relay_uptime_percentage: number;
+  estimated_relay_load: number;
+};
+
+export type ExternalServiceStatus = {
+  service_name: string;
+  category: 'price_feed' | 'data_provider' | 'infrastructure' | 'dex' | 'analytics';
+  status: 'operational' | 'degraded' | 'outage' | 'unknown';
+  response_time_ms: number;
+  last_successful_call: string;
+  error_rate_percentage: number;
+  rate_limit_remaining?: number;
+  rate_limit_reset?: string;
+  uptime_percentage: number;
+  incidents_24h: number;
+};
+
+export type SystemResourceMetrics = {
+  cpu_usage_percentage: number;
+  memory_usage_percentage: number;
+  memory_used_mb: number;
+  memory_total_mb: number;
+  disk_usage_percentage: number;
+  disk_free_gb: number;
+  network_in_mbps: number;
+  network_out_mbps: number;
+  active_connections: number;
+  load_average: number[];
+  goroutines_count?: number;
+  heap_size_mb?: number;
+};
+
+export type NetworkLatencyTest = {
+  target: string;
+  latency_ms: number;
+  packet_loss_percentage: number;
+  jitter_ms: number;
+  timestamp: string;
+  status: 'good' | 'fair' | 'poor';
+};
+
+export type NetworkHealthDashboard = {
+  network_metrics: NetworkMetrics;
+  nodes: NodeInfo[];
+  flashbots_status: FlashbotsStatus;
+  external_services: ExternalServiceStatus[];
+  system_resources: SystemResourceMetrics;
+  latency_tests: NetworkLatencyTest[];
+  network_incidents: {
+    id: string;
+    title: string;
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    status: 'open' | 'investigating' | 'resolved';
+    started_at: string;
+    resolved_at?: string;
+    affected_services: string[];
+    description: string;
+  }[];
+  performance_trends: {
+    block_time_trend: TimeSeriesPoint[];
+    gas_price_trend: TimeSeriesPoint[];
+    node_uptime_trend: TimeSeriesPoint[];
+    system_load_trend: TimeSeriesPoint[];
+  };
+};
+
+export async function getNetworkHealth(): Promise<NetworkHealthDashboard | null> {
+  try {
+    const res = await fetch(`${BASE}/api/network/health`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getNodeStatus(nodeUrl: string): Promise<NodeInfo | null> {
+  try {
+    const res = await fetch(`${BASE}/api/network/node-status?url=${encodeURIComponent(nodeUrl)}`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getServiceStatus(serviceName: string): Promise<ExternalServiceStatus | null> {
+  try {
+    const res = await fetch(`${BASE}/api/network/service-status/${serviceName}`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function runLatencyTest(target: string): Promise<NetworkLatencyTest | null> {
+  try {
+    const res = await fetch(`${BASE}/api/network/latency-test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target }),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function acknowledgeNetworkIncident(incidentId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/network/incidents/${incidentId}/acknowledge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ---- Risk Management API ----
+export type PositionRisk = {
+  strategy: string;
+  token_symbol: string;
+  position_size_usd: string;
+  max_position_size_usd: string;
+  utilization_percentage: number;
+  unrealized_pnl_usd: string;
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  liquidation_price?: string;
+  margin_ratio?: number;
+  time_to_liquidation_hours?: number;
+};
+
+export type VolatilityMetrics = {
+  token_symbol: string;
+  price_usd: string;
+  volatility_24h: number;
+  volatility_7d: number;
+  volatility_30d: number;
+  beta_to_eth: number;
+  correlation_to_btc: number;
+  risk_rating: 'low' | 'medium' | 'high' | 'extreme';
+  var_95_1d: string; // Value at Risk 95% 1-day
+  expected_shortfall: string;
+};
+
+export type LiquidityRisk = {
+  token_symbol: string;
+  total_liquidity_usd: string;
+  depth_1_percent: string;
+  depth_5_percent: string;
+  bid_ask_spread_bps: number;
+  liquidity_score: number;
+  slippage_impact_1k: number;
+  slippage_impact_10k: number;
+  slippage_impact_100k: number;
+  market_impact_score: number;
+};
+
+export type CounterpartyRisk = {
+  counterparty_name: string;
+  counterparty_type: 'dex' | 'cex' | 'protocol' | 'bridge';
+  exposure_usd: string;
+  risk_score: number;
+  credit_rating?: string;
+  tvl_usd?: string;
+  security_audit_score?: number;
+  insurance_coverage?: boolean;
+  last_incident?: string;
+  incident_count_6m: number;
+};
+
+export type GasRisk = {
+  current_gas_price_gwei: number;
+  gas_price_volatility: number;
+  max_acceptable_gas_gwei: number;
+  gas_limit_buffer_percentage: number;
+  estimated_daily_gas_cost_eth: string;
+  gas_cost_vs_profit_ratio: number;
+  gas_spike_probability: number;
+  optimal_gas_threshold_gwei: number;
+};
+
+export type PortfolioRisk = {
+  total_exposure_usd: string;
+  max_daily_loss_usd: string;
+  current_drawdown_percentage: number;
+  max_drawdown_percentage: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  calmar_ratio: number;
+  win_rate_percentage: number;
+  avg_win_loss_ratio: number;
+  correlation_matrix: Record<string, Record<string, number>>;
+};
+
+export type RiskLimit = {
+  id: string;
+  name: string;
+  type: 'position_size' | 'daily_loss' | 'gas_cost' | 'concentration' | 'leverage';
+  current_value: string;
+  limit_value: string;
+  utilization_percentage: number;
+  status: 'safe' | 'warning' | 'breached' | 'critical';
+  last_updated: string;
+  auto_action?: 'pause' | 'reduce' | 'liquidate';
+};
+
+export type StressTestScenario = {
+  id: string;
+  name: string;
+  description: string;
+  parameters: {
+    eth_price_change: number;
+    gas_price_multiplier: number;
+    liquidity_reduction: number;
+    volatility_multiplier: number;
+  };
+  results: {
+    estimated_loss_usd: string;
+    positions_at_risk: number;
+    liquidation_probability: number;
+    recovery_time_hours: number;
+  };
+  last_run: string;
+};
+
+export type RiskEvent = {
+  id: string;
+  timestamp: string;
+  event_type: 'limit_breach' | 'position_liquidated' | 'high_volatility' | 'gas_spike' | 'counterparty_issue';
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  title: string;
+  description: string;
+  affected_strategies: string[];
+  impact_usd: string;
+  auto_action_taken?: string;
+  manual_action_required: boolean;
+  resolved: boolean;
+  resolution_time_minutes?: number;
+};
+
+export type RiskDashboard = {
+  portfolio_risk: PortfolioRisk;
+  position_risks: PositionRisk[];
+  volatility_metrics: VolatilityMetrics[];
+  liquidity_risks: LiquidityRisk[];
+  counterparty_risks: CounterpartyRisk[];
+  gas_risk: GasRisk;
+  risk_limits: RiskLimit[];
+  stress_test_scenarios: StressTestScenario[];
+  recent_risk_events: RiskEvent[];
+  risk_summary: {
+    overall_risk_score: number;
+    risk_adjusted_return: number;
+    risk_capacity_utilization: number;
+    days_since_last_incident: number;
+    active_alerts_count: number;
+  };
+};
+
+export async function getRiskDashboard(): Promise<RiskDashboard | null> {
+  try {
+    const res = await fetch(`${BASE}/api/risk/dashboard`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function runStressTest(scenarioId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/risk/stress-test/${scenarioId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function updateRiskLimit(limitId: string, newLimit: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/risk/limits/${limitId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit_value: newLimit }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function acknowledgeRiskEvent(eventId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/risk/events/${eventId}/acknowledge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function emergencyPauseStrategy(strategy: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/risk/emergency-pause`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ strategy }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ---- Flashloan API ----
+export type FlashloanProvider = {
+  available: boolean;
+  max_amount: string;
+  fee_rate: string;
+  gas_cost: string;
+  last_update: number;
+};
+
+export type FlashloanTransaction = {
+  tx_hash: string;
+  timestamp: number;
+  provider: string;
+  token: string;
+  amount: string;
+  fee_paid: string;
+  strategy: string;
+  profit: string;
+  gas_used: string;
+  status: 'success' | 'failed' | 'pending';
+};
+
+export type FlashloanContract = {
+  address: string;
+  name: string;
+  verified: boolean;
+  proxy: boolean;
+  implementation: string | null;
+};
+
+export type SmartContract = {
+  solidity_version: string;
+  source_code: string;
+};
+
+export type FlashloanDashboard = {
+  flashloan_providers: Record<string, FlashloanProvider>;
+  recent_flashloans: FlashloanTransaction[];
+  performance_metrics: {
+    total_flashloans: number;
+    total_volume: string;
+    total_fees_paid: string;
+    total_profit: string;
+    success_rate: number;
+    avg_profit_per_loan: string;
+    most_used_provider: string;
+  };
+  flashloan_contracts: Record<string, FlashloanContract>;
+  smart_contracts: Record<string, SmartContract>;
+  gas_analytics: {
+    avg_gas_per_flashloan: string;
+    most_expensive_flashloan: string;
+    cheapest_flashloan: string;
+    gas_optimization_savings: string;
+  };
+};
+
+export async function getFlashloanDashboard(): Promise<FlashloanDashboard | null> {
+  try {
+    const res = await fetch(`${BASE}/api/flashloan/dashboard`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}

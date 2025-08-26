@@ -19,6 +19,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/strategies" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">전략</a>
               <a href="/bundles" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">번들</a>
               <a href="/mempool" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">멤풀</a>
+              <a href="/flashloan" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">플래시론</a>
+              <a href="/micro" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">마이크로</a>
+              <a href="/onchain" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">온체인</a>
+              <a href="/network" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">네트워크</a>
+              <a href="/risk" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">리스크</a>
               <a href="/performance" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">성능</a>
               <a href="/alerts" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">알림</a>
               <a href="/logs" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">로그</a>

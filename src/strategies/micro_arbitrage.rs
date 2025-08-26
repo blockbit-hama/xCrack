@@ -21,6 +21,8 @@ use crate::types::{
     OrderExecutionResult, OrderSide, OrderStatus, Bundle,
 };
 use crate::strategies::Strategy;
+use crate::flashbots::FlashbotsClient;
+use serde::Deserialize;
 
 /// 초단타 마이크로 아비트래지 전략
 /// 
@@ -611,9 +613,13 @@ impl MicroArbitrageStrategy {
         let amount_in = opportunity.max_amount;
 
         // buyCalldata: swapExactTokensForTokens(amountIn, amountOutMin, path=[token_in, token_out], to=receiver, deadline)
-        // 간단한 슬리피지 가드: 50bps
+        // 동적 슬리피지 가드: 0x 견적으로 minOut 산정, 실패 시 50bps
         let slippage_bps = 50u64;
-        let amount_out_min_buy = amount_in * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64);
+        let amount_out_min_buy = if let Some(q) = self.estimate_buy_amount_via_0x(token_in_addr, token_out_addr, amount_in).await {
+            q * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64)
+        } else {
+            amount_in * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64)
+        };
         let buy_path = vec![token_in_addr, token_out_addr];
         let buy_calldata = codec.encode_uniswap_v2_swap_exact_tokens(
             amount_in,
@@ -625,7 +631,7 @@ impl MicroArbitrageStrategy {
 
         // sellCalldata: swapExactTokensForTokens(amountIn=<all>, amountOutMin, path=[token_out, token_in], to=receiver, deadline)
         let sell_path = vec![token_out_addr, token_in_addr];
-        // sell도 50bps 가드 (보수적으로 동일 수치 적용)
+        // sell도 동일 가드 적용 (보수적)
         let amount_out_min_sell = amount_in * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64);
         // 여기서는 전량 매도를 위해 amountIn은 리시버 내에서 잔액 사용. V2는 exactTokens이므로 대략 amount_in 사용.
         let sell_calldata = codec.encode_uniswap_v2_swap_exact_tokens(
@@ -655,9 +661,80 @@ impl MicroArbitrageStrategy {
             0u16,
         )?;
 
-        // 번들 제출은 공통 경로(번들 매니저)로 전달하는 대신 여기서는 true만 반환하여 상위 실행 플로우 유지
-        debug!("📦 마이크로 DEX 아비트라지 플래시론 트랜잭션 인코딩 완료 (바로 전송 경로는 샌드위치/청산과 동일 체계에 후속 통합)");
-        Ok(true)
+        // 예상 수익(USD) > 최소 수익/프리미엄 가드
+        if !self.guard_min_profit_usd(opportunity, amount_in).await? {
+            warn!("⚠️ 예상 수익이 임계값 미만, 플래시론 경로 스킵");
+            return Ok(false);
+        }
+
+        // 플래시론 트랜잭션 구성 (Aave Pool 호출)
+        let flashloan_tx = crate::types::Transaction {
+            hash: alloy::primitives::B256::ZERO,
+            from: alloy::primitives::Address::ZERO,
+            to: Some(*contracts::AAVE_V3_POOL),
+            value: alloy::primitives::U256::ZERO,
+            gas_price: alloy::primitives::U256::from(30_000_000_000u64),
+            gas_limit: alloy::primitives::U256::from(500_000u64),
+            data: flash_calldata.to_vec(),
+            nonce: 0,
+            timestamp: chrono::Utc::now(),
+            block_number: None,
+        };
+
+        // 번들 생성 및 제출 (예상 수익은 보수적으로 0으로 설정)
+        let bundle = crate::types::Bundle::new(
+            vec![flashloan_tx],
+            0,
+            alloy::primitives::U256::ZERO,
+            500_000,
+            StrategyType::MicroArbitrage,
+        );
+
+        let client = FlashbotsClient::new(Arc::clone(&self.config)).await?;
+        let ok = client.submit_bundle(&bundle).await.unwrap_or(false);
+        if ok { info!("✅ 마이크로 플래시론 번들 제출 완료"); } else { warn!("❌ 마이크로 플래시론 번들 제출 실패"); }
+        Ok(ok)
+    }
+
+    /// 0x 견적으로 buy amountOut 추정 (실패 시 None)
+    async fn estimate_buy_amount_via_0x(
+        &self,
+        token_in: alloy::primitives::Address,
+        token_out: alloy::primitives::Address,
+        amount_in: alloy::primitives::U256,
+    ) -> Option<alloy::primitives::U256> {
+        #[derive(Deserialize)]
+        struct Quote { #[serde(rename = "buyAmount")] buy_amount: String }
+        let url = format!(
+            "https://api.0x.org/swap/v1/quote?sellToken={}&buyToken={}&sellAmount={}",
+            format!("{:x}", token_in),
+            format!("{:x}", token_out),
+            amount_in.to_string()
+        );
+        let client = reqwest::Client::new();
+        match client.get(&url).send().await.ok()?.json::<Quote>().await.ok() {
+            Some(q) => {
+                q.buy_amount.parse::<alloy::primitives::U256>().ok()
+            }
+            None => None,
+        }
+    }
+
+    /// 번들 제출 전 최소 USD 수익 가드 (플래시론 프리미엄 9bps 반영)
+    async fn guard_min_profit_usd(
+        &self,
+        opportunity: &MicroArbitrageOpportunity,
+        amount_in: alloy::primitives::U256,
+    ) -> Result<bool> {
+        // 기회에 내장된 profit_percentage를 사용하여 대략적 USD 수익 추정
+        let base_amount = amount_in.to::<u128>() as f64 / 1e18;
+        let buy_px = opportunity.buy_price.to_f64().unwrap_or(0.0);
+        let expected_usd = base_amount * buy_px * opportunity.profit_percentage;
+        // 플래시론 프리미엄 차감(9bps)
+        let premium = base_amount * buy_px * 0.0009;
+        let net_usd = expected_usd - premium;
+        let min_usd = self.min_profit_usd.to_f64().unwrap_or(0.0);
+        Ok(net_usd >= min_usd)
     }
     
     /// 거래소 클라이언트 생성

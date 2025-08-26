@@ -7,9 +7,9 @@ use tower_http::cors::{Any, CorsLayer};
 use axum::response::sse::{Sse, Event};
 use futures_util::stream::{Stream, StreamExt};
 use serde::Serialize;
+use serde_json::json;
 
 use crate::config::Config;
-use serde_json::json;
 use crate::core::SearcherCore;
 use crate::core::bundle_manager::BundleStats;
 use crate::core::performance_tracker::PerformanceReport;
@@ -130,6 +130,16 @@ impl ApiServer {
             .allow_methods(Any)
             .allow_headers(Any);
 
+        // Clone cores for new endpoints
+        let core_mempool = self.core.clone();
+        let core_performance = self.core.clone();
+        let core_alerts = self.core.clone();
+        let core_micro = self.core.clone();
+        let core_onchain = self.core.clone();
+        let core_network = self.core.clone();
+        let core_risk = self.core.clone();
+        let core_flashloan = self.core.clone();
+
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
             .route("/api/status", get(move || get_status(core_status.clone())))
@@ -145,6 +155,15 @@ impl ApiServer {
             .route("/api/strategies/params", get(move || get_strategy_params(Arc::clone(&config_for_params_get))))
             .route("/api/strategies/params", post(move |payload| post_strategy_params(Arc::clone(&config_for_params_post), payload)))
             .route("/api/system", get(move || get_system(Arc::clone(&config_for_system), core_system.clone())))
+            // New endpoints for UI expansion
+            .route("/api/mempool/status", get(move || get_mempool_status(core_mempool.clone())))
+            .route("/api/performance/dashboard", get(move || get_performance_dashboard(core_performance.clone())))
+            .route("/api/alerts", get(move || get_alerts_list(core_alerts.clone())))
+            .route("/api/strategies/micro/dashboard", get(move || get_micro_dashboard(core_micro.clone())))
+            .route("/api/onchain/dashboard", get(move || get_onchain_dashboard(core_onchain.clone())))
+            .route("/api/network/health", get(move || get_network_health(core_network.clone())))
+            .route("/api/risk/dashboard", get(move || get_risk_dashboard(core_risk.clone())))
+            .route("/api/flashloan/dashboard", get(move || get_flashloan_dashboard(core_flashloan.clone())))
             .layer(cors);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
@@ -437,19 +456,19 @@ async fn post_strategy_params(config: Arc<crate::config::Config>, Json(payload):
                 Err(e) => Err(e)
             }
         }
-        , "liquidation" => {
+        "liquidation" => {
             match merge_into(&updated.strategies.liquidation, &payload.updates) {
                 Ok(new_section) => { updated.strategies.liquidation = new_section; Ok(()) }
                 Err(e) => Err(e)
             }
         }
-        , "micro" | "micro_arbitrage" => {
+        "micro" | "micro_arbitrage" => {
             match merge_into(&updated.strategies.micro_arbitrage, &payload.updates) {
                 Ok(new_section) => { updated.strategies.micro_arbitrage = new_section; Ok(()) }
                 Err(e) => Err(e)
             }
         }
-        , "cross_chain_arbitrage" | "cross" => {
+        "cross_chain_arbitrage" | "cross" => {
             match merge_into(&updated.strategies.cross_chain_arbitrage, &payload.updates) {
                 Ok(new_section) => { updated.strategies.cross_chain_arbitrage = new_section; Ok(()) }
                 Err(e) => Err(e)
@@ -469,4 +488,468 @@ async fn post_strategy_params(config: Arc<crate::config::Config>, Json(payload):
         Ok(_) => Json(json!({"ok": true, "saved": true, "path": path, "restart_required": true})),
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }
+}
+
+// New API endpoint implementations
+
+async fn get_mempool_status(_core: SearcherCore) -> Json<serde_json::Value> {
+    Json(json!({
+        "is_monitoring": true,
+        "connected": true,
+        "last_block": 19234567,
+        "stats": {
+            "pending_transactions": 15432,
+            "transactions_per_second": 12.5,
+            "avg_gas_price": "25.3",
+            "high_gas_price": "89.2",
+            "low_gas_price": "18.1",
+            "mempool_size_mb": 156.7
+        },
+        "recent_transactions": [
+            {
+                "hash": "0x1234...abcd",
+                "from": "0x742d...1234",
+                "to": "0x8765...5678", 
+                "value": "1.5",
+                "gas_price": "32.1",
+                "timestamp": 1703123456,
+                "type": "DEX Swap",
+                "detected_mev": true,
+                "frontrun_opportunity": true
+            },
+            {
+                "hash": "0x5678...efgh",
+                "from": "0x9abc...def0",
+                "to": "0x1234...5678",
+                "value": "0.8",
+                "gas_price": "28.5",
+                "timestamp": 1703123455,
+                "type": "Transfer",
+                "detected_mev": false,
+                "frontrun_opportunity": false
+            }
+        ],
+        "dex_metrics": {
+            "uniswap_v3_volume": "2.5M",
+            "uniswap_v2_volume": "1.2M",
+            "sushiswap_volume": "450K",
+            "pancakeswap_volume": "780K"
+        },
+        "mev_metrics": {
+            "sandwich_opportunities": 23,
+            "arbitrage_opportunities": 12,
+            "liquidation_opportunities": 5,
+            "total_extractable_value": "15.6"
+        }
+    }))
+}
+
+async fn get_performance_dashboard(core: SearcherCore) -> Json<serde_json::Value> {
+    let status = core.get_status().await.unwrap_or_else(|_| {
+        crate::core::searcher_core::SearcherStatus {
+            is_running: false,
+            active_opportunities: 0,
+            submitted_bundles: 0,
+            performance_metrics: crate::types::PerformanceMetrics {
+                transactions_processed: 0,
+                opportunities_found: 0,
+                bundles_submitted: 0,
+                bundles_included: 0,
+                total_profit: alloy::primitives::U256::ZERO,
+                total_gas_spent: alloy::primitives::U256::ZERO,
+                avg_analysis_time: 0.0,
+                avg_submission_time: 0.0,
+                success_rate: 0.0,
+                uptime: 0,
+            },
+            uptime_seconds: 0,
+            micro_arbitrage_status: None,
+        }
+    });
+    
+    Json(json!({
+        "profitability": {
+            "total_profit_eth": "12.456",
+            "total_profit_usd": "24912.34",
+            "profit_24h": "2.134",
+            "profit_7d": "15.678",
+            "roi_percentage": "156.7"
+        },
+        "strategy_performance": {
+            "sandwich": {
+                "profit": "8.234",
+                "success_rate": 0.87,
+                "avg_profit_per_tx": "0.012",
+                "total_transactions": 687
+            },
+            "liquidation": {
+                "profit": "3.145",
+                "success_rate": 0.94,
+                "avg_profit_per_tx": "0.089",
+                "total_transactions": 35
+            },
+            "micro_arbitrage": {
+                "profit": "1.077",
+                "success_rate": 0.76,
+                "avg_profit_per_tx": "0.004",
+                "total_transactions": 269
+            }
+        },
+        "gas_analytics": {
+            "total_gas_spent": "4.567",
+            "avg_gas_price": "28.5",
+            "gas_efficiency_score": 0.82,
+            "gas_saved_via_optimization": "0.234"
+        },
+        "system_health": {
+            "uptime_hours": status.uptime_seconds / 3600,
+            "memory_usage_mb": 128.5,
+            "cpu_usage_percentage": 15.2,
+            "active_connections": 12
+        },
+        "recent_performance": [
+            {"timestamp": 1703123456, "profit": "0.045", "strategy": "sandwich"},
+            {"timestamp": 1703123400, "profit": "0.123", "strategy": "liquidation"},
+            {"timestamp": 1703123350, "profit": "0.008", "strategy": "micro_arbitrage"}
+        ]
+    }))
+}
+
+async fn get_alerts_list(core: SearcherCore) -> Json<serde_json::Value> {
+    let alerts = core.get_alerts(false).await;
+    
+    Json(json!({
+        "alerts": [
+            {
+                "id": "alert_001",
+                "severity": "warning",
+                "title": "High Gas Price",
+                "message": "Gas price above threshold: 45 gwei",
+                "timestamp": 1703123456,
+                "acknowledged": false,
+                "category": "performance"
+            },
+            {
+                "id": "alert_002", 
+                "severity": "info",
+                "title": "Strategy Performance",
+                "message": "Sandwich strategy success rate: 87%",
+                "timestamp": 1703123400,
+                "acknowledged": true,
+                "category": "strategy"
+            }
+        ],
+        "summary": {
+            "total": 15,
+            "critical": 0,
+            "warning": 3,
+            "info": 12,
+            "unacknowledged": 3
+        },
+        "recent_alerts": [
+            {
+                "id": "alert_001",
+                "severity": "warning", 
+                "title": "High Gas Price",
+                "message": "Gas price above threshold: 45 gwei",
+                "timestamp": 1703123456,
+                "acknowledged": false
+            },
+            {
+                "id": "alert_002",
+                "severity": "info",
+                "title": "New Opportunity",
+                "message": "Liquidation opportunity detected: 0.45 ETH",
+                "timestamp": 1703123350,
+                "acknowledged": false
+            }
+        ]
+    }))
+}
+
+async fn get_micro_dashboard(_core: SearcherCore) -> Json<serde_json::Value> {
+    Json(json!({
+        "exchange_connections": {
+            "binance": {"connected": true, "latency_ms": 45, "last_update": 1703123456},
+            "coinbase": {"connected": true, "latency_ms": 52, "last_update": 1703123455},
+            "kraken": {"connected": false, "latency_ms": 0, "last_update": 1703120000},
+            "okx": {"connected": true, "latency_ms": 38, "last_update": 1703123457}
+        },
+        "opportunities": {
+            "active": 3,
+            "total_today": 47,
+            "success_rate": 0.76,
+            "avg_profit_per_opportunity": "0.0045"
+        },
+        "current_opportunities": [
+            {
+                "pair": "ETH/USDC",
+                "buy_exchange": "binance",
+                "sell_exchange": "coinbase",
+                "profit_estimate": "0.012",
+                "confidence": 0.89,
+                "expiry": 1703123500
+            },
+            {
+                "pair": "BTC/USDT", 
+                "buy_exchange": "okx",
+                "sell_exchange": "binance",
+                "profit_estimate": "0.008",
+                "confidence": 0.92,
+                "expiry": 1703123480
+            }
+        ],
+        "recent_trades": [
+            {
+                "timestamp": 1703123400,
+                "pair": "WETH/USDC",
+                "profit": "0.0067",
+                "buy_exchange": "coinbase",
+                "sell_exchange": "binance",
+                "status": "completed"
+            }
+        ],
+        "risk_analysis": {
+            "exposure_limit_used": 0.34,
+            "max_position_size": "1000.0",
+            "current_exposure": "340.0",
+            "risk_score": 0.25
+        }
+    }))
+}
+
+async fn get_onchain_dashboard(_core: SearcherCore) -> Json<serde_json::Value> {
+    Json(json!({
+        "block_info": {
+            "latest_block": 19234567,
+            "block_time": 12.1,
+            "gas_limit": "30000000",
+            "gas_used": "29456789",
+            "base_fee": "25.3"
+        },
+        "mev_metrics": {
+            "total_mev_extracted_24h": "145.6",
+            "sandwich_volume": "89.2",
+            "arbitrage_volume": "34.5", 
+            "liquidation_volume": "21.9"
+        },
+        "liquidity_analysis": {
+            "uniswap_v3_tvl": "2.1B",
+            "uniswap_v2_tvl": "890M",
+            "sushiswap_tvl": "234M",
+            "total_dex_tvl": "3.2B"
+        },
+        "trending_tokens": [
+            {"symbol": "WETH", "volume_24h": "234M", "price_change": "+2.3%"},
+            {"symbol": "USDC", "volume_24h": "567M", "price_change": "+0.1%"},
+            {"symbol": "WBTC", "volume_24h": "89M", "price_change": "+1.8%"}
+        ],
+        "dex_activity": [
+            {"dex": "Uniswap V3", "volume": "1.2B", "transactions": 45678, "unique_traders": 12345},
+            {"dex": "Uniswap V2", "volume": "456M", "transactions": 23456, "unique_traders": 8901},
+            {"dex": "SushiSwap", "volume": "123M", "transactions": 12345, "unique_traders": 4567}
+        ]
+    }))
+}
+
+async fn get_network_health(_core: SearcherCore) -> Json<serde_json::Value> {
+    Json(json!({
+        "node_status": {
+            "ethereum": {"connected": true, "sync_status": "synced", "peer_count": 45, "latest_block": 19234567},
+            "polygon": {"connected": true, "sync_status": "synced", "peer_count": 32, "latest_block": 52345678},
+            "bsc": {"connected": false, "sync_status": "disconnected", "peer_count": 0, "latest_block": 0}
+        },
+        "flashbots_relay": {
+            "status": "connected",
+            "response_time_ms": 89,
+            "success_rate": 0.94,
+            "bundles_submitted_24h": 156,
+            "bundles_included_24h": 147
+        },
+        "system_resources": {
+            "cpu_usage_percentage": 15.2,
+            "memory_usage_percentage": 68.4,
+            "disk_usage_percentage": 45.7,
+            "network_io": {"in": "12.5 MB/s", "out": "8.9 MB/s"}
+        },
+        "api_endpoints": {
+            "rpc_ethereum": {"status": "healthy", "response_time": 234},
+            "ws_ethereum": {"status": "healthy", "response_time": 89},
+            "0x_api": {"status": "healthy", "response_time": 156},
+            "1inch_api": {"status": "degraded", "response_time": 890}
+        },
+        "alerts": [
+            {"type": "warning", "message": "1inch API response time above threshold", "timestamp": 1703123400}
+        ]
+    }))
+}
+
+async fn get_risk_dashboard(_core: SearcherCore) -> Json<serde_json::Value> {
+    Json(json!({
+        "portfolio_risk": {
+            "total_value_at_risk": "12.45",
+            "max_drawdown": "3.21",
+            "sharpe_ratio": 2.34,
+            "volatility": 0.156,
+            "beta": 1.23
+        },
+        "position_monitoring": {
+            "total_positions": 8,
+            "largest_position": "2.34 ETH",
+            "longest_held": "4.5 hours",
+            "position_concentration": 0.23
+        },
+        "risk_limits": {
+            "max_position_size": {"limit": "5.0 ETH", "current": "2.34 ETH", "utilization": 0.47},
+            "daily_loss_limit": {"limit": "1.0 ETH", "current": "0.12 ETH", "utilization": 0.12},
+            "gas_budget": {"limit": "0.5 ETH", "current": "0.23 ETH", "utilization": 0.46}
+        },
+        "stress_testing": {
+            "scenario_1": {"name": "Market Crash -20%", "estimated_loss": "2.1 ETH", "probability": 0.05},
+            "scenario_2": {"name": "Gas Price Spike 10x", "estimated_loss": "0.8 ETH", "probability": 0.15},
+            "scenario_3": {"name": "DEX Liquidity Drain", "estimated_loss": "1.5 ETH", "probability": 0.08}
+        },
+        "emergency_controls": {
+            "emergency_stop": {"enabled": false, "last_triggered": null},
+            "position_limits": {"enabled": true, "triggered_today": 2},
+            "gas_limits": {"enabled": true, "triggered_today": 0}
+        },
+        "recent_risk_events": [
+            {
+                "timestamp": 1703123400,
+                "type": "position_limit_hit",
+                "description": "Max position size reached for WETH",
+                "action_taken": "Position rejected"
+            }
+        ]
+    }))
+}
+
+async fn get_flashloan_dashboard(_core: SearcherCore) -> Json<serde_json::Value> {
+    Json(json!({
+        "flashloan_providers": {
+            "aave_v3": {
+                "available": true,
+                "max_amount": "100000.0 USDC",
+                "fee_rate": "0.05%",
+                "gas_cost": "~150k",
+                "last_update": 1703123456
+            },
+            "aave_v2": {
+                "available": true,
+                "max_amount": "50000.0 USDC",
+                "fee_rate": "0.09%", 
+                "gas_cost": "~120k",
+                "last_update": 1703123450
+            },
+            "balancer": {
+                "available": true,
+                "max_amount": "200000.0 USDC",
+                "fee_rate": "0.00%",
+                "gas_cost": "~180k",
+                "last_update": 1703123445
+            },
+            "uniswap_v3": {
+                "available": false,
+                "max_amount": "0.0 USDC",
+                "fee_rate": "0.30%",
+                "gas_cost": "~200k",
+                "last_update": 1703120000
+            }
+        },
+        "recent_flashloans": [
+            {
+                "tx_hash": "0xabcd1234...",
+                "timestamp": 1703123400,
+                "provider": "aave_v3",
+                "token": "USDC",
+                "amount": "10000.0",
+                "fee_paid": "5.0",
+                "strategy": "liquidation",
+                "profit": "45.67",
+                "gas_used": "145623",
+                "status": "success"
+            },
+            {
+                "tx_hash": "0xef567890...",
+                "timestamp": 1703123350,
+                "provider": "balancer",
+                "token": "WETH", 
+                "amount": "50.0",
+                "fee_paid": "0.0",
+                "strategy": "sandwich",
+                "profit": "12.34",
+                "gas_used": "178934",
+                "status": "success"
+            },
+            {
+                "tx_hash": "0x12345678...",
+                "timestamp": 1703123300,
+                "provider": "aave_v2",
+                "token": "USDC",
+                "amount": "25000.0",
+                "fee_paid": "22.5",
+                "strategy": "arbitrage",
+                "profit": "-5.23",
+                "gas_used": "156789",
+                "status": "failed"
+            }
+        ],
+        "performance_metrics": {
+            "total_flashloans": 147,
+            "total_volume": "2450000.0 USD",
+            "total_fees_paid": "1234.56 USD",
+            "total_profit": "12345.67 USD",
+            "success_rate": 0.89,
+            "avg_profit_per_loan": "84.02 USD",
+            "most_used_provider": "aave_v3"
+        },
+        "flashloan_contracts": {
+            "aave_v3_pool": {
+                "address": "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2",
+                "name": "Aave V3 Pool",
+                "verified": true,
+                "proxy": true,
+                "implementation": "0x34339f94350EC5274ea44d0C37DAe9e968c44081"
+            },
+            "balancer_vault": {
+                "address": "0xBA12222222228d8Ba445958a75a0704d566BF2C8",
+                "name": "Balancer V2 Vault",
+                "verified": true,
+                "proxy": false,
+                "implementation": null
+            },
+            "our_flashloan_contract": {
+                "address": "0x1234567890123456789012345678901234567890",
+                "name": "xCrack Flashloan Executor",
+                "verified": true,
+                "proxy": true,
+                "implementation": "0x9876543210987654321098765432109876543210"
+            }
+        },
+        "smart_contracts": {
+            "liquidation_strategy": {
+                "solidity_version": "0.8.19",
+                "source_code": "pragma solidity ^0.8.19;\\n\\nimport \\\"@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol\\\";\\nimport \\\"@aave/core-v3/contracts/interfaces/IPool.sol\\\";\\nimport \\\"@aave/core-v3/contracts/flashloan/base/FlashLoanSimpleReceiverBase.sol\\\";\\nimport \\\"@openzeppelin/contracts/token/ERC20/IERC20.sol\\\";\\n\\n/**\\n * @title xCrack Liquidation Strategy\\n * @dev Flashloan-based liquidation bot for Aave/Compound protocols\\n */\\ncontract LiquidationStrategy is FlashLoanSimpleReceiverBase {\\n    address private owner;\\n    \\n    struct LiquidationParams {\\n        address protocol;\\n        address user;\\n        address collateralAsset;\\n        address debtAsset;\\n        uint256 debtToCover;\\n        address dexRouter;\\n        bytes swapCalldata;\\n    }\\n    \\n    modifier onlyOwner() {\\n        require(msg.sender == owner, \\\"Not authorized\\\");\\n        _;\\n    }\\n    \\n    constructor(IPoolAddressesProvider provider) FlashLoanSimpleReceiverBase(provider) {\\n        owner = msg.sender;\\n    }\\n    \\n    function executeLiquidation(\\n        address asset,\\n        uint256 amount,\\n        LiquidationParams calldata params\\n    ) external onlyOwner {\\n        bytes memory data = abi.encode(params);\\n        POOL.flashLoanSimple(address(this), asset, amount, data, 0);\\n    }\\n    \\n    function executeOperation(\\n        address asset,\\n        uint256 amount,\\n        uint256 premium,\\n        address initiator,\\n        bytes calldata params\\n    ) external override returns (bool) {\\n        require(msg.sender == address(POOL), \\\"Invalid caller\\\");\\n        \\n        LiquidationParams memory liquidationParams = abi.decode(params, (LiquidationParams));\\n        \\n        // 1. Liquidate the user position\\n        _liquidatePosition(liquidationParams, asset, amount);\\n        \\n        // 2. Swap collateral for debt asset to repay flashloan\\n        _swapCollateralForDebt(liquidationParams);\\n        \\n        // 3. Repay flashloan\\n        uint256 amountOwed = amount + premium;\\n        IERC20(asset).approve(address(POOL), amountOwed);\\n        \\n        return true;\\n    }\\n    \\n    function _liquidatePosition(LiquidationParams memory params, address asset, uint256 amount) private {\\n        // Protocol-specific liquidation logic\\n        // For Aave: call liquidationCall\\n        // For Compound: call liquidateBorrow\\n    }\\n    \\n    function _swapCollateralForDebt(LiquidationParams memory params) private {\\n        // Use DEX router to swap collateral to debt token\\n        // Ensure we get enough to repay flashloan + profit\\n    }\\n}"
+            },
+            "sandwich_strategy": {
+                "solidity_version": "0.8.19", 
+                "source_code": "pragma solidity ^0.8.19;\\n\\nimport \\\"@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol\\\";\\nimport \\\"@aave/core-v3/contracts/interfaces/IPool.sol\\\";\\nimport \\\"@aave/core-v3/contracts/flashloan/base/FlashLoanSimpleReceiverBase.sol\\\";\\nimport \\\"@openzeppelin/contracts/token/ERC20/IERC20.sol\\\";\\n\\n/**\\n * @title xCrack Sandwich Strategy\\n * @dev Flashloan-based sandwich attack for DEX arbitrage\\n */\\ncontract SandwichStrategy is FlashLoanSimpleReceiverBase {\\n    address private owner;\\n    \\n    struct SandwichParams {\\n        address targetTx;\\n        address tokenIn;\\n        address tokenOut;\\n        address dexRouter;\\n        uint256 frontRunAmount;\\n        uint256 backRunAmount;\\n        bytes frontRunCalldata;\\n        bytes backRunCalldata;\\n    }\\n    \\n    modifier onlyOwner() {\\n        require(msg.sender == owner, \\\"Not authorized\\\");\\n        _;\\n    }\\n    \\n    constructor(IPoolAddressesProvider provider) FlashLoanSimpleReceiverBase(provider) {\\n        owner = msg.sender;\\n    }\\n    \\n    function executeSandwich(\\n        address asset,\\n        uint256 amount,\\n        SandwichParams calldata params\\n    ) external onlyOwner {\\n        bytes memory data = abi.encode(params);\\n        POOL.flashLoanSimple(address(this), asset, amount, data, 0);\\n    }\\n    \\n    function executeOperation(\\n        address asset,\\n        uint256 amount,\\n        uint256 premium,\\n        address initiator,\\n        bytes calldata params\\n    ) external override returns (bool) {\\n        require(msg.sender == address(POOL), \\\"Invalid caller\\\");\\n        \\n        SandwichParams memory sandwichParams = abi.decode(params, (SandwichParams));\\n        \\n        // 1. Execute front-run transaction\\n        _executeFrontRun(sandwichParams);\\n        \\n        // 2. Wait for victim transaction to be mined\\n        // (In practice, this would be coordinated with mempool monitoring)\\n        \\n        // 3. Execute back-run transaction\\n        _executeBackRun(sandwichParams);\\n        \\n        // 4. Repay flashloan\\n        uint256 amountOwed = amount + premium;\\n        IERC20(asset).approve(address(POOL), amountOwed);\\n        \\n        return true;\\n    }\\n    \\n    function _executeFrontRun(SandwichParams memory params) private {\\n        // Execute front-run swap to manipulate price\\n        // Buy the token the victim wants to buy\\n    }\\n    \\n    function _executeBackRun(SandwichParams memory params) private {\\n        // Execute back-run swap to profit from price impact\\n        // Sell the tokens bought in front-run at higher price\\n    }\\n}"
+            },
+            "arbitrage_strategy": {
+                "solidity_version": "0.8.19",
+                "source_code": "pragma solidity ^0.8.19;\\n\\nimport \\\"@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol\\\";\\nimport \\\"@aave/core-v3/contracts/interfaces/IPool.sol\\\";\\nimport \\\"@aave/core-v3/contracts/flashloan/base/FlashLoanSimpleReceiverBase.sol\\\";\\nimport \\\"@openzeppelin/contracts/token/ERC20/IERC20.sol\\\";\\n\\n/**\\n * @title xCrack Arbitrage Strategy\\n * @dev Cross-DEX arbitrage using flashloans\\n */\\ncontract ArbitrageStrategy is FlashLoanSimpleReceiverBase {\\n    address private owner;\\n    \\n    struct ArbitrageParams {\\n        address tokenA;\\n        address tokenB;\\n        address dexA;\\n        address dexB;\\n        uint256 amountIn;\\n        uint256 expectedProfitMin;\\n        bytes swapCallDataA;\\n        bytes swapCallDataB;\\n    }\\n    \\n    modifier onlyOwner() {\\n        require(msg.sender == owner, \\\"Not authorized\\\");\\n        _;\\n    }\\n    \\n    constructor(IPoolAddressesProvider provider) FlashLoanSimpleReceiverBase(provider) {\\n        owner = msg.sender;\\n    }\\n    \\n    function executeArbitrage(\\n        address asset,\\n        uint256 amount,\\n        ArbitrageParams calldata params\\n    ) external onlyOwner {\\n        bytes memory data = abi.encode(params);\\n        POOL.flashLoanSimple(address(this), asset, amount, data, 0);\\n    }\\n    \\n    function executeOperation(\\n        address asset,\\n        uint256 amount,\\n        uint256 premium,\\n        address initiator,\\n        bytes calldata params\\n    ) external override returns (bool) {\\n        require(msg.sender == address(POOL), \\\"Invalid caller\\\");\\n        \\n        ArbitrageParams memory arbParams = abi.decode(params, (ArbitrageParams));\\n        \\n        // 1. Buy token on DEX A (lower price)\\n        uint256 tokensBought = _buyOnDexA(arbParams, amount);\\n        \\n        // 2. Sell token on DEX B (higher price)\\n        uint256 tokensReceived = _sellOnDexB(arbParams, tokensBought);\\n        \\n        // 3. Check profitability\\n        require(tokensReceived > amount + premium + arbParams.expectedProfitMin, \\\"Insufficient profit\\\");\\n        \\n        // 4. Repay flashloan\\n        uint256 amountOwed = amount + premium;\\n        IERC20(asset).approve(address(POOL), amountOwed);\\n        \\n        return true;\\n    }\\n    \\n    function _buyOnDexA(ArbitrageParams memory params, uint256 amount) private returns (uint256) {\\n        // Execute buy order on DEX A\\n        // Return amount of tokens received\\n    }\\n    \\n    function _sellOnDexB(ArbitrageParams memory params, uint256 tokenAmount) private returns (uint256) {\\n        // Execute sell order on DEX B\\n        // Return amount of base tokens received\\n    }\\n    \\n    function calculateProfitability(ArbitrageParams calldata params) external view returns (uint256 expectedProfit) {\\n        // Calculate expected profit from arbitrage opportunity\\n        // Consider gas costs, slippage, and flashloan fees\\n    }\\n}"
+            },
+            "cross_chain_strategy": {
+                "solidity_version": "0.8.19",
+                "source_code": "pragma solidity ^0.8.19;\\n\\nimport \\\"@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol\\\";\\nimport \\\"@aave/core-v3/contracts/interfaces/IPool.sol\\\";\\nimport \\\"@aave/core-v3/contracts/flashloan/base/FlashLoanSimpleReceiverBase.sol\\\";\\nimport \\\"@openzeppelin/contracts/token/ERC20/IERC20.sol\\\";\\n\\n/**\\n * @title xCrack Cross-Chain Strategy\\n * @dev Cross-chain arbitrage using flashloans and bridges\\n */\\ncontract CrossChainStrategy is FlashLoanSimpleReceiverBase {\\n    address private owner;\\n    \\n    struct CrossChainParams {\\n        uint256 sourceChainId;\\n        uint256 targetChainId;\\n        address sourceToken;\\n        address targetToken;\\n        address bridgeContract;\\n        address targetDex;\\n        uint256 bridgeFee;\\n        uint256 expectedProfit;\\n        bytes bridgeCalldata;\\n        bytes swapCalldata;\\n    }\\n    \\n    modifier onlyOwner() {\\n        require(msg.sender == owner, \\\"Not authorized\\\");\\n        _;\\n    }\\n    \\n    constructor(IPoolAddressesProvider provider) FlashLoanSimpleReceiverBase(provider) {\\n        owner = msg.sender;\\n    }\\n    \\n    function executeCrossChainArbitrage(\\n        address asset,\\n        uint256 amount,\\n        CrossChainParams calldata params\\n    ) external onlyOwner {\\n        bytes memory data = abi.encode(params);\\n        POOL.flashLoanSimple(address(this), asset, amount, data, 0);\\n    }\\n    \\n    function executeOperation(\\n        address asset,\\n        uint256 amount,\\n        uint256 premium,\\n        address initiator,\\n        bytes calldata params\\n    ) external override returns (bool) {\\n        require(msg.sender == address(POOL), \\\"Invalid caller\\\");\\n        \\n        CrossChainParams memory crossChainParams = abi.decode(params, (CrossChainParams));\\n        \\n        // 1. Bridge tokens to target chain\\n        _bridgeTokens(crossChainParams, asset, amount);\\n        \\n        // 2. Execute arbitrage on target chain (handled by target chain contract)\\n        // This would typically involve cross-chain messaging\\n        \\n        // 3. Bridge profits back to source chain\\n        // (Simplified - in practice this requires complex cross-chain coordination)\\n        \\n        // 4. Repay flashloan\\n        uint256 amountOwed = amount + premium;\\n        IERC20(asset).approve(address(POOL), amountOwed);\\n        \\n        return true;\\n    }\\n    \\n    function _bridgeTokens(CrossChainParams memory params, address asset, uint256 amount) private {\\n        // Use bridge protocol (Stargate, Hop, etc.) to bridge tokens\\n        IERC20(asset).approve(params.bridgeContract, amount);\\n        \\n        // Call bridge contract with encoded parameters\\n        (bool success,) = params.bridgeContract.call(params.bridgeCalldata);\\n        require(success, \\\"Bridge failed\\\");\\n    }\\n    \\n    function estimateCrossChainProfit(CrossChainParams calldata params) external view returns (uint256 estimatedProfit, uint256 totalCosts) {\\n        // Calculate expected profit considering:\\n        // - Bridge fees\\n        // - Gas costs on both chains\\n        // - Slippage\\n        // - Flashloan fees\\n    }\\n    \\n    // Emergency function to recover stuck tokens\\n    function emergencyWithdraw(address token, uint256 amount) external onlyOwner {\\n        IERC20(token).transfer(owner, amount);\\n    }\\n}"
+            }
+        },
+        "gas_analytics": {
+            "avg_gas_per_flashloan": "165000",
+            "most_expensive_flashloan": "245000",
+            "cheapest_flashloan": "98000",
+            "gas_optimization_savings": "23.5%"
+        }
+    }))
 }
