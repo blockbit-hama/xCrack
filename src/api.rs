@@ -56,7 +56,7 @@ async fn get_system(config: Arc<crate::config::Config>, _core: SearcherCore) -> 
     external.push(ExternalApiInfo {
         name: "0x Quotes".to_string(),
         category: "DEX aggregation".to_string(),
-        description: "0x Aggregator API로 스왑 경로 견적을 조회합니다. 사용 전략: Sandwich(백업/슬리피지 검증), Liquidation(담보 매각 경로 견적)".to_string(),
+        description: "0x Aggregator API로 최적 스왑 경로를 조회합니다. 주 사용: CrossChain Arbitrage(크로스체인 차익거래 메인), 보조: Liquidation(담보 매각 경로 견적)".to_string(),
         docs: Some("https://docs.0x.org/".to_string()),
         env: env_status(&[]),
     });
@@ -64,7 +64,7 @@ async fn get_system(config: Arc<crate::config::Config>, _core: SearcherCore) -> 
     external.push(ExternalApiInfo {
         name: "1inch Quotes".to_string(),
         category: "DEX aggregation".to_string(),
-        description: "1inch API로 최적 스왑 견적을 조회합니다(일부 네트워크는 API 키 필요). 사용 전략: Liquidation(담보 매각), Sandwich(경로 비교)".to_string(),
+        description: "1inch API로 최적 스왑 견적을 조회합니다. 주 사용: Liquidation(담보 매각 경로), Micro Arbitrage(DEX 경로 비교), 보조: Sandwich(백업 견적)".to_string(),
         docs: Some("https://docs.1inch.io".to_string()),
         env: env_status(&["ONEINCH_API_KEY"]),
     });
@@ -83,6 +83,21 @@ async fn get_system(config: Arc<crate::config::Config>, _core: SearcherCore) -> 
         description: "Li.Fi로 체인 간 브리지 경로/수수료/유효시간을 조회·실행합니다. 사용 전략: Cross-Chain Arbitrage".to_string(),
         docs: Some("https://docs.li.fi".to_string()),
         env: env_status(&["LIFI_API_KEY"]),
+    });
+    // Flashloan Providers
+    external.push(ExternalApiInfo {
+        name: "Aave V3 Pool".to_string(),
+        category: "Flashloan provider".to_string(),
+        description: "Aave V3 프로토콜에서 플래시론을 실행합니다. 주 사용: 모든 전략의 flashloan 지원 (설정에서 use_flashloan=true 시)".to_string(),
+        docs: Some("https://docs.aave.com/developers/guides/flash-loans".to_string()),
+        env: env_status(&["FLASHLOAN_RECEIVER"]),
+    });
+    external.push(ExternalApiInfo {
+        name: "Balancer Vault".to_string(),
+        category: "Flashloan provider".to_string(),
+        description: "Balancer V2 Vault에서 무료 플래시론을 실행합니다. 백업 플래시론 제공자로 사용됩니다.".to_string(),
+        docs: Some("https://docs.balancer.fi/reference/contracts/flash-loans.html".to_string()),
+        env: env_status(&[]),
     });
 
     Json(SystemInfoResponse {
@@ -139,6 +154,7 @@ impl ApiServer {
         let core_network = self.core.clone();
         let core_risk = self.core.clone();
         let core_flashloan = self.core.clone();
+        let core_cross = self.core.clone();
 
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
@@ -164,6 +180,7 @@ impl ApiServer {
             .route("/api/network/health", get(move || get_network_health(core_network.clone())))
             .route("/api/risk/dashboard", get(move || get_risk_dashboard(core_risk.clone())))
             .route("/api/flashloan/dashboard", get(move || get_flashloan_dashboard(core_flashloan.clone())))
+            .route("/api/strategies/cross/dashboard", get(move || get_cross_dashboard(core_cross.clone())))
             .layer(cors);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
@@ -715,6 +732,38 @@ async fn get_micro_dashboard(_core: SearcherCore) -> Json<serde_json::Value> {
             "current_exposure": "340.0",
             "risk_score": 0.25
         }
+    }))
+}
+
+async fn get_cross_dashboard(core: SearcherCore) -> Json<serde_json::Value> {
+    // Try to read cross-chain metrics via typed handle; fallback to mock if unavailable
+    let metrics = if let Some(strat) = core.strategy_manager.get_cross_chain_strategy() {
+        let m = strat.get_performance_metrics();
+        serde_json::json!({
+            "total_opportunities": m.total_opportunities_found,
+            "trades_executed": m.total_trades_executed,
+            "success_rate": m.success_rate,
+            "total_profit": m.total_profit,
+            "avg_execution_time": m.avg_execution_time,
+            "failed_trades": m.failed_trades,
+        })
+    } else {
+        serde_json::json!({
+            "total_opportunities": 0,
+            "trades_executed": 0,
+            "success_rate": 0.0,
+            "total_profit": 0.0,
+            "avg_execution_time": 0.0,
+            "failed_trades": 0,
+        })
+    };
+
+    Json(json!({
+        "summary": metrics,
+        "recent_routes": [
+            {"protocol": "lifi", "from": "polygon", "to": "ethereum", "avg_time": 320, "success_rate": 0.92},
+            {"protocol": "stargate", "from": "bsc", "to": "arbitrum", "avg_time": 410, "success_rate": 0.88}
+        ]
     }))
 }
 

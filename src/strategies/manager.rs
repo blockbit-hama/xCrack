@@ -13,6 +13,7 @@ use crate::strategies::Strategy;
 use crate::strategies::RealTimeSandwichStrategy;
 use crate::strategies::CompetitiveLiquidationStrategy;
 use crate::strategies::MicroArbitrageStrategy;
+use crate::strategies::CrossChainArbitrageStrategy;
 
 pub struct StrategyManager {
     config: Arc<Config>,
@@ -21,6 +22,8 @@ pub struct StrategyManager {
     performance_stats: Arc<RwLock<HashMap<StrategyType, StrategyStats>>>,
     // Typed handle for MicroArbitrage to avoid downcasting issues
     micro_arbitrage_strategy: Option<Arc<MicroArbitrageStrategy>>, 
+    // Typed handle for CrossChain to expose metrics safely
+    cross_chain_strategy: Option<Arc<CrossChainArbitrageStrategy>>, 
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +39,7 @@ impl StrategyManager {
         let mut strategies = HashMap::new();
         let mut performance_stats = HashMap::new();
         let mut micro_arbitrage_strategy_typed: Option<Arc<MicroArbitrageStrategy>> = None;
+        let mut cross_chain_strategy_typed: Option<Arc<CrossChainArbitrageStrategy>> = None;
         
         
         // 샌드위치 전략 초기화
@@ -102,6 +106,21 @@ impl StrategyManager {
                 last_analysis_time: None,
             });
         }
+
+        // 크로스체인 아비트래지 전략 초기화
+        if config.strategies.cross_chain_arbitrage.enabled {
+            info!("🌉 크로스체인 아비트래지 전략 초기화 중...");
+            let cross_strategy = Arc::new(CrossChainArbitrageStrategy::new(Arc::clone(&config)));
+            strategies.insert(StrategyType::CrossChainArbitrage, cross_strategy.clone() as Arc<dyn Strategy + Send + Sync>);
+            cross_chain_strategy_typed = Some(cross_strategy);
+            performance_stats.insert(StrategyType::CrossChainArbitrage, StrategyStats {
+                transactions_analyzed: 0,
+                opportunities_found: 0,
+                avg_analysis_time_ms: 0.0,
+                last_analysis_time: None,
+            });
+            info!("✅ 크로스체인 아비트래지 전략 초기화 완료");
+        }
         
         info!("📊 총 {}개 전략 초기화됨", strategies.len());
         
@@ -111,6 +130,7 @@ impl StrategyManager {
             strategies: Arc::new(RwLock::new(strategies)),
             performance_stats: Arc::new(RwLock::new(performance_stats)),
             micro_arbitrage_strategy: micro_arbitrage_strategy_typed,
+            cross_chain_strategy: cross_chain_strategy_typed,
         })
     }
 
@@ -328,6 +348,11 @@ impl StrategyManager {
     /// Get typed MicroArbitrageStrategy handle (if initialized)
     pub fn get_micro_arbitrage_strategy(&self) -> Option<Arc<MicroArbitrageStrategy>> {
         self.micro_arbitrage_strategy.clone()
+    }
+
+    /// Get typed CrossChainArbitrageStrategy handle (if initialized)
+    pub fn get_cross_chain_strategy(&self) -> Option<Arc<CrossChainArbitrageStrategy>> {
+        self.cross_chain_strategy.clone()
     }
 }
 
