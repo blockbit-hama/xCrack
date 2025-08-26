@@ -611,7 +611,9 @@ impl MicroArbitrageStrategy {
         let amount_in = opportunity.max_amount;
 
         // buyCalldata: swapExactTokensForTokens(amountIn, amountOutMin, path=[token_in, token_out], to=receiver, deadline)
-        let amount_out_min_buy = alloy::primitives::U256::from(0u64); // TODO: 슬리피지 가드 적용
+        // 간단한 슬리피지 가드: 50bps
+        let slippage_bps = 50u64;
+        let amount_out_min_buy = amount_in * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64);
         let buy_path = vec![token_in_addr, token_out_addr];
         let buy_calldata = codec.encode_uniswap_v2_swap_exact_tokens(
             amount_in,
@@ -623,7 +625,8 @@ impl MicroArbitrageStrategy {
 
         // sellCalldata: swapExactTokensForTokens(amountIn=<all>, amountOutMin, path=[token_out, token_in], to=receiver, deadline)
         let sell_path = vec![token_out_addr, token_in_addr];
-        let amount_out_min_sell = alloy::primitives::U256::from(0u64); // TODO: 슬리피지 가드 적용
+        // sell도 50bps 가드 (보수적으로 동일 수치 적용)
+        let amount_out_min_sell = amount_in * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64);
         // 여기서는 전량 매도를 위해 amountIn은 리시버 내에서 잔액 사용. V2는 exactTokens이므로 대략 amount_in 사용.
         let sell_calldata = codec.encode_uniswap_v2_swap_exact_tokens(
             amount_in,

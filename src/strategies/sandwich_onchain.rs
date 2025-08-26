@@ -672,15 +672,17 @@ impl OnChainSandwichStrategy {
         // Encode Uniswap V2 swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline)
         let codec = ABICodec::new();
         let amount_in = *amount;
-        let amount_out_min = {
-            let mul = (min_out_multiplier * 10_000.0).round() as u64;
-            amount_in * U256::from(mul) / U256::from(10_000u64)
-        };
+        // Expected out by xy=k model with 0.3% fee
+        let amount_in_with_fee = amount_in * U256::from(997u64) / U256::from(1000u64);
+        let numerator = amount_in_with_fee * pool.reserve1;
+        let denominator = pool.reserve0 + amount_in_with_fee;
+        let expected_out = if denominator > U256::ZERO { numerator / denominator } else { U256::ZERO };
+        // Apply slippage tolerance from config (bps)
+        let slippage_bps = (self.config.strategies.sandwich.max_slippage * 10_000.0).round() as u64;
+        let amount_out_min = expected_out * U256::from(10_000u64 - slippage_bps) / U256::from(10_000u64);
         let path = vec![pool.token0, pool.token1];
         let to_recipient = to_recipient;
-        let deadline = U256::from(
-            (chrono::Utc::now().timestamp() as u64) + 120 // +120s
-        );
+        let deadline = U256::from((chrono::Utc::now().timestamp() as u64) + 60);
         let calldata = codec.encode_uniswap_v2_swap_exact_tokens(
             amount_in,
             amount_out_min,
@@ -719,15 +721,16 @@ impl OnChainSandwichStrategy {
         // Encode Uniswap V2 swapExactTokensForTokens (reverse path to unwind)
         let codec = ABICodec::new();
         let amount_in = *amount;
-        let amount_out_min = {
-            let mul = (min_out_multiplier * 10_000.0).round() as u64;
-            amount_in * U256::from(mul) / U256::from(10_000u64)
-        };
+        // Expected out reverse
+        let amount_in_with_fee = amount_in * U256::from(997u64) / U256::from(1000u64);
+        let numerator = amount_in_with_fee * pool.reserve0;
+        let denominator = pool.reserve1 + amount_in_with_fee;
+        let expected_out = if denominator > U256::ZERO { numerator / denominator } else { U256::ZERO };
+        let slippage_bps = (self.config.strategies.sandwich.max_slippage * 10_000.0).round() as u64;
+        let amount_out_min = expected_out * U256::from(10_000u64 - slippage_bps) / U256::from(10_000u64);
         let path = vec![pool.token1, pool.token0];
         let to_recipient = to_recipient;
-        let deadline = U256::from(
-            (chrono::Utc::now().timestamp() as u64) + 120
-        );
+        let deadline = U256::from((chrono::Utc::now().timestamp() as u64) + 60);
         let calldata = codec.encode_uniswap_v2_swap_exact_tokens(
             amount_in,
             amount_out_min,
