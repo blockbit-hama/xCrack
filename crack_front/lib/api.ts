@@ -121,6 +121,8 @@ export type SandwichParams = {
   min_profit_percentage: number;
   gas_multiplier: number;
   max_gas_price_gwei: string;
+  use_flashloan?: boolean;
+  flash_loan_amount?: string | null;
 };
 
 export type LiquidationParams = {
@@ -157,12 +159,15 @@ export type MicroParams = {
   blacklist_tokens: string[];
   priority_tokens: string[];
   runtime_blacklist_ttl_secs: number;
+  use_flashloan?: boolean;
+  flash_loan_amount?: string | null;
 };
 
 export type StrategyParamsResp = {
   sandwich: SandwichParams;
   liquidation: LiquidationParams;
   micro_arbitrage: MicroParams;
+  cross_chain_arbitrage?: { enabled: boolean; use_flashloan?: boolean; flash_loan_amount?: string | null };
 }
 
 export async function getStrategyParams(): Promise<StrategyParamsResp | null> {
@@ -171,7 +176,7 @@ export async function getStrategyParams(): Promise<StrategyParamsResp | null> {
   return res.json();
 }
 
-export async function updateStrategyParams(strategy: 'sandwich'|'liquidation'|'micro', updates: Record<string, any>): Promise<{ ok: boolean; restart_required?: boolean; error?: string; }> {
+export async function updateStrategyParams(strategy: 'sandwich'|'liquidation'|'micro'|'cross_chain_arbitrage', updates: Record<string, any>): Promise<{ ok: boolean; restart_required?: boolean; error?: string; }> {
   const res = await fetch(`${BASE}/api/strategies/params`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -346,4 +351,220 @@ export async function getReport(): Promise<PerformanceReport> {
   }
   const json = await res.json();
   return { summary: json.summary, recommendations: json.recommendations } as PerformanceReport;
+}
+
+// ---- Mempool Monitor API ----
+export type MempoolTransaction = {
+  hash: string;
+  from: string;
+  to?: string | null;
+  value: string;
+  gas_price: string;
+  gas_limit: string;
+  timestamp: string;
+  decoded_type?: string;
+  potential_mev?: boolean;
+};
+
+export type MempoolStats = {
+  total_transactions: number;
+  pending_transactions: number;
+  avg_gas_price: string;
+  min_gas_price: string;
+  max_gas_price: string;
+  transactions_per_second: number;
+  dex_transactions: number;
+  mev_opportunities: number;
+};
+
+export type MempoolStatus = {
+  is_monitoring: boolean;
+  connected: boolean;
+  last_block: number;
+  stats: MempoolStats;
+  recent_transactions: MempoolTransaction[];
+};
+
+export async function getMempoolStatus(): Promise<MempoolStatus | null> {
+  try {
+    const res = await fetch(`${BASE}/api/mempool/status`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getMempoolTransactions(limit = 20): Promise<MempoolTransaction[]> {
+  try {
+    const res = await fetch(`${BASE}/api/mempool/transactions?limit=${limit}`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.transactions || [];
+  } catch {
+    return [];
+  }
+}
+
+// ---- Detailed Performance API ----
+export type TimeSeriesPoint = {
+  timestamp: string;
+  value: number;
+};
+
+export type StrategyPerformance = {
+  strategy: string;
+  total_opportunities: number;
+  successful_trades: number;
+  success_rate: number;
+  total_profit_eth: string;
+  avg_profit_per_trade: string;
+  avg_analysis_time_ms: number;
+  avg_execution_time_ms: number;
+  gas_efficiency: number;
+  hourly_profit: TimeSeriesPoint[];
+  daily_success_rate: TimeSeriesPoint[];
+};
+
+export type GasAnalytics = {
+  avg_gas_price_gwei: number;
+  avg_gas_used: number;
+  total_gas_spent_eth: string;
+  gas_efficiency_score: number;
+  gas_price_history: TimeSeriesPoint[];
+  gas_usage_by_strategy: { strategy: string; gas_used: number; percentage: number }[];
+};
+
+export type ProfitabilityMetrics = {
+  total_profit_eth: string;
+  profit_trend: 'up' | 'down' | 'stable';
+  profit_per_hour: TimeSeriesPoint[];
+  profit_by_strategy: { strategy: string; profit: string; percentage: number }[];
+  roi_percentage: number;
+  break_even_point: string;
+};
+
+export type DetailedPerformanceData = {
+  strategy_performance: StrategyPerformance[];
+  gas_analytics: GasAnalytics;
+  profitability_metrics: ProfitabilityMetrics;
+  system_health: {
+    uptime_percentage: number;
+    avg_response_time_ms: number;
+    error_rate: number;
+    memory_usage_mb: number;
+    cpu_usage_percentage: number;
+  };
+  competitive_analysis: {
+    market_share_percentage: number;
+    competitor_count: number;
+    our_success_rate: number;
+    market_avg_success_rate: number;
+  };
+};
+
+export async function getDetailedPerformance(): Promise<DetailedPerformanceData | null> {
+  try {
+    const res = await fetch(`${BASE}/api/performance/detailed`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getPerformanceChart(metric: string, timeRange = '24h'): Promise<TimeSeriesPoint[]> {
+  try {
+    const res = await fetch(`${BASE}/api/performance/chart?metric=${metric}&range=${timeRange}`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch {
+    return [];
+  }
+}
+
+// ---- Alerts API ----
+export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+export type AlertCategory = 'system' | 'performance' | 'security' | 'strategy' | 'network' | 'gas' | 'profit';
+
+export type Alert = {
+  id: string;
+  title: string;
+  message: string;
+  severity: AlertSeverity;
+  category: AlertCategory;
+  timestamp: string;
+  acknowledged: boolean;
+  source: string;
+  metadata?: Record<string, any>;
+  action_required?: boolean;
+  auto_resolve?: boolean;
+  resolved_at?: string | null;
+};
+
+export type AlertStats = {
+  total_alerts: number;
+  unacknowledged_count: number;
+  critical_count: number;
+  alerts_last_24h: number;
+  most_frequent_category: AlertCategory;
+  avg_resolution_time_minutes: number;
+};
+
+export async function getAlerts(unacknowledged_only = false): Promise<Alert[]> {
+  try {
+    const res = await fetch(`${BASE}/api/alerts?unacknowledged_only=${unacknowledged_only}`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.alerts || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getAlertStats(): Promise<AlertStats | null> {
+  try {
+    const res = await fetch(`${BASE}/api/alerts/stats`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function acknowledgeAlert(alertId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/alerts/${alertId}/acknowledge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function acknowledgeAllAlerts(): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/alerts/acknowledge-all`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function dismissAlert(alertId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/alerts/${alertId}/dismiss`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

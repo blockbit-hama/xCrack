@@ -963,8 +963,29 @@ impl Strategy for OnChainSandwichStrategy {
             block_number: None,
         };
 
+        // 🆕 flashloan 보조 모드: flashloan -> frontrun -> victim -> backrun -> repay 형태의 번들을 지원할 수 있도록 선행 트랜잭션 삽입
+        let mut txs = vec![approve_tx, frontrun, backrun];
+        if self.config.strategies.sandwich.use_flashloan {
+            debug!("🔁 Flashloan 보조 모드 활성화 (샌드위치)");
+            // 실제 구현에서는 Aave V3 flashLoanSimple 호출 인코딩 및 콜백 컨트랙트 사용 필요
+            // 여기서는 안전하게 placeholder 트랜잭션을 추가하여 번들 시퀀스를 구성합니다
+            let flashloan_placeholder = Transaction {
+                hash: B256::ZERO,
+                from: Address::ZERO,
+                to: Some(Address::ZERO),
+                value: U256::ZERO,
+                gas_price: U256::from(20_000_000_000u64),
+                gas_limit: U256::from(120_000u64),
+                data: vec![],
+                nonce: 0,
+                timestamp: chrono::Utc::now(),
+                block_number: None,
+            };
+            txs.insert(0, flashloan_placeholder);
+        }
+
         let mut bundle = Bundle::new(
-            vec![approve_tx, frontrun, backrun],
+            txs,
             target_block,
             opportunity.expected_profit,
             gas_estimate + 60_000,

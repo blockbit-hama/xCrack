@@ -417,6 +417,13 @@ impl CrossChainArbitrageStrategy {
             opportunity.dest_chain.name()
         );
         
+        // 🆕 플래시론 보조 모드(설정 기반): 브리지 출발 자산을 플래시론으로 조달하는 경로를 선택할 수 있습니다.
+        // 실제 구현에는 Aave flashLoanSimple + 브리지 컨트랙트 호출 조합이 필요하며,
+        // 여기서는 안전하게 견적/실행 로직만 유지하고 플래시론 모드 여부를 로깅합니다.
+        if std::env::var("API_MODE").unwrap_or_default() != "mock" && self.config.strategies.cross_chain_arbitrage.use_flashloan {
+            debug!("🔁 Flashloan 보조 모드 힌트 (크로스체인): 출발 자산을 대여하여 브리지+도착 DEX 청산 가능");
+        }
+
         // 1) 최신 견적 1차 획득 (Balanced)
         let mut quote = self.bridge_manager.get_best_quote(
             opportunity.source_chain,

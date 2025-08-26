@@ -53,6 +53,9 @@ pub struct StrategyConfig {
     pub sandwich: SandwichConfig,
     pub liquidation: LiquidationConfig,
     pub micro_arbitrage: MicroArbitrageConfig,
+    /// Cross-chain arbitrage strategy configuration
+    #[serde(default)]
+    pub cross_chain_arbitrage: CrossChainArbitrageConfig,
 }
 
 
@@ -66,6 +69,12 @@ pub struct SandwichConfig {
     pub min_profit_percentage: f64, // minimum profit percentage
     pub gas_multiplier: f64, // gas price multiplier
     pub max_gas_price_gwei: String, // max gas price in gwei
+    /// Enable flashloan-assisted sandwich (experimental)
+    #[serde(default)]
+    pub use_flashloan: bool,
+    /// Desired flash loan amount (ETH or token units as string)
+    #[serde(default)]
+    pub flash_loan_amount: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +114,27 @@ pub struct MicroArbitrageConfig {
     pub priority_tokens: Vec<String>, // 우선순위 토큰들
     /// 런타임 블랙리스트 TTL(초) - 만료 후 자동 해제
     pub runtime_blacklist_ttl_secs: u64,
+    /// Enable flashloan-assisted micro arbitrage (DEX-only, experimental)
+    #[serde(default)]
+    pub use_flashloan: bool,
+    /// Desired flash loan amount (base asset units as string)
+    #[serde(default)]
+    pub flash_loan_amount: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrossChainArbitrageConfig {
+    pub enabled: bool,
+    /// Use flashloan to source origin-side funds for bridging+settlement
+    pub use_flashloan: bool,
+    /// Desired flash loan amount (token units as string, e.g., "10000" for 10k USDC)
+    pub flash_loan_amount: Option<String>,
+}
+
+impl Default for CrossChainArbitrageConfig {
+    fn default() -> Self {
+        Self { enabled: true, use_flashloan: false, flash_loan_amount: None }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +255,8 @@ impl Config {
                     min_profit_percentage: 0.01,
                     gas_multiplier: 1.5,
                     max_gas_price_gwei: "200".to_string(),
+                    use_flashloan: false,
+                    flash_loan_amount: None,
                 },
                 liquidation: LiquidationConfig {
                     enabled: true,
@@ -317,6 +349,13 @@ impl Config {
                     blacklist_tokens: vec!["SHIB".to_string(), "DOGE".to_string()], // 고변동성 토큰 제외
                     priority_tokens: vec!["WETH".to_string(), "WBTC".to_string(), "USDC".to_string(), "USDT".to_string()],
                     runtime_blacklist_ttl_secs: 900,
+                    use_flashloan: false,
+                    flash_loan_amount: None,
+                },
+                cross_chain_arbitrage: CrossChainArbitrageConfig {
+                    enabled: true,
+                    use_flashloan: false,
+                    flash_loan_amount: None,
                 },
             },
             flashbots: FlashbotsConfig {

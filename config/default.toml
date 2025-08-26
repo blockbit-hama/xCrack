@@ -49,6 +49,8 @@ min_profit_eth = "0.01"       # Minimum 0.01 ETH profit
 min_profit_percentage = 0.02  # Minimum 2% profit
 gas_multiplier = 1.2          # 20% gas price increase
 max_gas_price_gwei = "100"    # Maximum 100 gwei
+use_flashloan = false          # Use flashloan-assisted sandwich
+# flash_loan_amount = "10.0"   # Optional flash loan amount (ETH or token units)
 
 [strategies.liquidation]
 enabled = true
@@ -82,6 +84,8 @@ enable_dex_trading = true         # Enable DEX trading
 blacklist_tokens = []             # No blacklisted tokens
 priority_tokens = ["WETH", "USDC", "USDT", "DAI", "WBTC"]  # Priority tokens
 runtime_blacklist_ttl_secs = 900  # 15분 TTL
+use_flashloan = false              # Use flashloan to borrow base for DEX arbitrage
+# flash_loan_amount = "10000"      # Optional amount (e.g., 10,000 USDC)
 
 # Exchange configurations for micro arbitrage
 [[strategies.micro_arbitrage.exchanges]]
@@ -95,6 +99,11 @@ min_order_size = "0.01"          # 0.01 ETH minimum
 max_order_size = "10.0"          # 10 ETH maximum
 rate_limit_per_second = 10       # 10 requests per second
 supports_fast_execution = true
+
+[strategies.cross_chain_arbitrage]
+enabled = true
+use_flashloan = false
+# flash_loan_amount = "10000"    # e.g., 10,000 USDC
 
 [[strategies.micro_arbitrage.exchanges]]
 name = "sushiswap"

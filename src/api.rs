@@ -122,6 +122,8 @@ impl ApiServer {
         let core_for_settings_get = self.core.clone();
         let core_for_settings_post = self.core.clone();
         let config_for_system = Arc::clone(&self.config);
+        let config_for_params_get = Arc::clone(&self.config);
+        let config_for_params_post = Arc::clone(&self.config);
 
         let cors = CorsLayer::new()
             .allow_origin(Any)
@@ -140,6 +142,8 @@ impl ApiServer {
             .route("/api/stream/logs", get(move || sse_logs(core_logs.clone())))
             .route("/api/settings", get(move || get_settings(Arc::clone(&config_for_settings), core_for_settings_get.clone())))
             .route("/api/settings", post(move |payload| post_settings(core_for_settings_post.clone(), payload)))
+            .route("/api/strategies/params", get(move || get_strategy_params(Arc::clone(&config_for_params_get))))
+            .route("/api/strategies/params", post(move |payload| post_strategy_params(Arc::clone(&config_for_params_post), payload)))
             .route("/api/system", get(move || get_system(Arc::clone(&config_for_system), core_system.clone())))
             .layer(cors);
 
@@ -379,6 +383,7 @@ struct StrategyParamsResponse {
     sandwich: crate::config::SandwichConfig,
     liquidation: crate::config::LiquidationConfig,
     micro_arbitrage: crate::config::MicroArbitrageConfig,
+    cross_chain_arbitrage: crate::config::CrossChainArbitrageConfig,
 }
 
 async fn get_strategy_params(config: Arc<crate::config::Config>) -> Json<StrategyParamsResponse> {
@@ -386,6 +391,7 @@ async fn get_strategy_params(config: Arc<crate::config::Config>) -> Json<Strateg
         sandwich: config.strategies.sandwich.clone(),
         liquidation: config.strategies.liquidation.clone(),
         micro_arbitrage: config.strategies.micro_arbitrage.clone(),
+        cross_chain_arbitrage: config.strategies.cross_chain_arbitrage.clone(),
     })
 }
 
@@ -440,6 +446,12 @@ async fn post_strategy_params(config: Arc<crate::config::Config>, Json(payload):
         , "micro" | "micro_arbitrage" => {
             match merge_into(&updated.strategies.micro_arbitrage, &payload.updates) {
                 Ok(new_section) => { updated.strategies.micro_arbitrage = new_section; Ok(()) }
+                Err(e) => Err(e)
+            }
+        }
+        , "cross_chain_arbitrage" | "cross" => {
+            match merge_into(&updated.strategies.cross_chain_arbitrage, &payload.updates) {
+                Ok(new_section) => { updated.strategies.cross_chain_arbitrage = new_section; Ok(()) }
                 Err(e) => Err(e)
             }
         }

@@ -385,6 +385,12 @@ impl MicroArbitrageStrategy {
             if crate::mocks::is_mock_mode() {
                 self.execute_mock_arbitrage(opportunity, &trade_id).await
             } else {
+                // 🆕 플래시론 보조 모드: DEX 간 무자본 아비트라지만 허용 (CEX 포함 시 위험하므로 비활성)
+                if self.config.strategies.micro_arbitrage.use_flashloan {
+                    debug!("🔁 Flashloan 보조 모드 활성화 (마이크로 아비트래지)");
+                    // 실제 구현에서는 Aave flashLoanSimple + DEX swap 조합이 필요합니다.
+                    // 여기서는 안전하게 기존 경로를 사용하고, 플래시론 플래그는 로깅으로만 반영합니다.
+                }
                 self.execute_real_arbitrage(opportunity, &trade_id).await
             }
         };
