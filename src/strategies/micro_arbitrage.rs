@@ -1,9 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use tracing::{info, debug, warn, error};
 use alloy::primitives::{Address, U256};
+use core::str::FromStr;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -60,6 +61,9 @@ pub struct MicroArbitrageStrategy {
     // 위험 관리
     daily_volume_limit: U256,
     risk_limit_per_trade: U256,
+
+    // 번들 제출 경로 (공통 BundleManager로 라우팅하기 위한 채널)
+    bundle_sender: Arc<Mutex<Option<mpsc::UnboundedSender<Bundle>>>>,
 }
 
 impl MicroArbitrageStrategy {
@@ -152,7 +156,15 @@ impl MicroArbitrageStrategy {
             latency_threshold_ms,
             daily_volume_limit,
             risk_limit_per_trade,
+            bundle_sender: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// 공통 번들 제출 경로 연결 (SearcherCore가 생성한 채널 주입)
+    pub async fn set_bundle_sender(&self, sender: mpsc::UnboundedSender<Bundle>) {
+        let mut guard = self.bundle_sender.lock().await;
+        *guard = Some(sender);
+        info!("🔗 MicroArb 번들 전송 채널 연결 완료");
     }
     
     /// 가격 데이터 업데이트 (외부 피드에서 호출)
@@ -631,8 +643,14 @@ impl MicroArbitrageStrategy {
 
         // sellCalldata: swapExactTokensForTokens(amountIn=<all>, amountOutMin, path=[token_out, token_in], to=receiver, deadline)
         let sell_path = vec![token_out_addr, token_in_addr];
-        // sell도 동일 가드 적용 (보수적)
-        let amount_out_min_sell = amount_in * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64);
+        // sell도 동적 가드 적용 (0x -> 1inch 폴백), 실패 시 50bps
+        let amount_out_min_sell = if let Some(q) = self.estimate_amount_out_via_0x(token_out_addr, token_in_addr, amount_in).await {
+            q * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64)
+        } else if let Some(q) = self.estimate_amount_out_via_1inch(token_out_addr, token_in_addr, amount_in).await {
+            q * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64)
+        } else {
+            amount_in * alloy::primitives::U256::from(10_000u64 - slippage_bps) / alloy::primitives::U256::from(10_000u64)
+        };
         // 여기서는 전량 매도를 위해 amountIn은 리시버 내에서 잔액 사용. V2는 exactTokens이므로 대략 amount_in 사용.
         let sell_calldata = codec.encode_uniswap_v2_swap_exact_tokens(
             amount_in,
@@ -681,7 +699,7 @@ impl MicroArbitrageStrategy {
             block_number: None,
         };
 
-        // 번들 생성 및 제출 (예상 수익은 보수적으로 0으로 설정)
+        // 번들 생성 (예상 수익은 보수적으로 0으로 설정)
         let bundle = crate::types::Bundle::new(
             vec![flashloan_tx],
             0,
@@ -690,9 +708,23 @@ impl MicroArbitrageStrategy {
             StrategyType::MicroArbitrage,
         );
 
+        // 공통 번들 경로가 설정되어 있으면 채널로 전송, 없으면 기존 경로로 폴백
+        if let Some(sender) = self.bundle_sender.lock().await.clone() {
+            match sender.send(bundle.clone()) {
+                Ok(_) => {
+                    info!("📦 MicroArb 번들을 BundleManager 경로로 전송 완료");
+                    return Ok(true);
+                }
+                Err(e) => {
+                    warn!("⚠️ 번들 채널 전송 실패, 직접 제출로 폴백: {}", e);
+                }
+            }
+        }
+
+        // 폴백: 직접 Flashbots 제출 (기존 동작 유지)
         let client = FlashbotsClient::new(Arc::clone(&self.config)).await?;
         let ok = client.submit_bundle(&bundle).await.unwrap_or(false);
-        if ok { info!("✅ 마이크로 플래시론 번들 제출 완료"); } else { warn!("❌ 마이크로 플래시론 번들 제출 실패"); }
+        if ok { info!("✅ 마이크로 플래시론 번들 직접 제출 완료"); } else { warn!("❌ 마이크로 플래시론 번들 직접 제출 실패"); }
         Ok(ok)
     }
 
@@ -720,6 +752,44 @@ impl MicroArbitrageStrategy {
         }
     }
 
+    /// 0x generic amountOut estimator
+    async fn estimate_amount_out_via_0x(
+        &self,
+        token_in: alloy::primitives::Address,
+        token_out: alloy::primitives::Address,
+        amount_in: alloy::primitives::U256,
+    ) -> Option<alloy::primitives::U256> {
+        self.estimate_buy_amount_via_0x(token_in, token_out, amount_in).await
+    }
+
+    /// 1inch amountOut estimator (quote)
+    async fn estimate_amount_out_via_1inch(
+        &self,
+        token_in: alloy::primitives::Address,
+        token_out: alloy::primitives::Address,
+        amount_in: alloy::primitives::U256,
+    ) -> Option<alloy::primitives::U256> {
+        #[derive(Deserialize)]
+        struct Quote { #[serde(rename = "dstAmount")] dst_amount: String }
+        let url = format!(
+            "https://api.1inch.dev/swap/v5.2/1/quote?src={}&dst={}&amount={}",
+            format!("{:x}", token_in),
+            format!("{:x}", token_out),
+            amount_in.to_string()
+        );
+        let client = reqwest::Client::new();
+        let mut req = client.get(&url).header("accept", "application/json");
+        if let Ok(key) = std::env::var("ONEINCH_API_KEY") {
+            if !key.trim().is_empty() {
+                req = req.header("Authorization", format!("Bearer {}", key)).header("apikey", key);
+            }
+        }
+        match req.send().await.ok()?.json::<Quote>().await.ok() {
+            Some(q) => alloy::primitives::U256::from_str(&q.dst_amount).ok(),
+            None => None,
+        }
+    }
+
     /// 번들 제출 전 최소 USD 수익 가드 (플래시론 프리미엄 9bps 반영)
     async fn guard_min_profit_usd(
         &self,
@@ -732,7 +802,11 @@ impl MicroArbitrageStrategy {
         let expected_usd = base_amount * buy_px * opportunity.profit_percentage;
         // 플래시론 프리미엄 차감(9bps)
         let premium = base_amount * buy_px * 0.0009;
-        let net_usd = expected_usd - premium;
+        // 가스비(추정) 차감: 500k gas * 30 gwei * ETHUSD(=buy_px)
+        let gas_gwei = std::env::var("GAS_PRICE_GWEI").ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(30.0);
+        let gas_cost_eth = 500_000.0 * gas_gwei * 1e-9; // 500k * gwei to ETH
+        let gas_cost_usd = gas_cost_eth * buy_px;
+        let net_usd = expected_usd - premium - gas_cost_usd;
         let min_usd = self.min_profit_usd.to_f64().unwrap_or(0.0);
         Ok(net_usd >= min_usd)
     }
@@ -962,6 +1036,7 @@ impl MicroArbitrageStrategy {
                 let exchanges = self.exchanges.clone();
                 let active_trades = Arc::clone(&self.active_trades);
                 let stats = Arc::clone(&self.stats);
+                let bundle_sender = Arc::clone(&self.bundle_sender);
                 let min_profit_percentage = self.min_profit_percentage;
                 let min_profit_usd = self.min_profit_usd;
                 let execution_timeout_ms = self.execution_timeout_ms;
@@ -988,6 +1063,7 @@ impl MicroArbitrageStrategy {
                         latency_threshold_ms,
                         daily_volume_limit,
                         risk_limit_per_trade,
+                        bundle_sender,
                     };
                     
                     temp_strategy.execute_micro_arbitrage(&opportunity).await

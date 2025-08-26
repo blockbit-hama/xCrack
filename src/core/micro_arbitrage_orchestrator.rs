@@ -91,6 +91,8 @@ impl MicroArbitrageOrchestrator {
         // 3. 마이크로아비트래지 전략 시작
         info!("⚡ 마이크로아비트래지 전략 시작...");
         (*self.micro_arbitrage_strategy).start().await?;
+
+        // 번들 라우팅 채널이 상위(SearcherCore)에서 주입되는 구조이므로 여기서는 노옵
         
         // 4. 실시간 스케줄러 시작 (새로운 고성능 스캔 시스템)
         info!("⏰ 실시간 스케줄러 시작...");
