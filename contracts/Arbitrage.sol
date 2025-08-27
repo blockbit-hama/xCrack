@@ -37,6 +37,8 @@ contract ArbitrageStrategy is FlashLoanSimpleReceiverBase, ReentrancyGuard {
         address tokenB;          // 중간 토큰 (예: WETH)
         address dexA;            // 첫 번째 DEX 라우터(매수)
         address dexB;            // 두 번째 DEX 라우터(매도)
+        address spenderA;        // (옵션) DEX A 호출 전 approve 대상(집계기 allowanceTarget). 0이면 dexA.
+        address spenderB;        // (옵션) DEX B 호출 전 approve 대상(집계기 allowanceTarget). 0이면 dexB.
         uint256 amountIn;        // 대출받아 첫 스왑에 투입할 tokenA 양
         uint256 expectedProfitMin; // 최소 기대 이익(tokenA 단위). 미만이면 revert.
         bytes   swapCallDataA;   // DEX A에 보낼 실행용 calldata (예: swapExactTokensForTokens 등)
@@ -167,8 +169,9 @@ contract ArbitrageStrategy is FlashLoanSimpleReceiverBase, ReentrancyGuard {
         uint256 beforeBal = tokenB.balanceOf(address(this));
 
         // 필요량만 승인 (0 → amount)
-        _safeApprove(tokenA, p.dexA, 0);
-        _safeApprove(tokenA, p.dexA, amount);
+        address spenderA = p.spenderA != address(0) ? p.spenderA : p.dexA;
+        _safeApprove(tokenA, spenderA, 0);
+        _safeApprove(tokenA, spenderA, amount);
 
         // 저수준 호출: 라우터가 pull 하거나 내부에서 transferFrom/permit2 등 사용
         (bool ok, bytes memory ret) = p.dexA.call(p.swapCallDataA);
@@ -196,8 +199,9 @@ contract ArbitrageStrategy is FlashLoanSimpleReceiverBase, ReentrancyGuard {
         uint256 beforeBal = tokenA.balanceOf(address(this));
 
         // 필요량만 승인
-        _safeApprove(tokenB, p.dexB, 0);
-        _safeApprove(tokenB, p.dexB, tokenBAmount);
+        address spenderB = p.spenderB != address(0) ? p.spenderB : p.dexB;
+        _safeApprove(tokenB, spenderB, 0);
+        _safeApprove(tokenB, spenderB, tokenBAmount);
 
         (bool ok, bytes memory ret) = p.dexB.call(p.swapCallDataB);
         if (!ok) revert DexCallFailed(p.dexB, p.swapCallDataB, ret);

@@ -16,6 +16,8 @@ sol! {
             address tokenB;
             address dexA;
             address dexB;
+            address spenderA;
+            address spenderB;
             uint256 amountIn;
             uint256 expectedProfitMin;
             bytes   swapCallDataA;
@@ -306,6 +308,8 @@ impl ABICodec {
         token_b: Address,
         dex_a: Address,
         dex_b: Address,
+        spender_a: Option<Address>,
+        spender_b: Option<Address>,
         amount_in: U256,
         expected_profit_min: U256,
         swap_a: Bytes,
@@ -316,6 +320,8 @@ impl ABICodec {
             tokenB: token_b,
             dexA: dex_a,
             dexB: dex_b,
+            spenderA: spender_a.unwrap_or(Address::ZERO),
+            spenderB: spender_b.unwrap_or(Address::ZERO),
             amountIn: amount_in,
             expectedProfitMin: expected_profit_min,
             swapCallDataA: swap_a.into(),

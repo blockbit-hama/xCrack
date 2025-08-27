@@ -651,11 +651,16 @@ impl MicroArbitrageStrategy {
         // ArbitrageStrategy.executeArbitrage(asset, amount, params)
         // params = abi.encode(ArbitrageParams{ tokenA, tokenB, dexA, dexB, amountIn, expectedProfitMin, swapCallDataA, swapCallDataB })
         let expected_min = amount_in / alloy::primitives::U256::from(1000u64); // 0.1% 최소 이익 가드 예시
+        // 집계기(0x/1inch) 라우터가 별도 spender(allowanceTarget)를 요구할 수 있으므로
+        // 여기서는 안전하게 spenderA/spenderB를 라우터 주소로 기본 지정.
+        // 향후 off-chain quote에서 allowanceTarget을 얻으면 해당 주소를 채워 넣을 수 있음.
         let arb_params = codec.encode_arbitrage_contract_params(
             token_in_addr,
             token_out_addr,
             router_buy,
             router_sell,
+            Some(router_buy),
+            Some(router_sell),
             amount_in,
             expected_min,
             Bytes::from(buy_calldata.to_vec()),
