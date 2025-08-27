@@ -167,6 +167,39 @@ export default function SettingsPage() {
                   </div>
                 </form>
 
+                {/* Micro Aggregator Execution Settings */}
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const allow = (e.currentTarget.elements.namedItem('m_allow_agg') as HTMLInputElement).checked;
+                  const use0x = (e.currentTarget.elements.namedItem('m_use_0x') as HTMLInputElement).checked;
+                  const use1inch = (e.currentTarget.elements.namedItem('m_use_1inch') as HTMLInputElement).checked;
+                  const preferred: string[] = [];
+                  if (use0x) preferred.push('0x');
+                  if (use1inch) preferred.push('1inch');
+                  const updates: any = { allow_aggregator_execution: allow, preferred_aggregators: preferred };
+                  const res = await updateStrategyParams('micro', updates);
+                  setMsg(res.ok ? 'Micro 집계기 실행 설정 저장 완료(재시작 필요)' : `Micro 집계기 설정 저장 실패: ${res.error}`);
+                }}>
+                  <label style={{ fontSize: 12, color: '#666' }}>Micro Aggregator Execution</label>
+                  <div style={{ display: 'grid', gap: 8, alignItems: 'center' }}>
+                    <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input type="checkbox" name="m_allow_agg" defaultChecked={Boolean((params as any).micro_arbitrage?.allow_aggregator_execution)} />
+                      <span>집계기(to/data/allowanceTarget) 경로 실행 허용</span>
+                    </label>
+                    <div style={{ display: 'flex', gap: 16 }}>
+                      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input type="checkbox" name="m_use_0x" defaultChecked={Array.isArray((params as any).micro_arbitrage?.preferred_aggregators) && (params as any).micro_arbitrage.preferred_aggregators.includes('0x')} />
+                        <span>0x</span>
+                      </label>
+                      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input type="checkbox" name="m_use_1inch" defaultChecked={Array.isArray((params as any).micro_arbitrage?.preferred_aggregators) && (params as any).micro_arbitrage.preferred_aggregators.includes('1inch')} />
+                        <span>1inch</span>
+                      </label>
+                    </div>
+                    <button type="submit" className="px-3 py-2 bg-black text-white rounded" style={{ width: 'fit-content' }}>Save</button>
+                  </div>
+                </form>
+
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   const enabled = (e.currentTarget.elements.namedItem('c_flash') as HTMLInputElement).checked;
