@@ -160,10 +160,7 @@ impl SearcherCore {
         info!("📡 멤풀 모니터링 시작 중...");
         self.mempool_monitor.start(tx_sender.clone()).await?;
         
-        // 3.1. 마이크로아비트래지 전략에 번들 전송 채널 주입
-        if let Some(micro_strategy) = self.strategy_manager.get_micro_arbitrage_strategy() {
-            micro_strategy.set_bundle_sender(bundle_sender.clone()).await;
-        }
+        // 3.1. 마이크로아비트래지는 번들 경로를 사용하지 않음 (공개 브로드캐스트만)
 
         // 3.1. 마이크로아비트래지 시스템 시작 (활성화된 경우)
         if let Some(orchestrator_arc) = &self.micro_arbitrage_orchestrator {

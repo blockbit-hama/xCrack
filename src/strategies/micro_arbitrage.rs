@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 use tracing::{info, debug, warn, error};
 use alloy::primitives::{Address, U256};
 use core::str::FromStr;
@@ -19,10 +19,9 @@ use crate::types::{
     Transaction, Opportunity, StrategyType, OpportunityType, OpportunityDetails,
     MicroArbitrageDetails, MicroArbitrageOpportunity, PriceData, 
     OrderBookSnapshot, ExchangeInfo, ExchangeType, MicroArbitrageStats,
-    OrderExecutionResult, OrderSide, OrderStatus, Bundle,
+    OrderExecutionResult, OrderSide, OrderStatus,
 };
 use crate::strategies::Strategy;
-use crate::flashbots::FlashbotsClient;
 use serde::Deserialize;
 
 /// 초단타 마이크로 아비트래지 전략
@@ -62,8 +61,7 @@ pub struct MicroArbitrageStrategy {
     daily_volume_limit: U256,
     risk_limit_per_trade: U256,
 
-    // 번들/MEV 미사용 정책으로 전환: 남겨두지만 사용하지 않음
-    bundle_sender: Arc<Mutex<Option<mpsc::UnboundedSender<Bundle>>>>,
+    // 번들/MEV 미사용 정책: 번들 채널 제거
 }
 
 impl MicroArbitrageStrategy {
@@ -156,16 +154,10 @@ impl MicroArbitrageStrategy {
             latency_threshold_ms,
             daily_volume_limit,
             risk_limit_per_trade,
-            bundle_sender: Arc::new(Mutex::new(None)),
         })
     }
 
-    /// 공통 번들 제출 경로 연결 (SearcherCore가 생성한 채널 주입)
-    pub async fn set_bundle_sender(&self, sender: mpsc::UnboundedSender<Bundle>) {
-        let mut guard = self.bundle_sender.lock().await;
-        *guard = Some(sender);
-        info!("🔗 MicroArb 번들 전송 채널 연결 완료");
-    }
+    // 번들 경로 제거: 마이크로 전략은 공개 트랜잭션 브로드캐스트만 사용
     
     /// 가격 데이터 업데이트 (외부 피드에서 호출)
     pub async fn update_price_data(&self, price_data: PriceData) -> Result<()> {
@@ -1056,7 +1048,7 @@ impl MicroArbitrageStrategy {
                 let exchanges = self.exchanges.clone();
                 let active_trades = Arc::clone(&self.active_trades);
                 let stats = Arc::clone(&self.stats);
-                let bundle_sender = Arc::clone(&self.bundle_sender);
+                // 번들 경로 제거됨
                 let min_profit_percentage = self.min_profit_percentage;
                 let min_profit_usd = self.min_profit_usd;
                 let execution_timeout_ms = self.execution_timeout_ms;
@@ -1083,7 +1075,7 @@ impl MicroArbitrageStrategy {
                         latency_threshold_ms,
                         daily_volume_limit,
                         risk_limit_per_trade,
-                        bundle_sender,
+                        
                     };
                     
                     temp_strategy.execute_micro_arbitrage(&opportunity).await
