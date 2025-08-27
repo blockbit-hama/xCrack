@@ -483,6 +483,13 @@ impl Config {
             if min_profit <= 0.0 {
                 return Err(anyhow::anyhow!("Sandwich min profit threshold must be positive"));
             }
+
+            // Policy: Sandwich strategy must not use flashloans
+            if self.strategies.sandwich.use_flashloan {
+                return Err(anyhow::anyhow!(
+                    "Sandwich flashloan is disabled by policy. Set strategies.sandwich.use_flashloan=false"
+                ));
+            }
         }
 
         // Validate micro arbitrage configuration
