@@ -43,20 +43,7 @@ sol! {
     }
 }
 
-sol! {
-    /// Sandwich contract interface (contracts/Sandwich.sol)
-    interface ISandwichStrategy {
-        struct SandwichParams {
-            address router;
-            bytes   frontCalldata;
-            bytes   backCalldata;
-            address asset;
-            uint256 amount;
-        }
-
-        function executeSandwich(address asset, uint256 amount, SandwichParams calldata params) external;
-    }
-}
+// Sandwich flashloan executor interface removed by policy (no flashloan for Sandwich)
 
 sol! {
     /// Helper interface solely to ABI-encode parameters for a FlashLoan receiver
@@ -388,38 +375,7 @@ impl ABICodec {
         Ok(call.abi_encode().into())
     }
 
-    /// Encode SandwichStrategy params struct
-    pub fn encode_sandwich_contract_params(
-        &self,
-        router: Address,
-        front_calldata: Bytes,
-        back_calldata: Bytes,
-        asset: Address,
-        amount: U256,
-    ) -> Result<Bytes> {
-        let p = ISandwichStrategy::SandwichParams {
-            router,
-            frontCalldata: front_calldata.into(),
-            backCalldata: back_calldata.into(),
-            asset,
-            amount,
-        };
-        Ok(p.abi_encode().into())
-    }
-
-    /// Encode call to SandwichStrategy.executeSandwich
-    pub fn encode_sandwich_execute_call(
-        &self,
-        asset: Address,
-        amount: U256,
-        params: Bytes,
-    ) -> Result<Bytes> {
-        let decoded: ISandwichStrategy::SandwichParams =
-            ISandwichStrategy::SandwichParams::abi_decode(&params)
-                .map_err(|_| anyhow!("invalid sandwich params encoding"))?;
-        let call = ISandwichStrategy::executeSandwichCall { asset, amount, params: decoded };
-        Ok(call.abi_encode().into())
-    }
+    // Sandwich flashloan helpers removed by policy
 
     /// Encode Uniswap V2 swap exact tokens for tokens call
     pub fn encode_uniswap_v2_swap_exact_tokens(
@@ -617,24 +573,7 @@ impl ABICodec {
         Ok(call.abi_encode().into())
     }
 
-    /// Encode parameters for sandwich execution inside flashloan receiver
-    pub fn encode_flashloan_receiver_sandwich_params(
-        &self,
-        router: Address,
-        front_calldata: Bytes,
-        back_calldata: Bytes,
-        asset: Address,
-        amount: U256,
-    ) -> Result<Bytes> {
-        let call = IFlashLoanReceiverHelper::executeSandwichCall {
-            router,
-            frontCalldata: front_calldata.into(),
-            backCalldata: back_calldata.into(),
-            asset,
-            amount,
-        };
-        Ok(call.abi_encode().into())
-    }
+    // (no sandwich receiver params)
 
     /// Encode parameters for two-router arbitrage inside flashloan receiver
     pub fn encode_flashloan_receiver_arbitrage_params(

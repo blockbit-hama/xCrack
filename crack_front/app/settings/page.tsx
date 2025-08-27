@@ -148,23 +148,7 @@ export default function SettingsPage() {
                   </div>
                 </form>
 
-                {/* Flashloan toggles for strategies */}
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  const enabled = (e.currentTarget.elements.namedItem('s_flash') as HTMLInputElement).checked;
-                  const amount = (e.currentTarget.elements.namedItem('s_amt') as HTMLInputElement).value;
-                  const updates: any = { use_flashloan: enabled };
-                  if (amount) updates.flash_loan_amount = amount;
-                  const res = await updateStrategyParams('sandwich', updates);
-                  setMsg(res.ok ? 'Sandwich flashloan 저장 완료(재시작 필요)' : `Sandwich flashloan 저장 실패: ${res.error}`);
-                }}>
-                  <label style={{ fontSize: 12, color: '#666' }}>Sandwich Flashloan</label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="checkbox" name="s_flash" defaultChecked={Boolean((params as any).sandwich?.use_flashloan)} />
-                    <input name="s_amt" placeholder="amount (optional)" defaultValue={(params as any).sandwich?.flash_loan_amount || ''} className="border p-2" />
-                    <button type="submit" className="px-3 py-2 bg-black text-white rounded">Save</button>
-                  </div>
-                </form>
+                {/* Sandwich flashloan is disabled by policy: toggle removed */}
 
                 <form onSubmit={async (e) => {
                   e.preventDefault();
