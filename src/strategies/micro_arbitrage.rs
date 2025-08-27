@@ -601,9 +601,9 @@ impl MicroArbitrageStrategy {
         let token_in_addr = alloy::primitives::Address::from_slice(token_in.as_bytes());
         let token_out_addr = alloy::primitives::Address::from_slice(token_out.as_bytes());
 
-        // 라우터 선택 (간단 매핑)
-        let router_buy = if opportunity.buy_exchange.to_lowercase().contains("sushi") { *contracts::SUSHISWAP_ROUTER } else { *contracts::UNISWAP_V2_ROUTER };
-        let router_sell = if opportunity.sell_exchange.to_lowercase().contains("sushi") { *contracts::SUSHISWAP_ROUTER } else { *contracts::UNISWAP_V2_ROUTER };
+        // 라우터/집계기 선택 (간단 매핑). 필요시 config로 확장 가능
+        let router_buy = if opportunity.buy_exchange.to_lowercase().contains("sushi") { *contracts::SUSHISWAP_ROUTER } else if opportunity.buy_exchange.to_lowercase().contains("uniswap_v3") { *contracts::UNISWAP_V3_ROUTER } else { *contracts::UNISWAP_V2_ROUTER };
+        let router_sell = if opportunity.sell_exchange.to_lowercase().contains("sushi") { *contracts::SUSHISWAP_ROUTER } else if opportunity.sell_exchange.to_lowercase().contains("uniswap_v3") { *contracts::UNISWAP_V3_ROUTER } else { *contracts::UNISWAP_V2_ROUTER };
 
         let codec = ABICodec::new();
         let now = chrono::Utc::now().timestamp() as u64;
@@ -612,7 +612,7 @@ impl MicroArbitrageStrategy {
         // 금액: 설정된 flash_loan_amount 사용 또는 기회 max_amount
         let amount_in = opportunity.max_amount;
 
-        // buyCalldata: swapExactTokensForTokens(amountIn, amountOutMin, path=[token_in, token_out], to=receiver, deadline)
+        // buyCalldata: 기본은 V2 swapExactTokensForTokens. (향후 집계기 raw calldata 직접 주입 경로 추가)
         // 동적 슬리피지 가드: 0x 견적으로 minOut 산정, 실패 시 50bps
         let slippage_bps = 50u64;
         let amount_out_min_buy = if let Some(q) = self.estimate_buy_amount_via_0x(token_in_addr, token_out_addr, amount_in).await {
@@ -629,7 +629,7 @@ impl MicroArbitrageStrategy {
             deadline,
         )?;
 
-        // sellCalldata: swapExactTokensForTokens(amountIn=<all>, amountOutMin, path=[token_out, token_in], to=receiver, deadline)
+        // sellCalldata: 기본은 V2 swapExactTokensForTokens (집계기 raw 지원 예정)
         let sell_path = vec![token_out_addr, token_in_addr];
         // sell도 동적 가드 적용 (0x -> 1inch 폴백), 실패 시 50bps
         let amount_out_min_sell = if let Some(q) = self.estimate_amount_out_via_0x(token_out_addr, token_in_addr, amount_in).await {
@@ -659,7 +659,7 @@ impl MicroArbitrageStrategy {
             token_out_addr,
             router_buy,
             router_sell,
-            Some(router_buy),
+            Some(router_buy), // allowanceTarget이 있으면 여기 교체
             Some(router_sell),
             amount_in,
             expected_min,
