@@ -27,6 +27,38 @@ sol! {
 }
 
 sol! {
+    /// Liquidation contract interface (contracts/Liquidation.sol)
+    interface ILiquidationStrategy {
+        struct LiquidationParams {
+            address protocol;
+            address user;
+            address collateralAsset;
+            address debtAsset;
+            uint256 debtToCover;
+            address dexRouter;
+            bytes   swapCalldata;
+        }
+
+        function executeLiquidation(address asset, uint256 amount, LiquidationParams calldata params) external;
+    }
+}
+
+sol! {
+    /// Sandwich contract interface (contracts/Sandwich.sol)
+    interface ISandwichStrategy {
+        struct SandwichParams {
+            address router;
+            bytes   frontCalldata;
+            bytes   backCalldata;
+            address asset;
+            uint256 amount;
+        }
+
+        function executeSandwich(address asset, uint256 amount, SandwichParams calldata params) external;
+    }
+}
+
+sol! {
     /// Helper interface solely to ABI-encode parameters for a FlashLoan receiver
     /// The actual receiver contract should implement a compatible decoder for this signature.
     interface IFlashLoanReceiverHelper {
@@ -316,6 +348,76 @@ impl ABICodec {
             IArbitrageStrategy::ArbitrageParams::abi_decode(&params)
                 .map_err(|_| anyhow!("invalid arbitrage params encoding"))?;
         let call = IArbitrageStrategy::executeArbitrageCall { asset, amount, params: decoded };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode LiquidationStrategy params struct
+    pub fn encode_liquidation_contract_params(
+        &self,
+        protocol: Address,
+        user: Address,
+        collateral_asset: Address,
+        debt_asset: Address,
+        debt_to_cover: U256,
+        dex_router: Address,
+        swap_calldata: Bytes,
+    ) -> Result<Bytes> {
+        let p = ILiquidationStrategy::LiquidationParams {
+            protocol,
+            user,
+            collateralAsset: collateral_asset,
+            debtAsset: debt_asset,
+            debtToCover: debt_to_cover,
+            dexRouter: dex_router,
+            swapCalldata: swap_calldata.into(),
+        };
+        Ok(p.abi_encode().into())
+    }
+
+    /// Encode call to LiquidationStrategy.executeLiquidation
+    pub fn encode_liquidation_execute_call(
+        &self,
+        asset: Address,
+        amount: U256,
+        params: Bytes,
+    ) -> Result<Bytes> {
+        let decoded: ILiquidationStrategy::LiquidationParams =
+            ILiquidationStrategy::LiquidationParams::abi_decode(&params)
+                .map_err(|_| anyhow!("invalid liquidation params encoding"))?;
+        let call = ILiquidationStrategy::executeLiquidationCall { asset, amount, params: decoded };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode SandwichStrategy params struct
+    pub fn encode_sandwich_contract_params(
+        &self,
+        router: Address,
+        front_calldata: Bytes,
+        back_calldata: Bytes,
+        asset: Address,
+        amount: U256,
+    ) -> Result<Bytes> {
+        let p = ISandwichStrategy::SandwichParams {
+            router,
+            frontCalldata: front_calldata.into(),
+            backCalldata: back_calldata.into(),
+            asset,
+            amount,
+        };
+        Ok(p.abi_encode().into())
+    }
+
+    /// Encode call to SandwichStrategy.executeSandwich
+    pub fn encode_sandwich_execute_call(
+        &self,
+        asset: Address,
+        amount: U256,
+        params: Bytes,
+    ) -> Result<Bytes> {
+        let decoded: ISandwichStrategy::SandwichParams =
+            ISandwichStrategy::SandwichParams::abi_decode(&params)
+                .map_err(|_| anyhow!("invalid sandwich params encoding"))?;
+        let call = ISandwichStrategy::executeSandwichCall { asset, amount, params: decoded };
         Ok(call.abi_encode().into())
     }
 

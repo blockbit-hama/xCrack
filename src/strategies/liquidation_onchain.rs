@@ -1185,6 +1185,61 @@ impl Strategy for OnChainLiquidationStrategy {
             sell_spender = None; // 1inch는 allowanceTarget을 제공하지 않거나 라우터 자체가 spender
         }
 
+        // 전용 Liquidation 컨트랙트가 설정되어 있으면: 컨트랙트의 executeLiquidation 호출로 단일 트랜잭션 구성
+        if let Some(liq_h160) = self.config.blockchain.primary_network.liquidation_contract {
+            if liq_h160 != H160::zero() {
+                let liq_addr = Address::from_slice(liq_h160.as_bytes());
+                // LiquidationStrategy 파라미터 인코딩
+                let liq_params = abi.encode_liquidation_contract_params(
+                    protocol_info.lending_pool_address,
+                    user,
+                    collateral_asset,
+                    debt_asset,
+                    debt_amount,
+                    sell_target.unwrap_or(Address::ZERO),
+                    sell_calldata.clone().unwrap_or_else(|| alloy::primitives::Bytes::from(Vec::new())),
+                )?;
+
+                // executeLiquidation(asset=debtAsset, amount=debtToCover, params)
+                let call_data = abi.encode_liquidation_execute_call(
+                    debt_asset,
+                    debt_amount,
+                    liq_params,
+                )?;
+
+                let tx = Transaction {
+                    hash: alloy::primitives::B256::ZERO,
+                    from: alloy::primitives::Address::ZERO,
+                    to: Some(liq_addr),
+                    value: U256::ZERO,
+                    gas_price: U256::from(30_000_000_000u64),
+                    gas_limit: U256::from(800_000u64),
+                    data: call_data.to_vec(),
+                    nonce: 0,
+                    timestamp: chrono::Utc::now(),
+                    block_number: None,
+                };
+
+                // Aave V3 플래시론 프리미엄(기본 9bps) 비용 반영
+                let flash_fee = debt_amount * U256::from(9u64) / U256::from(10000u64);
+                let adjusted_profit = if opportunity.expected_profit > flash_fee { opportunity.expected_profit - flash_fee } else { U256::ZERO };
+                let mut bundle = Bundle::new(vec![tx], 0, adjusted_profit, 800_000, StrategyType::Liquidation);
+
+                // 가스 전략 반영
+                if let Ok((base_fee, priority_fee)) = self.blockchain_client.get_gas_price().await {
+                    let urgency = self.predict_liquidation_urgency(collateral_asset, debt_asset).await.unwrap_or(0.2);
+                    let competition = self.estimate_competition_intensity().await.unwrap_or(0.5);
+                    let aggressiveness = (urgency * 0.6 + competition * 0.4).clamp(0.0, 1.0);
+                    let bump_gwei = ((1.0 + aggressiveness) * 3.0).round() as u64;
+                    let adj_priority = priority_fee + ethers::types::U256::from(bump_gwei);
+                    let max_fee_eth = base_fee + adj_priority * ethers::types::U256::from(2);
+                    bundle.max_fee_per_gas = Some(U256::from_limbs_slice(&max_fee_eth.0));
+                    bundle.max_priority_fee_per_gas = Some(U256::from_limbs_slice(&adj_priority.0));
+                }
+                return Ok(bundle);
+            }
+        }
+
         // 플래시론 수신자 설정 시: 3-스텝을 수신자 내부에서 처리하도록 단일 flashLoan 트랜잭션만 번들에 포함하고 조기 반환
         if let Some(receiver_h160) = self.config.blockchain.primary_network.flashloan_receiver {
             if receiver_h160 != H160::zero() {

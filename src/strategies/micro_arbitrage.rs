@@ -700,9 +700,51 @@ impl MicroArbitrageStrategy {
     }
 
     /// 일반 트랜잭션 브로드캐스트 (간단 스텁: 실제 서명/전송은 온체인 모듈과 통합 가능)
-    async fn broadcast_public_transaction(&self, _tx: crate::types::Transaction) -> Result<bool> {
-        // TODO: BlockchainClient + LocalWallet로 서명/전송 통합
-        info!("📤 Micro: 공개 브로드캐스트 전송 (스텁)");
+    async fn broadcast_public_transaction(&self, tx: crate::types::Transaction) -> Result<bool> {
+        use ethers::providers::{Provider as HttpProvider, Http, Middleware};
+        use ethers::types::{TransactionRequest as EthersTxRequest, H160 as EthersH160, U256 as EthersU256};
+        use ethers::signers::{LocalWallet, Signer};
+        use ethers::middleware::SignerMiddleware;
+
+        let rpc_url = &self.config.blockchain.primary_network.rpc_url;
+        let provider: HttpProvider<Http> = HttpProvider::<Http>::try_from(rpc_url)
+            .map_err(|e| anyhow!("provider error: {}", e))?;
+
+        // Load key
+        let pk = std::env::var("PRIVATE_KEY").ok()
+            .or_else(|| std::env::var("FLASHBOTS_PRIVATE_KEY").ok())
+            .ok_or_else(|| anyhow!("PRIVATE_KEY/FLASHBOTS_PRIVATE_KEY not set"))?;
+        let mut wallet: LocalWallet = pk.parse().map_err(|e| anyhow!("wallet parse error: {}", e))?;
+        let chain_id = self.config.blockchain.primary_network.chain_id;
+        wallet = wallet.with_chain_id(chain_id);
+
+        // Convert types
+        let to = tx.to.ok_or_else(|| anyhow!("missing to address"))?;
+        let to_h160: EthersH160 = EthersH160::from_slice(to.as_slice());
+
+        let mut be = [0u8; 32];
+        be.copy_from_slice(&tx.value.to_be_bytes::<32>());
+        let val = EthersU256::from_big_endian(&be);
+        be.copy_from_slice(&tx.gas_price.to_be_bytes::<32>());
+        let gas_price = EthersU256::from_big_endian(&be);
+        be.copy_from_slice(&tx.gas_limit.to_be_bytes::<32>());
+        let gas_limit = EthersU256::from_big_endian(&be);
+
+        // Build legacy tx
+        let data_bytes = ethers::types::Bytes::from(tx.data.clone());
+        let mut req = EthersTxRequest::new()
+            .to(to_h160)
+            .data(data_bytes)
+            .value(val)
+            .gas(gas_limit)
+            .gas_price(gas_price);
+        // Nonce optional: let provider determine if not provided
+        if tx.nonce != 0 { req = req.nonce(ethers::types::U256::from(tx.nonce)); }
+
+        let client: SignerMiddleware<HttpProvider<Http>, LocalWallet> = SignerMiddleware::new(provider, wallet);
+        let pending = client.send_transaction(req, None::<ethers::types::BlockId>).await?;
+        let _tx_hash = pending.tx_hash();
+        info!("📤 Micro: 공개 브로드캐스트 전송 완료");
         Ok(true)
     }
 
