@@ -1,0 +1,11 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Check for .DS_Store files
+if git diff --cached --name-only | grep -q "\.DS_Store"; then
+    echo "❌ Error: .DS_Store files are not allowed in commits"
+    echo "📝 Run: git rm --cached .DS_Store"
+    exit 1
+fi
+
+echo "✅ No .DS_Store files detected"
