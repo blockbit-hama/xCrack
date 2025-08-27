@@ -966,97 +966,10 @@ impl Strategy for OnChainSandwichStrategy {
             block_number: None,
         };
 
-        // 🆕 flashloan 보조 모드: 전용 Sandwich 컨트랙트가 있으면 그 경로 우선, 없으면 기존 리시버 경로
+        // Flashloan 경로 제거: 정책상 샌드위치는 플래시론을 사용하지 않음
         let mut txs = vec![approve_tx, frontrun.clone(), backrun.clone()];
         if self.config.strategies.sandwich.use_flashloan {
-            debug!("🔁 Flashloan 보조 모드 활성화 (샌드위치)");
-            if let Some(sandwich_h160) = self.config.blockchain.primary_network.sandwich_contract {
-                if sandwich_h160 != ethers::types::H160::zero() {
-                    let sandwich_addr = Address::from_slice(sandwich_h160.as_bytes());
-                    let codec = ABICodec::new();
-                    let front_bytes = alloy::primitives::Bytes::from(frontrun.data.clone());
-                    let back_bytes = alloy::primitives::Bytes::from(backrun.data.clone());
-                    let asset = pool_info.token0;
-                    let amount = details.frontrun_amount;
-                    // params for SandwichStrategy
-                    let params = codec.encode_sandwich_contract_params(
-                        *contracts::UNISWAP_V2_ROUTER,
-                        front_bytes,
-                        back_bytes,
-                        asset,
-                        amount,
-                    )?;
-                    // executeSandwich(asset, amount, params)
-                    let call_data = codec.encode_sandwich_execute_call(
-                        asset,
-                        amount,
-                        params,
-                    )?;
-                    let call_tx = Transaction {
-                        hash: B256::ZERO,
-                        from: Address::ZERO,
-                        to: Some(sandwich_addr),
-                        value: U256::ZERO,
-                        gas_price: U256::from(30_000_000_000u64),
-                        gas_limit: U256::from(600_000u64),
-                        data: call_data.to_vec(),
-                        nonce: 0,
-                        timestamp: chrono::Utc::now(),
-                        block_number: None,
-                    };
-                    txs = vec![call_tx];
-                } else {
-                    debug!("⚠️ sandwich_contract 미설정(0x0). 리시버/기존 경로로 진행");
-                }
-            } else if let Some(receiver_h160) = self.config.blockchain.primary_network.flashloan_receiver {
-                if receiver_h160 != ethers::types::H160::zero() {
-                    let receiver_addr = Address::from_slice(receiver_h160.as_bytes());
-                    let codec = ABICodec::new();
-
-                    // 앞/뒤 스왑 calldata를 receiver로 전달할 패키지 생성
-                    let front_bytes = alloy::primitives::Bytes::from(frontrun.data.clone());
-                    let back_bytes = alloy::primitives::Bytes::from(backrun.data.clone());
-                    // 대여 자산은 풀의 token0로 가정(샌드위치 시작 자산)
-                    let asset = pool_info.token0;
-                    let amount = details.frontrun_amount;
-                    let params = codec.encode_flashloan_receiver_sandwich_params(
-                        *contracts::UNISWAP_V2_ROUTER,
-                        front_bytes,
-                        back_bytes,
-                        asset,
-                        amount,
-                    )?;
-
-                    // flashLoanSimple(receiver, asset, amount, params, referralCode)
-                    let flash_calldata = codec.encode_aave_flashloan_simple(
-                        receiver_addr,
-                        asset,
-                        amount,
-                        params,
-                        0u16,
-                    )?;
-
-                    let aave_pool = *contracts::AAVE_V3_POOL;
-                    let flashloan_tx = Transaction {
-                        hash: B256::ZERO,
-                        from: Address::ZERO,
-                        to: Some(aave_pool),
-                        value: U256::ZERO,
-                        gas_price: U256::from(30_000_000_000u64),
-                        gas_limit: U256::from(500_000u64),
-                        data: flash_calldata.to_vec(),
-                        nonce: 0,
-                        timestamp: chrono::Utc::now(),
-                        block_number: None,
-                    };
-                    // 플래시론 트랜잭션만 번들에 포함 (receiver 내부에서 front/back/repay 수행)
-                    txs = vec![flashloan_tx];
-                } else {
-                    debug!("⚠️ flashloan_receiver 미설정(0x0). 일반 경로로 진행");
-                }
-            } else {
-                debug!("⚠️ flashloan_receiver 미설정(None). 일반 경로로 진행");
-            }
+            warn!("⚠️ Sandwich: flashloan 비활성 정책. use_flashloan=true 무시합니다.");
         }
 
         let mut bundle = Bundle::new(
