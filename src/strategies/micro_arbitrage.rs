@@ -24,6 +24,14 @@ use crate::types::{
 use crate::strategies::Strategy;
 use serde::Deserialize;
 
+// Helper type for aggregator execution quotes (0x)
+struct OxSwapQuote { 
+    to: alloy::primitives::Address, 
+    data: Vec<u8>, 
+    spender: Option<alloy::primitives::Address>, 
+    amount_out: alloy::primitives::U256 
+}
+
 /// 초단타 마이크로 아비트래지 전략
 /// 
 /// 여러 거래소간 수 밀리초 단위 가격 차이를 포착하여 
@@ -583,6 +591,7 @@ impl MicroArbitrageStrategy {
     async fn execute_flashloan_arbitrage_via_contract(&self, opportunity: &MicroArbitrageOpportunity) -> Result<bool> {
         use crate::utils::abi::{ABICodec, contracts};
         use alloy::primitives::Bytes;
+        use alloy::primitives::Address as AlloyAddress;
         // 전용 컨트랙트 주소 필요
         let arb_h160 = self.config.blockchain.primary_network.arbitrage_contract
             .ok_or_else(|| anyhow!("arbitrage_contract not configured"))?;
@@ -612,7 +621,20 @@ impl MicroArbitrageStrategy {
         // 금액: 설정된 flash_loan_amount 사용 또는 기회 max_amount
         let amount_in = opportunity.max_amount;
 
-        // buyCalldata: 기본은 V2 swapExactTokensForTokens. (향후 집계기 raw calldata 직접 주입 경로 추가)
+        // 집계기(0x) 경로 시도: 실제 실행 라우터/데이터/spender를 그대로 사용
+        let mut agg_buy: Option<(AlloyAddress, Vec<u8>, Option<AlloyAddress>, alloy::primitives::U256)> = None;
+        let mut agg_sell: Option<(AlloyAddress, Vec<u8>, Option<AlloyAddress>, alloy::primitives::U256)> = None;
+        if let Some(bq) = self.get_0x_swap_quote(token_in_addr, token_out_addr, amount_in).await? {
+            let out_b = bq.amount_out;
+            agg_buy = Some((bq.to, bq.data, bq.spender, out_b));
+            if out_b > alloy::primitives::U256::ZERO {
+                if let Some(sq) = self.get_0x_swap_quote(token_out_addr, token_in_addr, out_b).await? {
+                    agg_sell = Some((sq.to, sq.data, sq.spender, sq.amount_out));
+                }
+            }
+        }
+
+        // buyCalldata: 기본은 V2 swapExactTokensForTokens. (집계기 경로가 유리하면 아래에서 교체)
         // 동적 슬리피지 가드: 0x 견적으로 minOut 산정, 실패 시 50bps
         let slippage_bps = 50u64;
         let amount_out_min_buy = if let Some(q) = self.estimate_buy_amount_via_0x(token_in_addr, token_out_addr, amount_in).await {
@@ -629,7 +651,7 @@ impl MicroArbitrageStrategy {
             deadline,
         )?;
 
-        // sellCalldata: 기본은 V2 swapExactTokensForTokens (집계기 raw 지원 예정)
+        // sellCalldata: 기본은 V2 swapExactTokensForTokens (집계기 경로가 유리하면 아래에서 교체)
         let sell_path = vec![token_out_addr, token_in_addr];
         // sell도 동적 가드 적용 (0x -> 1inch 폴백), 실패 시 50bps
         let amount_out_min_sell = if let Some(q) = self.estimate_amount_out_via_0x(token_out_addr, token_in_addr, amount_in).await {
@@ -654,17 +676,31 @@ impl MicroArbitrageStrategy {
         // 집계기(0x/1inch) 라우터가 별도 spender(allowanceTarget)를 요구할 수 있으므로
         // 여기서는 안전하게 spenderA/spenderB를 라우터 주소로 기본 지정.
         // 향후 off-chain quote에서 allowanceTarget을 얻으면 해당 주소를 채워 넣을 수 있음.
+        // 경로 선택: 0x 두 레그가 모두 준비되고, V2 대비 유리하면 집계기 경로 채택
+        let (final_dex_a, final_data_a, final_spender_a,
+             final_dex_b, final_data_b, final_spender_b) = if let (Some((to_a, data_a, sp_a, out_b)), Some((to_b, data_b, sp_b, out_a))) = (agg_buy, agg_sell) {
+            // 단순 비교: 집계기 최종 tokenA 수령량 vs V2 예상 최소 수령량
+            let v2_min_back_a = amount_out_min_sell; // 보수적 가드 기준
+            if out_a > v2_min_back_a {
+                (to_a, data_a, sp_a.unwrap_or(to_a), to_b, data_b, sp_b.unwrap_or(to_b))
+            } else {
+                (router_buy, buy_calldata.to_vec(), router_buy, router_sell, sell_calldata.to_vec(), router_sell)
+            }
+        } else {
+            (router_buy, buy_calldata.to_vec(), router_buy, router_sell, sell_calldata.to_vec(), router_sell)
+        };
+
         let arb_params = codec.encode_arbitrage_contract_params(
             token_in_addr,
             token_out_addr,
-            router_buy,
-            router_sell,
-            Some(router_buy), // allowanceTarget이 있으면 여기 교체
-            Some(router_sell),
+            final_dex_a,
+            final_dex_b,
+            Some(final_spender_a),
+            Some(final_spender_b),
             amount_in,
             expected_min,
-            Bytes::from(buy_calldata.to_vec()),
-            Bytes::from(sell_calldata.to_vec()),
+            Bytes::from(final_data_a),
+            Bytes::from(final_data_b),
         )?;
         let calldata = codec.encode_arbitrage_execute_call(
             token_in_addr,
@@ -805,6 +841,35 @@ impl MicroArbitrageStrategy {
             Some(q) => alloy::primitives::U256::from_str(&q.dst_amount).ok(),
             None => None,
         }
+    }
+
+    /// 0x 실행용 quote (to, data, allowanceTarget, amountOut) 가져오기
+    async fn get_0x_swap_quote(
+        &self,
+        token_in: alloy::primitives::Address,
+        token_out: alloy::primitives::Address,
+        amount_in: alloy::primitives::U256,
+    ) -> Result<Option<OxSwapQuote>> {
+        #[derive(Deserialize)]
+        struct Quote { to: String, data: String, #[serde(rename="allowanceTarget")] allowance_target: Option<String>, #[serde(rename="buyAmount")] buy_amount: String }
+        let url = format!(
+            "https://api.0x.org/swap/v1/quote?sellToken={}&buyToken={}&sellAmount={}",
+            format!("{:x}", token_in),
+            format!("{:x}", token_out),
+            amount_in.to_string()
+        );
+        let client = reqwest::Client::new();
+        let resp = match client.get(&url).send().await { Ok(r) => r, Err(_) => return Ok(None) };
+        if !resp.status().is_success() { return Ok(None); }
+        let q: Quote = match resp.json().await { Ok(j) => j, Err(_) => return Ok(None) };
+        let to = match alloy::primitives::Address::from_str(&q.to) { Ok(a) => a, Err(_) => return Ok(None) };
+        let data = match hex::decode(q.data.trim_start_matches("0x")) { Ok(b) => b, Err(_) => return Ok(None) };
+        let spender = match q.allowance_target {
+            Some(s) if !s.is_empty() => alloy::primitives::Address::from_str(&s).ok(),
+            _ => None
+        };
+        let amount_out = alloy::primitives::U256::from_str_radix(&q.buy_amount, 10).unwrap_or_default();
+        Ok(Some(OxSwapQuote{ to, data, spender, amount_out }))
     }
 
     /// 번들 제출 전 최소 USD 수익 가드 (플래시론 프리미엄 9bps 반영)
