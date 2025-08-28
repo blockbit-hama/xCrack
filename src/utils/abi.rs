@@ -29,6 +29,70 @@ sol! {
 }
 
 sol! {
+    /// Multi-Asset Arbitrage contract interface (contracts/MultiAssetArbitrage.sol)
+    interface IMultiAssetArbitrageStrategy {
+        struct MultiAssetArbitrageParams {
+            address[] borrowAssets;
+            uint256[] borrowAmounts;
+            address[] targetAssets;
+            address[] dexes;
+            address[] spenders;
+            uint256 expectedProfitMin;
+            bytes[] swapCallData;
+            uint256[] swapSequences;
+        }
+
+        struct TriangularArbitrageParams {
+            address tokenA;
+            address tokenB;
+            address tokenC;
+            uint256 amountA;
+            uint256 amountB;
+            address dexAB;
+            address dexBC;
+            address dexCA;
+            address dexCB;
+            uint256 expectedProfitMin;
+            bytes swapCallDataAB;
+            bytes swapCallDataBC;
+            bytes swapCallDataCA;
+            bytes swapCallDataCB;
+        }
+
+        struct PositionMigrationParams {
+            address[] debtAssets;
+            uint256[] debtAmounts;
+            address[] collateralAssets;
+            uint256[] collateralAmounts;
+            address[] newDebtAssets;
+            address[] newCollateralAssets;
+            address[] migrationDexes;
+            bytes[] migrationCallData;
+            uint256 expectedSavingMin;
+        }
+
+        function executeMultiAssetArbitrage(
+            address[] calldata assets,
+            uint256[] calldata amounts,
+            uint256[] calldata modes,
+            MultiAssetArbitrageParams calldata params
+        ) external;
+
+        function executeTriangularArbitrage(
+            TriangularArbitrageParams calldata params
+        ) external;
+
+        function executePositionMigration(
+            PositionMigrationParams calldata params
+        ) external;
+
+        function calculateTriangularProfitability(
+            TriangularArbitrageParams calldata params
+        ) external view returns (uint256 expectedProfit);
+    }
+}
+
+sol! {
     /// Liquidation contract interface (contracts/Liquidation.sol)
     interface ILiquidationStrategy {
         struct LiquidationParams {
@@ -341,6 +405,139 @@ impl ABICodec {
             IArbitrageStrategy::ArbitrageParams::abi_decode(&params)
                 .map_err(|_| anyhow!("invalid arbitrage params encoding"))?;
         let call = IArbitrageStrategy::executeArbitrageCall { asset, amount, params: decoded };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode TriangularArbitrageParams for MultiAssetArbitrageStrategy
+    pub fn encode_triangular_arbitrage_params(
+        &self,
+        token_a: Address,
+        token_b: Address,
+        token_c: Address,
+        amount_a: U256,
+        amount_b: U256,
+        dex_ab: Address,
+        dex_bc: Address,
+        dex_ca: Address,
+        dex_cb: Address,
+        expected_profit_min: U256,
+        swap_call_data_ab: Bytes,
+        swap_call_data_bc: Bytes,
+        swap_call_data_ca: Bytes,
+        swap_call_data_cb: Bytes,
+    ) -> Result<Bytes> {
+        let p = IMultiAssetArbitrageStrategy::TriangularArbitrageParams {
+            tokenA: token_a,
+            tokenB: token_b,
+            tokenC: token_c,
+            amountA: amount_a,
+            amountB: amount_b,
+            dexAB: dex_ab,
+            dexBC: dex_bc,
+            dexCA: dex_ca,
+            dexCB: dex_cb,
+            expectedProfitMin: expected_profit_min,
+            swapCallDataAB: swap_call_data_ab.into(),
+            swapCallDataBC: swap_call_data_bc.into(),
+            swapCallDataCA: swap_call_data_ca.into(),
+            swapCallDataCB: swap_call_data_cb.into(),
+        };
+        Ok(p.abi_encode().into())
+    }
+
+    /// Encode call to MultiAssetArbitrageStrategy.executeTriangularArbitrage
+    pub fn encode_triangular_arbitrage_execute_call(
+        &self,
+        params: Bytes,
+    ) -> Result<Bytes> {
+        let decoded: IMultiAssetArbitrageStrategy::TriangularArbitrageParams =
+            IMultiAssetArbitrageStrategy::TriangularArbitrageParams::abi_decode(&params)
+                .map_err(|_| anyhow!("invalid triangular arbitrage params encoding"))?;
+        let call = IMultiAssetArbitrageStrategy::executeTriangularArbitrageCall { params: decoded };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode MultiAssetArbitrageParams for MultiAssetArbitrageStrategy
+    pub fn encode_multi_asset_arbitrage_params(
+        &self,
+        borrow_assets: Vec<Address>,
+        borrow_amounts: Vec<U256>,
+        target_assets: Vec<Address>,
+        dexes: Vec<Address>,
+        spenders: Vec<Address>,
+        expected_profit_min: U256,
+        swap_call_data: Vec<Bytes>,
+        swap_sequences: Vec<U256>,
+    ) -> Result<Bytes> {
+        let p = IMultiAssetArbitrageStrategy::MultiAssetArbitrageParams {
+            borrowAssets: borrow_assets,
+            borrowAmounts: borrow_amounts,
+            targetAssets: target_assets,
+            dexes: dexes,
+            spenders: spenders,
+            expectedProfitMin: expected_profit_min,
+            swapCallData: swap_call_data.into_iter().map(|b| b.into()).collect(),
+            swapSequences: swap_sequences,
+        };
+        Ok(p.abi_encode().into())
+    }
+
+    /// Encode call to MultiAssetArbitrageStrategy.executeMultiAssetArbitrage
+    pub fn encode_multi_asset_arbitrage_execute_call(
+        &self,
+        assets: Vec<Address>,
+        amounts: Vec<U256>,
+        modes: Vec<U256>,
+        params: Bytes,
+    ) -> Result<Bytes> {
+        let decoded: IMultiAssetArbitrageStrategy::MultiAssetArbitrageParams =
+            IMultiAssetArbitrageStrategy::MultiAssetArbitrageParams::abi_decode(&params)
+                .map_err(|_| anyhow!("invalid multi-asset arbitrage params encoding"))?;
+        let call = IMultiAssetArbitrageStrategy::executeMultiAssetArbitrageCall { 
+            assets, 
+            amounts, 
+            modes, 
+            params: decoded 
+        };
+        Ok(call.abi_encode().into())
+    }
+
+    /// Encode PositionMigrationParams for MultiAssetArbitrageStrategy
+    pub fn encode_position_migration_params(
+        &self,
+        debt_assets: Vec<Address>,
+        debt_amounts: Vec<U256>,
+        collateral_assets: Vec<Address>,
+        collateral_amounts: Vec<U256>,
+        new_debt_assets: Vec<Address>,
+        new_collateral_assets: Vec<Address>,
+        migration_dexes: Vec<Address>,
+        migration_call_data: Vec<Bytes>,
+        expected_saving_min: U256,
+    ) -> Result<Bytes> {
+        let p = IMultiAssetArbitrageStrategy::PositionMigrationParams {
+            debtAssets: debt_assets,
+            debtAmounts: debt_amounts,
+            collateralAssets: collateral_assets,
+            collateralAmounts: collateral_amounts,
+            newDebtAssets: new_debt_assets,
+            newCollateralAssets: new_collateral_assets,
+            migrationDexes: migration_dexes,
+            migrationCallData: migration_call_data.into_iter().map(|b| b.into()).collect(),
+            expectedSavingMin: expected_saving_min,
+        };
+        Ok(p.abi_encode().into())
+    }
+
+    /// Encode call to MultiAssetArbitrageStrategy.executePositionMigration
+    pub fn encode_position_migration_execute_call(
+        &self,
+        params: Bytes,
+    ) -> Result<Bytes> {
+        let decoded: IMultiAssetArbitrageStrategy::PositionMigrationParams =
+            IMultiAssetArbitrageStrategy::PositionMigrationParams::abi_decode(&params)
+                .map_err(|_| anyhow!("invalid position migration params encoding"))?;
+        let call = IMultiAssetArbitrageStrategy::executePositionMigrationCall { params: decoded };
         Ok(call.abi_encode().into())
     }
 

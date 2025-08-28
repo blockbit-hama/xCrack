@@ -23,6 +23,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <div className="flex flex-col pb-2">
                   <a href="/strategies" className="text-white no-underline px-3 py-2 hover:bg-white/10">전략</a>
                   <a href="/micro" className="text-white no-underline px-3 py-2 hover:bg-white/10">마이크로</a>
+                  <a href="/flashloan" className="text-white no-underline px-3 py-2 hover:bg-white/10">플래시론</a>
+                  <a href="/multi-asset" className="text-white no-underline px-3 py-2 hover:bg-white/10">다중자산</a>
                   <a href="/bundles" className="text-white no-underline px-3 py-2 hover:bg-white/10">번들</a>
                 </div>
               </div>

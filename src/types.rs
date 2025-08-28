@@ -26,6 +26,7 @@ pub enum StrategyType {
     Liquidation,
     MicroArbitrage, // 초고속 거래소간 마이크로 아비트래지
     CrossChainArbitrage, // 크로스체인 아비트래지
+    MultiAssetArbitrage, // 다중자산 플래시론 아비트래지
     // TODO: 향후 구현 예정
     // Frontrun,
     // Backrun,
@@ -38,6 +39,7 @@ impl std::fmt::Display for StrategyType {
             StrategyType::Liquidation => write!(f, "Liquidation"),
             StrategyType::MicroArbitrage => write!(f, "MicroArbitrage"),
             StrategyType::CrossChainArbitrage => write!(f, "CrossChainArbitrage"),
+            StrategyType::MultiAssetArbitrage => write!(f, "MultiAssetArbitrage"),
         }
     }
 }
@@ -49,6 +51,7 @@ pub enum OpportunityType {
     Liquidation,
     MicroArbitrage,
     CrossChainArbitrage,
+    MultiAssetArbitrage,
     MevBoost,
 }
 
@@ -118,6 +121,7 @@ pub enum OpportunityDetails {
     Sandwich(SandwichDetails),
     Liquidation(LiquidationDetails),
     MicroArbitrage(MicroArbitrageDetails),
+    MultiAssetArbitrage(MultiAssetArbitrageDetails),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -163,6 +167,102 @@ pub struct MicroArbitrageDetails {
     pub profit_percentage: f64,
     pub execution_time_ms: u64,
     pub order_books: Vec<OrderBookSnapshot>,
+}
+
+/// 다중자산 아비트래지 세부 정보
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MultiAssetArbitrageDetails {
+    pub strategy_type: MultiAssetStrategyType,
+    pub borrow_assets: Vec<Address>,
+    pub borrow_amounts: Vec<U256>,
+    pub target_assets: Vec<Address>,
+    pub dex_paths: Vec<Vec<String>>,
+    pub expected_profit: U256,
+    pub execution_sequence: Vec<u32>,
+    pub flash_loan_premiums: Vec<U256>,
+    pub gas_estimate: u64,
+}
+
+/// 다중자산 전략 타입
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MultiAssetStrategyType {
+    TriangularArbitrage {
+        token_a: Address,
+        token_b: Address,
+        token_c: Address,
+        amount_a: U256,
+        amount_b: U256,
+    },
+    PositionMigration {
+        debt_assets: Vec<Address>,
+        collateral_assets: Vec<Address>,
+        new_debt_assets: Vec<Address>,
+        new_collateral_assets: Vec<Address>,
+    },
+    ComplexArbitrage {
+        swap_sequence: Vec<SwapStep>,
+    },
+}
+
+/// 스왑 단계
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SwapStep {
+    pub dex: String,
+    pub token_in: Address,
+    pub token_out: Address,
+    pub amount_in: U256,
+    pub expected_amount_out: U256,
+    pub call_data: Vec<u8>,
+}
+
+/// 다중자산 아비트래지 기회
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MultiAssetArbitrageOpportunity {
+    pub id: String,
+    pub strategy_type: MultiAssetStrategyType,
+    pub borrow_assets: Vec<Address>,
+    pub borrow_amounts: Vec<U256>,
+    pub target_assets: Vec<Address>,
+    pub expected_profit: U256,
+    pub profit_percentage: f64,
+    pub execution_sequence: Vec<u32>,
+    pub confidence_score: f64,
+    pub gas_estimate: u64,
+    pub flash_loan_premiums: Vec<U256>,
+    pub max_execution_time_ms: u64,
+    pub discovered_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    /// 기회 탐지 시 선택된 DEX 어댑터 정보 (실행 시 동일한 DEX 사용)
+    pub selected_dex_adapters: Vec<String>,}
+
+impl MultiAssetArbitrageOpportunity {
+    pub fn is_valid(&self) -> bool {
+        Utc::now() < self.expires_at && self.expected_profit > U256::ZERO
+    }
+
+    pub fn profitability_score(&self) -> f64 {
+        (self.profit_percentage * self.confidence_score) / (self.max_execution_time_ms as f64 / 1000.0)
+    }
+}
+
+/// 다중자산 아비트래지 통계
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MultiAssetArbitrageStats {
+    pub total_opportunities: u64,
+    pub executed_trades: u64,
+    pub successful_trades: u64,
+    pub failed_trades: u64,
+    pub total_volume: U256,
+    pub total_profit: U256,
+    pub total_fees: U256,
+    pub avg_profit_per_trade: U256,
+    pub avg_execution_time_ms: f64,
+    pub success_rate: f64,
+    pub profit_rate: f64,
+    pub uptime_percentage: f64,
+    pub triangular_arbitrage_count: u64,
+    pub position_migration_count: u64,
+    pub complex_arbitrage_count: u64,
 }
 
 /// 거래소 정보
@@ -1004,7 +1104,8 @@ pub struct CrossChainArbitrageOpportunity {
     pub discovered_at: DateTime<Utc>,
     /// Expiry time for this opportunity
     pub expires_at: DateTime<Utc>,
-}
+    /// 기회 탐지 시 선택된 DEX 어댑터 정보 (실행 시 동일한 DEX 사용)
+    pub selected_dex_adapters: Vec<String>,}
 
 impl CrossChainArbitrageOpportunity {
     /// Check if opportunity is still valid

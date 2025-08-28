@@ -21,11 +21,12 @@ interface IAaveV3Pool {
     ) external;
 }
 
-/// Receiver for Aave V3 flashLoanSimple that executes:
+/// Multi-strategy executor for Aave V3 flashLoanSimple that executes:
 /// - Liquidation + optional sell (executeLiquidation params)
 /// - Sandwich front/back swaps (executeSandwich params)
+/// - Arbitrage buy/sell swaps (executeArbitrage params)
 /// Then repays the flashloan.
-contract FlashLoanLiquidationReceiver {
+contract FlashLoanStrategyExecutor {
     address public owner;
     address public immutable AAVE_POOL;
 

@@ -1,6 +1,7 @@
 pub mod sandwich; 
 pub mod liquidation;
 pub mod micro_arbitrage;
+pub mod multi_asset_arbitrage;
 pub mod manager;
 pub mod utils;
 pub mod traits;
@@ -16,6 +17,7 @@ pub mod liquidation_onchain;
 pub use sandwich::RealTimeSandwichStrategy;
 pub use liquidation::CompetitiveLiquidationStrategy;
 pub use micro_arbitrage::MicroArbitrageStrategy;
+pub use multi_asset_arbitrage::MultiAssetArbitrageStrategy;
 pub use manager::StrategyManager;
 pub use traits::Strategy;
 pub use execution_engine::{QuantExecutionEngine, ExecutionStrategy, ExecutionTask};

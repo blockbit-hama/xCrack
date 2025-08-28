@@ -11,6 +11,7 @@ mod config;
 mod types;
 mod utils;
 mod strategies;
+mod adapters;
 mod flashbots;
 mod mempool;
 mod monitoring;
