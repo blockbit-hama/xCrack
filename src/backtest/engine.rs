@@ -220,6 +220,10 @@ impl BacktestEngine {
                         // Simulate cross-chain arbitrage strategy
                         tracing::info!("Simulating cross-chain arbitrage strategy");
                     }
+                    StrategyType::MultiAssetArbitrage => {
+                        // Simulate multi-asset arbitrage strategy
+                        tracing::info!("Simulating multi-asset arbitrage strategy");
+                    }
                 }
             }
 

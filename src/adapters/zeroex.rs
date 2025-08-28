@@ -158,6 +158,10 @@ impl ZeroExAdapter {
 
 #[async_trait]
 impl DexAdapter for ZeroExAdapter {
+    fn as_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    
     fn name(&self) -> &str {
         "0x"
     }
@@ -218,9 +222,9 @@ impl DexAdapter for ZeroExAdapter {
         
         // allowance target 추출 (집계기 특성상 중요)
         let spender = quote.metadata.get("allowance_target")
-            .and_then(|addr| Address::from_str(addr).ok());
+            .and_then(|addr| addr.parse().ok());
         
-        let to_address = Address::from_str(to)
+        let to_address: Address = to.parse()
             .map_err(|e| AdapterError::CalldataGenerationFailed { message: format!("Invalid 'to' address: {}", e) })?;
         
         let calldata = hex::decode(data.trim_start_matches("0x"))

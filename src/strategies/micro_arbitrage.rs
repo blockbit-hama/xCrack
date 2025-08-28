@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
 use tokio::sync::Mutex;
 use tracing::{info, debug, warn, error};
-use alloy::primitives::{Address, U256};
+use alloy::primitives::U256;
 use core::str::FromStr;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -16,10 +16,10 @@ use ethers::providers::{Provider, Ws};
 
 use crate::config::Config;
 use crate::types::{
-    Transaction, Opportunity, StrategyType, OpportunityType, OpportunityDetails,
-    MicroArbitrageDetails, MicroArbitrageOpportunity, PriceData, 
+    Transaction, Opportunity, StrategyType,
+    MicroArbitrageOpportunity, PriceData, 
     OrderBookSnapshot, ExchangeInfo, ExchangeType, MicroArbitrageStats,
-    OrderExecutionResult, OrderSide, OrderStatus,
+    
 };
 use crate::strategies::Strategy;
 use serde::Deserialize;
@@ -30,6 +30,18 @@ struct OxSwapQuote {
     data: Vec<u8>, 
     spender: Option<alloy::primitives::Address>, 
     amount_out: alloy::primitives::U256 
+}
+
+/// 자금 조달 방식별 수익성 메트릭
+#[derive(Debug, Clone)]
+pub struct FundingMetrics {
+    pub gross_profit: U256,        // 총 수익
+    pub total_cost: U256,          // 총 비용
+    pub net_profit: U256,          // 순수익
+    pub gas_cost: U256,            // 가스 비용
+    pub premium_cost: U256,        // 플래시론 수수료
+    pub success_probability: f64,  // 성공 확률
+    pub liquidity_available: bool, // 유동성 가용 여부
 }
 
 /// 초단타 마이크로 아비트래지 전략
@@ -70,6 +82,9 @@ pub struct MicroArbitrageStrategy {
     risk_limit_per_trade: U256,
 
     // 번들/MEV 미사용 정책: 번들 채널 제거
+    
+    // 자금 조달 모드 설정
+    funding_mode: String, // "auto", "flashloan", "wallet"
 }
 
 impl MicroArbitrageStrategy {
@@ -130,6 +145,7 @@ impl MicroArbitrageStrategy {
         let execution_timeout_ms = config.strategies.micro_arbitrage.execution_timeout_ms;
         let max_concurrent_trades = config.strategies.micro_arbitrage.max_concurrent_trades;
         let latency_threshold_ms = config.strategies.micro_arbitrage.latency_threshold_ms;
+        let funding_mode = config.strategies.micro_arbitrage.funding_mode.clone();
         
         Ok(Self {
             config,
@@ -162,10 +178,188 @@ impl MicroArbitrageStrategy {
             latency_threshold_ms,
             daily_volume_limit,
             risk_limit_per_trade,
+            funding_mode,
         })
     }
 
     // 번들 경로 제거: 마이크로 전략은 공개 트랜잭션 브로드캐스트만 사용
+    
+    /// 자금 조달 방식 자동 선택
+    async fn determine_funding_mode(
+        &self,
+        opportunity: &MicroArbitrageOpportunity,
+    ) -> Result<(String, FundingMetrics)> {
+        match self.funding_mode.as_str() {
+            "flashloan" => Ok(("flashloan".to_string(), self.calculate_flashloan_metrics(opportunity).await?)),
+            "wallet" => Ok(("wallet".to_string(), self.calculate_wallet_metrics(opportunity).await?)),
+            "auto" | _ => self.auto_select_funding_mode(opportunity).await,
+        }
+    }
+    
+    /// 자동 자금 조달 모드 선택 로직
+    async fn auto_select_funding_mode(
+        &self,
+        opportunity: &MicroArbitrageOpportunity,
+    ) -> Result<(String, FundingMetrics)> {
+        // 1. 플래시론과 지갑 방식의 수익성 계산
+        let flash_metrics = self.calculate_flashloan_metrics(opportunity).await?;
+        let wallet_metrics = self.calculate_wallet_metrics(opportunity).await?;
+        
+        info!("💰 자금 조달 방식 비교:");
+        info!("  플래시론: 순수익 {} ETH, 성공확률 {:.1}%", 
+            self.format_eth_amount(flash_metrics.net_profit), flash_metrics.success_probability * 100.0);
+        info!("  지갑:     순수익 {} ETH, 성공확률 {:.1}%", 
+            self.format_eth_amount(wallet_metrics.net_profit), wallet_metrics.success_probability * 100.0);
+        
+        // 2. 선택 로직
+        // 둘 다 수익성이 없으면 스킵
+        if flash_metrics.net_profit <= U256::ZERO && wallet_metrics.net_profit <= U256::ZERO {
+            return Ok(("skip".to_string(), flash_metrics));
+        }
+        
+        // 플래시론이 수익성 있고 지갑보다 좋으면 플래시론 선택
+        if flash_metrics.net_profit > U256::ZERO && flash_metrics.net_profit >= wallet_metrics.net_profit {
+            info!("✅ 플래시론 모드 선택 (더 높은 순수익)");
+            return Ok(("flashloan".to_string(), flash_metrics));
+        }
+        
+        // 그 외에는 지갑 선택
+        if wallet_metrics.net_profit > U256::ZERO {
+            info!("✅ 지갑 모드 선택");
+            return Ok(("wallet".to_string(), wallet_metrics));
+        }
+        
+        // 둘 다 안 되면 스킵
+        Ok(("skip".to_string(), flash_metrics))
+    }
+    
+    /// 플래시론 방식 수익성 계산
+    async fn calculate_flashloan_metrics(
+        &self,
+        opportunity: &MicroArbitrageOpportunity,
+    ) -> Result<FundingMetrics> {
+        // 1. 기본 수익 계산
+        let gross_profit = opportunity.expected_profit;
+        
+        // 2. 플래시론 수수료 계산 (Aave v3 기본: 9bps)
+        let flash_fee_bps = self.config.strategies.micro_arbitrage.max_flashloan_fee_bps;
+        let flash_premium = opportunity.buy_amount * U256::from(flash_fee_bps) / U256::from(10000);
+        
+        // 3. 가스 비용 계산 (플래시론 경로)
+        let (base_fee, priority_fee) = self.estimate_gas_price().await?;
+        let gas_buffer_pct = self.config.strategies.micro_arbitrage.gas_buffer_pct / 100.0;
+        let flash_gas_limit = 400_000; // 플래시론 콜백 포함
+        let flash_gas_cost = U256::from((flash_gas_limit as f64 * (1.0 + gas_buffer_pct)) as u64) 
+            * (base_fee + priority_fee);
+        
+        // 4. 총 비용과 순수익
+        let total_cost = flash_premium + flash_gas_cost;
+        let net_profit = if gross_profit > total_cost {
+            gross_profit - total_cost
+        } else {
+            U256::ZERO
+        };
+        
+        // 5. 플래시론 풀 유동성 체크
+        let liquidity_available = self.check_flashloan_liquidity(&opportunity.base_asset, opportunity.buy_amount).await?;
+        
+        // 6. 성공 확률 계산
+        let mut success_prob = 0.85; // 기본 85%
+        if !liquidity_available { success_prob *= 0.3; } // 유동성 부족 시 30%
+        if flash_gas_cost > gross_profit / U256::from(4) { success_prob *= 0.7; } // 가스비 과다 시 70%
+        
+        Ok(FundingMetrics {
+            gross_profit,
+            total_cost,
+            net_profit,
+            gas_cost: flash_gas_cost,
+            premium_cost: flash_premium,
+            success_probability: success_prob,
+            liquidity_available,
+        })
+    }
+    
+    /// 지갑 방식 수익성 계산  
+    async fn calculate_wallet_metrics(
+        &self,
+        opportunity: &MicroArbitrageOpportunity,
+    ) -> Result<FundingMetrics> {
+        // 1. 기본 수익 계산
+        let gross_profit = opportunity.expected_profit;
+        
+        // 2. 가스 비용 계산 (일반 트랜잭션)
+        let (base_fee, priority_fee) = self.estimate_gas_price().await?;
+        let wallet_gas_limit = 150_000; // 일반 스왑
+        let wallet_gas_cost = U256::from(wallet_gas_limit) * (base_fee + priority_fee);
+        
+        // 3. 총 비용과 순수익 (프리미엄 없음)
+        let total_cost = wallet_gas_cost;
+        let net_profit = if gross_profit > total_cost {
+            gross_profit - total_cost
+        } else {
+            U256::ZERO
+        };
+        
+        // 4. 지갑 잔고 체크
+        let balance_sufficient = self.check_wallet_balance(&opportunity.base_asset, opportunity.buy_amount).await?;
+        
+        // 5. 성공 확률 계산
+        let mut success_prob = 0.95; // 기본 95% (간단함)
+        if !balance_sufficient { success_prob = 0.0; } // 잔고 부족 시 불가능
+        
+        Ok(FundingMetrics {
+            gross_profit,
+            total_cost,
+            net_profit,
+            gas_cost: wallet_gas_cost,
+            premium_cost: U256::ZERO, // 지갑 방식은 프리미엄 없음
+            success_probability: success_prob,
+            liquidity_available: balance_sufficient,
+        })
+    }
+    
+    /// 플래시론 풀 유동성 체크
+    async fn check_flashloan_liquidity(
+        &self,
+        asset: &str,
+        amount: U256,
+    ) -> Result<bool> {
+        // 실제로는 Aave Pool 컨트랙트에서 조회
+        // 여기서는 간단한 추정 로직
+        
+        // 주요 자산들의 일반적인 유동성 (실제로는 온체인 조회 필요)
+        let estimated_liquidity = match asset {
+            "USDC" | "USDT" | "DAI" => U256::from(100_000_000u64) * U256::from(10u64.pow(6)), // 100M
+            "WETH" => U256::from(50_000u64) * U256::from(10u64.pow(18)), // 50K ETH
+            "WBTC" => U256::from(2_000u64) * U256::from(10u64.pow(8)), // 2K BTC
+            _ => U256::from(1_000_000u64) * U256::from(10u64.pow(18)), // 기본값
+        };
+        
+        Ok(amount <= estimated_liquidity / U256::from(10)) // 총 유동성의 10% 이하
+    }
+    
+    /// 지갑 잔고 체크
+    async fn check_wallet_balance(
+        &self,
+        asset: &str,
+        amount: U256,
+    ) -> Result<bool> {
+        // 실제로는 지갑 잔고 조회
+        // 여기서는 간단한 추정 (실제 구현에서는 ERC20 잔고 조회)
+        debug!("Checking wallet balance for {}: {}", asset, amount);
+        
+        // 임시로 항상 충분하다고 가정 (실제로는 on-chain 조회 필요)
+        Ok(true)
+    }
+    
+    /// 가스 가격 추정
+    async fn estimate_gas_price(&self) -> Result<(U256, U256)> {
+        // 실제로는 provider에서 조회
+        // 여기서는 간단한 추정
+        let base_fee = U256::from(20_000_000_000u64); // 20 gwei
+        let priority_fee = U256::from(2_000_000_000u64); // 2 gwei
+        Ok((base_fee, priority_fee))
+    }
     
     /// 가격 데이터 업데이트 (외부 피드에서 호출)
     pub async fn update_price_data(&self, price_data: PriceData) -> Result<()> {
@@ -309,6 +503,14 @@ impl MicroArbitrageStrategy {
             execution_window_ms,
         ).await?;
         
+        // 예상 수익 계산 (wei 단위)
+        let expected_profit_wei = U256::from(
+            (max_amount.to::<u128>() as f64 * net_profit_percentage) as u64
+        );
+        
+        // 기본 자산 추출 (예: "WETH/USDC" -> "WETH")
+        let base_asset = pair.split('/').next().unwrap_or("ETH").to_string();
+        
         Ok(Some(MicroArbitrageOpportunity {
             token_symbol: pair.to_string(),
             buy_exchange: buy_exchange.to_string(),
@@ -320,6 +522,9 @@ impl MicroArbitrageStrategy {
             max_amount,
             execution_window_ms,
             confidence_score,
+            expected_profit: expected_profit_wei,
+            buy_amount: max_amount,  // 매수 수량은 최대 거래량과 동일
+            base_asset,
         }))
     }
     
@@ -399,14 +604,47 @@ impl MicroArbitrageStrategy {
             if crate::mocks::is_mock_mode() {
                 self.execute_mock_arbitrage(opportunity, &trade_id).await
             } else {
-                // 정책: Micro는 MEV 비사용. 플래시론 사용 시에도 전용 Arbitrage 컨트랙트 호출로 처리(번들/사설제출 제외).
-                if self.config.strategies.micro_arbitrage.use_flashloan {
-                    match self.execute_flashloan_arbitrage_via_contract(opportunity).await {
-                        Ok(done) => return Ok(done),
-                        Err(e) => warn!("⚠️ 플래시론 경로 실패, 일반 경로로 폴백: {}", e),
+                // 새로운 자동 자금 조달 모드 선택 로직
+                let (selected_mode, _metrics) = match self.determine_funding_mode(opportunity).await {
+                    Ok((mode, metrics)) => (mode, metrics),
+                    Err(e) => {
+                        warn!("⚠️ 자금 조달 모드 선택 실패, 기본 지갑 모드 사용: {}", e);
+                        ("wallet".to_string(), FundingMetrics {
+                            gross_profit: opportunity.expected_profit,
+                            total_cost: U256::ZERO,
+                            net_profit: opportunity.expected_profit,
+                            gas_cost: U256::ZERO,
+                            premium_cost: U256::ZERO,
+                            success_probability: 0.9,
+                            liquidity_available: true,
+                        })
+                    }
+                };
+                
+                match selected_mode.as_str() {
+                    "flashloan" => {
+                        info!("⚡ 플래시론 모드로 실행");
+                        match self.execute_flashloan_arbitrage_via_contract(opportunity).await {
+                            Ok(done) => return Ok(done),
+                            Err(e) => {
+                                warn!("⚠️ 플래시론 경로 실패, 지갑 경로로 폴백: {}", e);
+                                self.execute_real_arbitrage(opportunity, &trade_id).await
+                            }
+                        }
+                    }
+                    "wallet" => {
+                        info!("💳 지갑 모드로 실행");
+                        self.execute_real_arbitrage(opportunity, &trade_id).await
+                    }
+                    "skip" => {
+                        info!("⏭️ 수익성 부족으로 기회 스킵");
+                        return Ok(false);
+                    }
+                    _ => {
+                        warn!("⚠️ 알 수 없는 자금 조달 모드: {}, 지갑 모드로 폴백", selected_mode);
+                        self.execute_real_arbitrage(opportunity, &trade_id).await
                     }
                 }
-                self.execute_real_arbitrage(opportunity, &trade_id).await
             }
         };
         
@@ -464,7 +702,7 @@ impl MicroArbitrageStrategy {
     
     /// 실제 아비트래지 실행 (실제 거래소 API 호출)
     async fn execute_real_arbitrage(&self, opportunity: &MicroArbitrageOpportunity, trade_id: &str) -> Result<bool> {
-        use crate::exchange::{ExchangeClientFactory, ExchangeClient};
+        use crate::exchange::ExchangeClient;
         
         info!("🚀 실제 아비트래지 실행: {}", trade_id);
         info!("  매수: {} @ {}", opportunity.buy_exchange, opportunity.buy_price);
@@ -1126,6 +1364,7 @@ impl MicroArbitrageStrategy {
                 let latency_threshold_ms = self.latency_threshold_ms;
                 let daily_volume_limit = self.daily_volume_limit;
                 let risk_limit_per_trade = self.risk_limit_per_trade;
+                let funding_mode = self.funding_mode.clone();
                 
                 let task = tokio::spawn(async move {
                     // Create a temporary strategy instance for execution
@@ -1145,7 +1384,7 @@ impl MicroArbitrageStrategy {
                         latency_threshold_ms,
                         daily_volume_limit,
                         risk_limit_per_trade,
-                        
+                        funding_mode,
                     };
                     
                     temp_strategy.execute_micro_arbitrage(&opportunity).await
@@ -1184,6 +1423,12 @@ impl MicroArbitrageStrategy {
         }
         
         Ok(executed_count)
+    }
+    
+    /// ETH 금액 포매팅 유틸리티 함수
+    fn format_eth_amount(&self, amount: U256) -> String {
+        let eth_amount = amount.to::<u128>() as f64 / 1e18;
+        format!("{:.6}", eth_amount)
     }
 }
 

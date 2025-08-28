@@ -93,6 +93,10 @@ impl SushiswapAdapter {
 
 #[async_trait]
 impl DexAdapter for SushiswapAdapter {
+    fn as_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    
     fn name(&self) -> &str {
         "sushiswap"
     }

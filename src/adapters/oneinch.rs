@@ -234,6 +234,10 @@ impl OneInchAdapter {
 
 #[async_trait]
 impl DexAdapter for OneInchAdapter {
+    fn as_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    
     fn name(&self) -> &str {
         "1inch"
     }
@@ -279,7 +283,7 @@ impl DexAdapter for OneInchAdapter {
         deadline: u64,
     ) -> Result<CalldataBundle, AdapterError> {
         // 슬리피지를 퍼센트로 변환
-        let slippage = (10000 - quote.amount_out_min * U256::from(10000) / quote.amount_out) as f64 / 100.0;
+        let slippage = (U256::from(10000) - quote.amount_out_min * U256::from(10000) / quote.amount_out).to::<u64>() as f64 / 100.0;
         
         // 1inch API에서 스왑 데이터 조회
         let swap = self.fetch_swap(
@@ -290,7 +294,7 @@ impl DexAdapter for OneInchAdapter {
             recipient,
         ).await?;
         
-        let to_address = Address::from_str(&swap.tx.to)
+        let to_address = swap.tx.to.parse::<Address>()
             .map_err(|e| AdapterError::CalldataGenerationFailed { message: format!("Invalid 'to' address: {}", e) })?;
         
         let calldata = hex::decode(swap.tx.data.trim_start_matches("0x"))

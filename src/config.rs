@@ -121,12 +121,21 @@ pub struct MicroArbitrageConfig {
     pub priority_tokens: Vec<String>, // 우선순위 토큰들
     /// 런타임 블랙리스트 TTL(초) - 만료 후 자동 해제
     pub runtime_blacklist_ttl_secs: u64,
+    /// 자금 조달 모드: "auto" | "flashloan" | "wallet"
+    #[serde(default = "default_funding_mode")]
+    pub funding_mode: String,
     /// Enable flashloan-assisted micro arbitrage (DEX-only, experimental)
     #[serde(default)]
     pub use_flashloan: bool,
     /// Desired flash loan amount (base asset units as string)
     #[serde(default)]
     pub flash_loan_amount: Option<String>,
+    /// 플래시론 수수료 상한 (basis points, 기본: 9bps)
+    #[serde(default = "default_max_flashloan_fee_bps")]
+    pub max_flashloan_fee_bps: u32,
+    /// 가스 버퍼 (플래시론용, 기본: 20%)
+    #[serde(default = "default_gas_buffer_pct")]
+    pub gas_buffer_pct: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,6 +220,19 @@ pub struct PerformanceConfig {
     pub mempool_filter_max_gas_price: String, // gwei
     pub enable_metrics: bool,
     pub cache_size: usize,
+}
+
+// 기본값 함수들
+fn default_funding_mode() -> String {
+    "auto".to_string()
+}
+
+fn default_max_flashloan_fee_bps() -> u32 {
+    9 // 0.09% (Aave v3 기본)
+}
+
+fn default_gas_buffer_pct() -> f64 {
+    20.0 // 20% 버퍼
 }
 
 impl Config {
@@ -364,6 +386,10 @@ impl Config {
                     runtime_blacklist_ttl_secs: 900,
                     use_flashloan: false,
                     flash_loan_amount: None,
+                    // 새로운 자금 조달 모드 관련 설정
+                    funding_mode: "auto".to_string(), // 기본값: 자동 선택
+                    max_flashloan_fee_bps: 9, // 9 basis points (0.09%)
+                    gas_buffer_pct: 20.0, // 20% 가스 버퍼
                 },
                 cross_chain_arbitrage: CrossChainArbitrageConfig {
                     enabled: true,

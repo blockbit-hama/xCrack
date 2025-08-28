@@ -74,6 +74,9 @@ pub struct CalldataBundle {
 /// DEX 어댑터 트레이트
 #[async_trait]
 pub trait DexAdapter: Send + Sync {
+    /// Any를 위한 타입 캐스팅 지원
+    fn as_any(&mut self) -> &mut dyn std::any::Any;
+    
     /// 어댑터 이름
     fn name(&self) -> &str;
     
@@ -123,17 +126,21 @@ pub enum DexType {
     ZeroEx,
     /// 1inch (애그리게이터)
     OneInch,
+    /// 네이티브 라우터 (일반)
+    NativeRouter,
+    /// 애그리게이터 (일반)
+    Aggregator,
 }
 
 impl DexType {
     /// DEX가 네이티브 프로토콜인지 확인
     pub fn is_native(&self) -> bool {
-        matches!(self, DexType::UniswapV2 | DexType::UniswapV3 | DexType::SushiSwap)
+        matches!(self, DexType::UniswapV2 | DexType::UniswapV3 | DexType::SushiSwap | DexType::NativeRouter)
     }
     
     /// DEX가 애그리게이터인지 확인
     pub fn is_aggregator(&self) -> bool {
-        matches!(self, DexType::ZeroEx | DexType::OneInch)
+        matches!(self, DexType::ZeroEx | DexType::OneInch | DexType::Aggregator)
     }
     
     /// 가스 비용 가중치 (네이티브가 더 저렴)
@@ -142,6 +149,8 @@ impl DexType {
             DexType::UniswapV2 | DexType::SushiSwap => 1.0,
             DexType::UniswapV3 => 1.1,  // V3는 약간 더 비쌈
             DexType::ZeroEx | DexType::OneInch => 1.3,  // 애그리게이터는 30% 더 비쌈
+            DexType::NativeRouter => 1.0,  // 네이티브 라우터
+            DexType::Aggregator => 1.3,   // 일반 애그리게이터
         }
     }
     
@@ -317,7 +326,7 @@ impl QuoteComparator {
         }
         
         Ok(QuoteComparison {
-            quotes,
+            quotes: quotes.clone(),
             best_adapter: best_adapter.clone(),
             best_amount_out: best_quote.amount_out,
             differences,

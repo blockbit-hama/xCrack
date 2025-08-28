@@ -3,7 +3,7 @@ use alloy::primitives::{Address, U256, Bytes, FixedBytes, B256, Uint};
 use alloy::sol_types::{SolCall, SolEvent, SolValue};
 use alloy::sol;
 use std::collections::HashMap;
-use tracing::{debug, warn};
+use tracing::warn;
 
 // Define Solidity interfaces using alloy's sol! macro
 

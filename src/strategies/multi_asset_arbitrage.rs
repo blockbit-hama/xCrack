@@ -14,7 +14,7 @@ use ethers::providers::{Provider, Ws};
 
 use crate::config::Config;
 use crate::types::{
-    Transaction, Opportunity, StrategyType,
+    DexPerformanceData,    Transaction, Opportunity, StrategyType,
     MultiAssetArbitrageOpportunity, MultiAssetStrategyType,
     MultiAssetArbitrageStats,
 };
@@ -51,8 +51,10 @@ pub struct MultiAssetArbitrageStrategy {
     multi_asset_contract: Option<Address>,
     
     // DEX 어댑터 팩토리 및 선택기
-    adapter_selector: AdapterSelector,
-}
+    adapter_selector: Arc<AdapterSelector>,
+    
+    // DEX 성능 추적
+    dex_performance: Arc<Mutex<HashMap<String, DexPerformanceData>>>,}
 
 impl MultiAssetArbitrageStrategy {
     pub async fn new(config: Arc<Config>, provider: Arc<Provider<Ws>>) -> Result<Self> {
@@ -96,7 +98,7 @@ impl MultiAssetArbitrageStrategy {
         info!("  🔌 DEX 어댑터: {}개 초기화됨", adapter_selector.factory().get_supported_dexes().len());
         
         Ok(Self {
-            config,
+            config: config.clone(),
             provider,
             enabled: Arc::new(AtomicBool::new(true)),
             active_opportunities: Arc::new(Mutex::new(HashMap::new())),
@@ -116,6 +118,7 @@ impl MultiAssetArbitrageStrategy {
                 triangular_arbitrage_count: 0,
                 position_migration_count: 0,
                 complex_arbitrage_count: 0,
+                dex_performance: HashMap::new(),
             })),
             min_profit_percentage: config.strategies.micro_arbitrage.min_profit_percentage,
             min_profit_usd,
@@ -124,7 +127,8 @@ impl MultiAssetArbitrageStrategy {
             daily_volume_limit,
             risk_limit_per_trade,
             multi_asset_contract,
-            adapter_selector,
+            adapter_selector: Arc::new(adapter_selector),
+            dex_performance: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -202,13 +206,13 @@ impl MultiAssetArbitrageStrategy {
 
         // 하이브리드 경로 탐색으로 각 레그별 최적 DEX 선택
         // 1단계: A → C 견적 (네이티브 + 애그리게이터 비교)
-        let (quote_c_from_a, dex_ac, _) = self.find_best_route(addr_a, addr_c, base_amount).await?;
+        let (quote_c_from_a, dex_ac, _) = self.find_best_route_parallel(addr_a, addr_c, base_amount).await?;
         if quote_c_from_a.is_zero() {
             return Ok(None);
         }
 
         // 2단계: B → C 견적 (동일한 가치, 별도 DEX 선택)
-        let (quote_c_from_b, dex_bc, _) = self.find_best_route(addr_b, addr_c, base_amount).await?;
+        let (quote_c_from_b, dex_bc, _) = self.find_best_route_parallel(addr_b, addr_c, base_amount).await?;
         if quote_c_from_b.is_zero() {
             return Ok(None);
         }
@@ -216,13 +220,15 @@ impl MultiAssetArbitrageStrategy {
         let total_c = quote_c_from_a + quote_c_from_b;
 
         // 3단계: C → A 견적 (절반, 역방향 최적화)
-        let (quote_a_from_c, dex_ca, _) = self.find_best_route(addr_c, addr_a, total_c / 2).await?;
+        let half_c = total_c.checked_div(U256::from(2)).unwrap_or(U256::ZERO);
+        let (quote_a_from_c, dex_ca, _) = self.find_best_route_parallel(addr_c, addr_a, half_c).await?;
         if quote_a_from_c.is_zero() {
             return Ok(None);
         }
 
         // 4단계: C → B 견적 (나머지, 역방향 최적화)
-        let (quote_b_from_c, dex_cb, _) = self.find_best_route(addr_c, addr_b, total_c - (total_c / 2)).await?;
+        let remaining_c = total_c.checked_sub(half_c).unwrap_or(U256::ZERO);
+        let (quote_b_from_c, dex_cb, _) = self.find_best_route_parallel(addr_c, addr_b, remaining_c).await?;
         if quote_b_from_c.is_zero() {
             return Ok(None);
         }
@@ -236,7 +242,7 @@ impl MultiAssetArbitrageStrategy {
 
         // 수익성 계산
         let total_return = quote_a_from_c + quote_b_from_c;
-        let total_input = base_amount * 2; // A + B
+        let total_input = base_amount.checked_mul(U256::from(2)).unwrap_or(U256::ZERO); // A + B
 
         if total_return <= total_input {
             return Ok(None);
@@ -252,7 +258,7 @@ impl MultiAssetArbitrageStrategy {
 
         // 플래시론 프리미엄 및 가스비 고려
         let flash_loan_premium = total_input * U256::from(9) / U256::from(10000); // 0.09%
-        let estimated_gas_cost = U256::from(500000) * U256::from(30_000_000_000); // 500k gas * 30 gwei
+        let estimated_gas_cost = U256::from(500000) * U256::from(30_000_000_000u64); // 500k gas * 30 gwei
         let net_profit = profit - flash_loan_premium - estimated_gas_cost;
 
         if net_profit <= U256::ZERO {
@@ -280,7 +286,10 @@ impl MultiAssetArbitrageStrategy {
             execution_sequence: vec![0, 1, 2, 3], // A→C, B→C, C→A, C→B
             confidence_score,
             gas_estimate: 500000,
-            flash_loan_premiums: vec![flash_loan_premium / 2, flash_loan_premium / 2],
+            flash_loan_premiums: vec![
+                flash_loan_premium.checked_div(U256::from(2)).unwrap_or(U256::ZERO),
+                flash_loan_premium.checked_div(U256::from(2)).unwrap_or(U256::ZERO)
+            ],
             max_execution_time_ms: self.max_execution_time_ms,
             discovered_at: Utc::now(),
             expires_at: Utc::now() + chrono::Duration::seconds(30),
@@ -334,7 +343,8 @@ impl MultiAssetArbitrageStrategy {
 
         let execution_result = async {
             if crate::mocks::is_mock_mode() {
-                self.execute_mock_multi_asset_arbitrage(opportunity, &trade_id).await
+                // Mock 모드에서는 실제 실행 대신 성공 반환
+                Ok(true)
             } else {
                 self.execute_real_multi_asset_arbitrage(opportunity, &trade_id).await
             }
@@ -454,7 +464,7 @@ impl MultiAssetArbitrageStrategy {
                 .build_swap_calldata(&quote_bc, contract_address, deadline).await?;
             
             // C → A 스왑 (일부)
-            let amount_c_to_a = quote_ab.amount_out / 2;
+            let amount_c_to_a = quote_ab.amount_out.checked_div(U256::from(2)).unwrap_or(U256::ZERO);
             let adapter_ca = &opportunity.selected_dex_adapters[2];
             let (_, quote_ca) = self.adapter_selector.select_adapter(*token_c, *token_a, amount_c_to_a, 50).await?;
             let calldata_ca = self.adapter_selector.factory()
@@ -636,7 +646,7 @@ impl MultiAssetArbitrageStrategy {
 
     /// 통계 조회
     pub async fn get_stats(&self) -> MultiAssetArbitrageStats {
-        self.stats.lock().await.clone()
+        (*self.stats.lock().await).clone()
     }
 
     /// 다중자산 아비트래지 기회를 독립적으로 스캔하고 실행
@@ -684,6 +694,7 @@ impl MultiAssetArbitrageStrategy {
                 let daily_volume_limit = self.daily_volume_limit;
                 let risk_limit_per_trade = self.risk_limit_per_trade;
                 let multi_asset_contract = self.multi_asset_contract;
+                let adapter_selector = Arc::clone(&self.adapter_selector);
 
                 let task = tokio::spawn(async move {
                     let temp_strategy = MultiAssetArbitrageStrategy {
@@ -699,6 +710,8 @@ impl MultiAssetArbitrageStrategy {
                         daily_volume_limit,
                         risk_limit_per_trade,
                         multi_asset_contract,
+                        adapter_selector,
+                        dex_performance: Arc::new(Mutex::new(HashMap::new())),
                     };
 
                     temp_strategy.execute_multi_asset_arbitrage(&opportunity).await
@@ -740,58 +753,130 @@ impl MultiAssetArbitrageStrategy {
     }
 
     /// 하이브리드 경로 탐색: 네이티브 DEX와 애그리게이터를 모두 활용
-    async fn find_best_route(
+
+    /// 개별 DEX에서 견적 조회 (병렬 처리용)
+    async fn get_quote_from_dex_with_tracking(
+        &self,
+        dex_name: &str,
+        token_in: Address,
+        token_out: Address,
+        amount_in: U256,
+    ) -> Option<(String, crate::adapters::Quote, U256)> {
+        let start_time = std::time::Instant::now();
+        if let Some(adapter) = self.adapter_selector.factory().get_adapter(dex_name) {
+            match adapter.quote(token_in, token_out, amount_in, 50).await {
+                Ok(quote) => {
+                    let gas_weight = adapter.dex_type().gas_weight();
+                    let response_time = start_time.elapsed().as_millis() as f64;
+                    let adjusted_output = quote.amount_out * U256::from(1000) / U256::from((gas_weight * 1000.0) as u64);
+                    self.record_dex_performance(dex_name, true, quote.amount_out, amount_in, response_time).await;
+                    Some((dex_name.to_string(), quote, adjusted_output))
+                }
+                Err(e) => {
+                    debug!("Failed to get quote from {}: {}", dex_name, e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    /// 시장 변동성 계산
+    async fn calculate_market_volatility(&self) -> Result<f64> {
+        // 간단한 변동성 계산: 최근 가격 변화율의 표준편차
+        // 실제로는 더 정교한 변동성 지표를 사용할 수 있음
+        let volatility = 0.05; // 기본값 5%
+        Ok(volatility)
+    }
+
+    /// 동적 임계값 계산
+
+    /// DEX 성능 추적 기록
+    async fn record_dex_performance(
+        &self,
+        dex_name: &str,
+        success: bool,
+        profit: U256,
+        volume: U256,
+        response_time_ms: f64,
+    ) {
+        let mut perf_map = self.dex_performance.lock().await;
+        let perf_data = perf_map.entry(dex_name.to_string()).or_insert_with(DexPerformanceData::new);
+        perf_data.record_quote(success, profit, volume, response_time_ms);
+    }
+
+    /// DEX 성능 통계 조회
+    pub async fn get_dex_performance_stats(&self) -> HashMap<String, DexPerformanceData> {
+        self.dex_performance.lock().await.clone()
+    }
+    async fn get_dynamic_threshold(&self) -> Result<f64> {
+        let market_volatility = self.calculate_market_volatility().await?;
+        
+        // 변동성이 높을 때는 더 낮은 임계값 사용 (더 적극적으로 애그리게이터 선택)
+        let threshold = if market_volatility > 0.1 {
+            3.0  // 3% 개선 시 애그리게이터 선택
+        } else if market_volatility > 0.05 {
+            4.0  // 4% 개선 시 애그리게이터 선택
+        } else {
+            5.0  // 5% 개선 시 애그리게이터 선택 (기본값)
+        };
+        
+        debug!("Market volatility: {:.2}%, Dynamic threshold: {:.1}%", 
+               market_volatility * 100.0, threshold);
+        Ok(threshold)
+    }
+    async fn find_best_route_parallel(
         &self,
         token_in: Address,
         token_out: Address,
         amount_in: U256,
     ) -> Result<(U256, String, crate::adapters::Quote)> {
+        use futures::future::join_all;
+use std::collections::HashMap;        
+        // 1. 네이티브 DEX들 병렬 쿼리
+        let native_dexes = vec!["uniswap_v2", "uniswap_v3", "sushiswap"];
+        let native_quotes = join_all(
+            native_dexes.iter().map(|dex| {
+                self.get_quote_from_dex_with_tracking(dex, token_in, token_out, amount_in)
+            })
+        ).await;
+        
+        // 2. 애그리게이터 병렬 쿼리
+        let aggregators = vec!["zeroex", "oneinch"];
+        let agg_quotes = join_all(
+            aggregators.iter().map(|agg| {
+                self.get_quote_from_dex_with_tracking(agg, token_in, token_out, amount_in)
+            })
+        ).await;
+        
+        // 3. 최적 견적 선택
         let mut best_quote: Option<(String, crate::adapters::Quote)> = None;
         let mut best_adjusted_output = U256::ZERO;
         
-        // 1. 네이티브 DEX들 쿼리 (낮은 가스 비용)
-        let native_dexes = vec!["uniswap_v2", "uniswap_v3", "sushiswap"];
-        for dex_name in native_dexes {
-            if let Some(adapter) = self.adapter_selector.factory().get_adapter(dex_name) {
-                match adapter.quote(token_in, token_out, amount_in, 50).await {
-                    Ok(quote) => {
-                        // 가스 비용 가중치 적용
-                        let gas_weight = adapter.dex_type().gas_weight();
-                        let adjusted_output = quote.amount_out * U256::from(1000) / U256::from((gas_weight * 1000.0) as u64);
-                        
-                        if adjusted_output > best_adjusted_output {
-                            best_adjusted_output = adjusted_output;
-                            best_quote = Some((dex_name.to_string(), quote));
-                        }
-                    }
-                    Err(e) => debug!("Failed to get quote from {}: {}", dex_name, e),
+        // 네이티브 DEX 결과 처리
+        for quote_result in native_quotes {
+            if let Some((dex_name, quote, adjusted_output)) = quote_result {
+                if adjusted_output > best_adjusted_output {
+                    best_adjusted_output = adjusted_output;
+                    best_quote = Some((dex_name, quote));
                 }
             }
         }
         
-        // 2. 애그리게이터 쿼리 (복잡한 경로 최적화)
-        let aggregators = vec!["zeroex", "oneinch"];
-        for agg_name in aggregators {
-            if let Some(adapter) = self.adapter_selector.factory().get_adapter(agg_name) {
-                match adapter.quote(token_in, token_out, amount_in, 50).await {
-                    Ok(quote) => {
-                        // 가스 비용 가중치 적용
-                        let gas_weight = adapter.dex_type().gas_weight();
-                        let adjusted_output = quote.amount_out * U256::from(1000) / U256::from((gas_weight * 1000.0) as u64);
-                        
-                        // 애그리게이터는 5% 이상 개선될 때만 선택
-                        if adjusted_output > best_adjusted_output * U256::from(105) / U256::from(100) {
-                            best_adjusted_output = adjusted_output;
-                            best_quote = Some((agg_name.to_string(), quote));
-                        }
-                    }
-                    Err(e) => debug!("Failed to get quote from {}: {}", agg_name, e),
+        // 애그리게이터 결과 처리 (5% 이상 개선 시에만 선택)
+        for quote_result in agg_quotes {
+            if let Some((agg_name, quote, adjusted_output)) = quote_result {
+                let threshold = self.get_dynamic_threshold().await?;
+        let threshold_u256 = U256::from((threshold * 100.0) as u64) + U256::from(10000);
+        if adjusted_output > best_adjusted_output * threshold_u256 / U256::from(10000) {
+                    best_adjusted_output = adjusted_output;
+                    best_quote = Some((agg_name, quote));
                 }
             }
         }
         
-        match best_quote {
-            Some((dex_name, quote)) => {
+        match best_quote {            Some((dex_name, quote)) => {
                 info!("Best route: {} -> {} via {} (output: {})", 
                     token_in, token_out, dex_name, quote.amount_out);
                 Ok((quote.amount_out, dex_name, quote))
@@ -821,7 +906,7 @@ impl MultiAssetArbitrageStrategy {
         token_out: Address,
         amount_in: U256,
     ) -> Result<(U256, String)> {
-        let (amount_out, dex_name, _) = self.find_best_route(token_in, token_out, amount_in).await?;
+        let (amount_out, dex_name, _) = self.find_best_route_parallel(token_in, token_out, amount_in).await?;
         Ok((amount_out, dex_name))
     }
 

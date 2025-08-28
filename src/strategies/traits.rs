@@ -46,4 +46,14 @@ pub trait Strategy: Send + Sync {
     fn is_active(&self) -> bool {
         true
     }
+    
+    /// Create liquidation transaction (for liquidation strategies)
+    async fn create_liquidation_transaction(&self, _opportunity: &Opportunity) -> Result<Transaction> {
+        Err(anyhow::anyhow!("create_liquidation_transaction not implemented"))
+    }
+    
+    /// Broadcast liquidation transaction (for liquidation strategies)
+    async fn broadcast_liquidation_transaction(&self, _tx: Transaction) -> Result<bool> {
+        Err(anyhow::anyhow!("broadcast_liquidation_transaction not implemented"))
+    }
 } 

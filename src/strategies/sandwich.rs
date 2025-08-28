@@ -610,6 +610,7 @@ impl Strategy for RealTimeSandwichStrategy {
     }
     
     async fn create_bundle(&self, opportunity: &Opportunity) -> Result<Bundle> {
+        // 샌드위치 공격은 MEV 번들이 필수 (정확한 순서 보장 필요)
         // 샌드위치 번들 생성
         // 실제 구현에서는 프론트런과 백런 트랜잭션을 포함한 번들 생성
         

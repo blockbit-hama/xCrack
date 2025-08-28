@@ -199,7 +199,10 @@ MAX_POSITION_SIZE_ETH=10.0
 MICRO_ARB_ENABLED=true
 MICRO_ARB_MIN_PROFIT_USD=10.0
 MICRO_ARB_MAX_CONCURRENT_TRADES=3
-MICRO_ARB_USE_FLASHLOAN=false
+MICRO_ARB_FUNDING_MODE=auto  # auto(자동선택), flashloan, wallet
+MICRO_ARB_MAX_FLASHLOAN_FEE_BPS=9  # 0.09% (9 basis points)
+MICRO_ARB_GAS_BUFFER_PCT=20.0  # 20% 가스 버퍼
+# Legacy: MICRO_ARB_USE_FLASHLOAN=false  # DEPRECATED: funding_mode 사용 권장
 
 # 크로스체인 아비트라지
 CROSS_CHAIN_ENABLED=true
@@ -266,7 +269,10 @@ max_gas_price_gwei = 100
 enabled = true
 min_profit_usd = 10.0
 max_position_size_eth = 5.0
-use_flashloan = false
+funding_mode = "auto"  # auto(자동선택), flashloan, wallet
+max_flashloan_fee_bps = 9  # 0.09% (9 basis points)
+gas_buffer_pct = 20.0  # 20% 가스 버퍼
+# Legacy: use_flashloan = false  # DEPRECATED: funding_mode 사용 권장
 
 [strategies.cross_chain_arbitrage]
 enabled = true
@@ -469,6 +475,53 @@ sudo systemctl status xcrack
 | **중급자** | 중간 | 1 ETH | 20-50% APY | 테스트넷 → 메인넷 마이크로 |
 | **고급자** | 높음 | 10 ETH | 50-200% APY | 모든 전략 활성화 |
 | **전문가** | 매우 높음 | 100+ ETH | 200%+ APY | MEV + 플래시론 |
+
+### 💡 자금 조달 모드 선택 (마이크로 아비트라지)
+
+xCrack의 마이크로 아비트라지 전략은 세 가지 자금 조달 모드를 지원합니다:
+
+#### 모드별 특징
+
+| 모드 | 설명 | 장점 | 단점 | 권장 상황 |
+|------|------|------|------|-----------|
+| **auto** | 수익성 기반 자동 선택 | 최적 수익 보장 | 복잡도 증가 | 일반적인 운영 |
+| **flashloan** | 플래시론만 사용 | 자본 효율성 극대화 | 가스비 증가, 실패 리스크 | 대규모 거래 |
+| **wallet** | 지갑 자금만 사용 | 단순하고 안정적 | 자본 요구량 높음 | 보수적 운영 |
+
+#### auto 모드 수익성 계산 로직
+```rust
+// 각 모드별 비용 계산
+flash_cost = premium_estimate(9bps) + gas_flashloan(400k gas)
+wallet_cost = gas_wallet(150k gas)
+
+// 순수익 비교
+net_flash = expected_profit_gross - flash_cost
+net_wallet = expected_profit_gross - wallet_cost
+
+// 자동 선택 규칙
+if (net_flash > net_wallet && net_flash > 0) {
+    선택: flashloan
+} else if (net_wallet > 0) {
+    선택: wallet
+} else {
+    선택: skip (수익성 없음)
+}
+```
+
+#### 모드별 설정 예시
+```bash
+# 자동 선택 (권장)
+MICRO_ARB_FUNDING_MODE=auto
+MICRO_ARB_MAX_FLASHLOAN_FEE_BPS=9
+MICRO_ARB_GAS_BUFFER_PCT=20.0
+
+# 플래시론만 사용 (고급)
+MICRO_ARB_FUNDING_MODE=flashloan
+MICRO_ARB_MAX_FLASHLOAN_FEE_BPS=15  # 더 높은 프리미엄 허용
+
+# 지갑만 사용 (보수적)
+MICRO_ARB_FUNDING_MODE=wallet
+```
 
 ### 단계별 실행 가이드
 

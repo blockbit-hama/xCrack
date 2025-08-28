@@ -93,6 +93,10 @@ impl UniswapV2Adapter {
 
 #[async_trait]
 impl DexAdapter for UniswapV2Adapter {
+    fn as_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    
     fn name(&self) -> &str {
         "uniswap_v2"
     }

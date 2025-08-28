@@ -228,7 +228,7 @@ impl DexAdapterFactory {
         }
         
         Ok(QuoteComparison {
-            quotes,
+            quotes: quotes.clone(),
             best_adapter: best_adapter.clone(),
             best_amount_out: best_quote.amount_out,
             differences,

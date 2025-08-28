@@ -18,7 +18,7 @@ impl UniswapV3Adapter {
     pub fn new(config: AdapterConfig) -> Self {
         Self {
             router_address: Address::from_slice(&[
-                0xe5, 0x92, 0x42, 0x7a, 0x0a, 0xec, 0xe9, 0x92d, 0xe3, 0xed, 0xee, 0x1f, 0x18, 0xe0, 0x15, 0x7c, 0x05, 0x86, 0x15, 0x64
+                0xe5, 0x92, 0x42, 0x7a, 0x0a, 0xec, 0xe9, 0x2d, 0xe3, 0xed, 0xee, 0x1f, 0x18, 0xe0, 0x15, 0x7c, 0x05, 0x86, 0x15, 0x64
             ]),
             quoter_address: Address::from_slice(&[
                 0xb2, 0x73, 0x08, 0xf9, 0xf3, 0xcf, 0x30, 0x3d, 0x44, 0x4a, 0x27, 0x9b, 0x22, 0x04, 0x5b, 0x5a, 0x5e, 0x5a, 0x5e, 0x5a
@@ -84,12 +84,12 @@ impl UniswapV3Adapter {
         let params = IUniswapV3Router::ExactInputSingleParams {
             tokenIn: token_in,
             tokenOut: token_out,
-            fee,
+            fee: alloy::primitives::Uint::<24, 1>::from(fee),
             recipient,
             deadline: U256::from(deadline),
             amountIn: amount_in,
             amountOutMinimum: amount_out_minimum,
-            sqrtPriceLimitX96: sqrt_price_limit_x96,
+            sqrtPriceLimitX96: alloy::primitives::Uint::<160, 3>::from_limbs(sqrt_price_limit_x96.as_limbs()[0..3].try_into().unwrap()),
         };
         
         let call = IUniswapV3Router::exactInputSingleCall { params };
@@ -118,6 +118,10 @@ impl UniswapV3Adapter {
 
 #[async_trait]
 impl DexAdapter for UniswapV3Adapter {
+    fn as_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    
     fn name(&self) -> &str {
         "uniswap_v3"
     }

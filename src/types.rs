@@ -19,6 +19,23 @@ pub struct Transaction {
     pub block_number: Option<u64>,
 }
 
+impl Default for Transaction {
+    fn default() -> Self {
+        Self {
+            hash: B256::ZERO,
+            from: Address::ZERO,
+            to: None,
+            value: U256::ZERO,
+            gas_price: U256::ZERO,
+            gas_limit: U256::ZERO,
+            data: Vec::new(),
+            nonce: 0,
+            timestamp: DateTime::from_timestamp(0, 0).unwrap_or_else(|| Utc::now()),
+            block_number: None,
+        }
+    }
+}
+
 /// Strategy types
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum StrategyType {
@@ -245,7 +262,43 @@ impl MultiAssetArbitrageOpportunity {
     }
 }
 
-/// 다중자산 아비트래지 통계
+/// DEX별 성능 추적 데이터
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct DexPerformanceData {
+    pub total_quotes: u64,
+    pub successful_quotes: u64,
+    pub total_profit: U256,
+    pub total_volume: U256,
+    pub avg_response_time_ms: f64,
+    pub success_rate: f64,
+    pub avg_profit_per_trade: U256,
+}
+
+impl DexPerformanceData {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    pub fn record_quote(&mut self, success: bool, profit: U256, volume: U256, response_time_ms: f64) {
+        self.total_quotes += 1;
+        if success {
+            self.successful_quotes += 1;
+            self.total_profit += profit;
+            self.total_volume += volume;
+        }
+        
+        // 평균 응답 시간 업데이트
+        self.avg_response_time_ms = (self.avg_response_time_ms * (self.total_quotes - 1) as f64 + response_time_ms) / self.total_quotes as f64;
+        
+        // 성공률 업데이트
+        self.success_rate = self.successful_quotes as f64 / self.total_quotes as f64;
+        
+        // 평균 수익 업데이트
+        if self.successful_quotes > 0 {
+            self.avg_profit_per_trade = self.total_profit / U256::from(self.successful_quotes);
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MultiAssetArbitrageStats {
     pub total_opportunities: u64,
@@ -263,7 +316,8 @@ pub struct MultiAssetArbitrageStats {
     pub triangular_arbitrage_count: u64,
     pub position_migration_count: u64,
     pub complex_arbitrage_count: u64,
-}
+    /// DEX별 성능 추적
+    pub dex_performance: HashMap<String, DexPerformanceData>,}
 
 /// 거래소 정보
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -329,6 +383,10 @@ pub struct MicroArbitrageOpportunity {
     pub max_amount: U256,
     pub execution_window_ms: u64,
     pub confidence_score: f64,
+    // 추가 필드 (자금 조달 계산용)
+    pub expected_profit: U256,    // 예상 총 수익 (wei 단위)
+    pub buy_amount: U256,         // 매수 수량 (wei 단위) 
+    pub base_asset: String,       // 기본 자산 심볼 (예: "WETH")
 }
 
 /// 주문 실행 결과
