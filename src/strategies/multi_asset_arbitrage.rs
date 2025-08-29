@@ -19,7 +19,7 @@ use crate::types::{
     MultiAssetArbitrageStats,
 };
 use crate::strategies::Strategy;
-use crate::adapters::{DexAdapterFactory, AdapterConfig};
+use crate::adapters::DexAdapterFactory;
 use crate::adapters::factory::{AdapterSelector, AdapterSelectionStrategy};
 
 /// 다중자산 플래시론 아비트래지 전략

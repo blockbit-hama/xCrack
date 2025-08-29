@@ -136,6 +136,14 @@ export type LiquidationParams = {
   max_gas_price_gwei: string;
   health_factor_threshold: number;
   max_liquidation_size: string;
+  // v2.0 새로운 파라미터들
+  funding_mode: 'auto' | 'flashloan' | 'wallet';
+  max_flashloan_fee_bps: number;
+  gas_buffer_pct: number;
+  max_concurrent_liquidations: number;
+  execution_timeout_ms: number;
+  dex_aggregator_enabled: boolean;
+  preferred_dex_aggregator: '0x' | '1inch' | 'auto';
 };
 
 export type MicroParams = {
@@ -161,6 +169,14 @@ export type MicroParams = {
   runtime_blacklist_ttl_secs: number;
   use_flashloan?: boolean;
   flash_loan_amount?: string | null;
+  // v2.0 자금 조달 시스템
+  funding_mode: 'auto' | 'flashloan' | 'wallet';
+  max_flashloan_fee_bps: number;
+  gas_buffer_pct: number;
+  // v2.0 RealTimeScheduler 설정
+  price_update_interval: number; // 10ms
+  orderbook_refresh_interval: number; // 50ms
+  opportunity_scan_interval: number; // 100ms
 };
 
 export type StrategyParamsResp = {
@@ -176,7 +192,7 @@ export async function getStrategyParams(): Promise<StrategyParamsResp | null> {
   return res.json();
 }
 
-export async function updateStrategyParams(strategy: 'sandwich'|'liquidation'|'micro'|'cross_chain_arbitrage', updates: Record<string, any>): Promise<{ ok: boolean; restart_required?: boolean; error?: string; }> {
+export async function updateStrategyParams(strategy: 'sandwich'|'liquidation'|'micro'|'cross_chain_arbitrage'|'micro_arbitrage', updates: Record<string, any>): Promise<{ ok: boolean; restart_required?: boolean; error?: string; }> {
   const res = await fetch(`${BASE}/api/strategies/params`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1285,6 +1301,185 @@ export async function emergencyPauseStrategy(strategy: string): Promise<boolean>
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+// ---- Liquidation v2.0 API ----
+export type LiquidationOpportunity = {
+  id: string;
+  protocol: 'aave' | 'compound';
+  user_address: string;
+  collateral_token: string;
+  debt_token: string;
+  health_factor: number;
+  liquidation_amount: string;
+  collateral_amount: string;
+  expected_profit: string;
+  gas_estimate: string;
+  confidence_score: number;
+  expires_at: string;
+  funding_mode: 'flashloan' | 'wallet';
+  dex_route: string;
+};
+
+export type ProtocolStatus = {
+  protocol: 'aave' | 'compound';
+  connected: boolean;
+  last_scan_time: string;
+  total_users: number;
+  liquidatable_positions: number;
+  total_collateral_usd: string;
+  total_debt_usd: string;
+  avg_health_factor: number;
+  scan_latency_ms: number;
+};
+
+export type LiquidationMetrics = {
+  total_opportunities: number;
+  successful_liquidations: number;
+  failed_liquidations: number;
+  success_rate: number;
+  total_profit_usd: string;
+  avg_profit_per_liquidation: string;
+  avg_execution_time_ms: number;
+  flashloan_usage_rate: number;
+  wallet_mode_usage_rate: number;
+  auto_mode_decisions: {
+    flashloan_selected: number;
+    wallet_selected: number;
+    total_decisions: number;
+  };
+};
+
+export type LiquidationDashboard = {
+  metrics: LiquidationMetrics;
+  protocol_status: ProtocolStatus[];
+  active_opportunities: LiquidationOpportunity[];
+  recent_liquidations: {
+    id: string;
+    protocol: string;
+    user_address: string;
+    profit_usd: string;
+    execution_time_ms: number;
+    funding_mode: string;
+    timestamp: string;
+    status: 'success' | 'failed';
+  }[];
+  profitability_analysis: {
+    flashloan_vs_wallet: {
+      flashloan_avg_profit: string;
+      wallet_avg_profit: string;
+      flashloan_success_rate: number;
+      wallet_success_rate: number;
+    };
+  };
+};
+
+export async function getLiquidationDashboard(): Promise<LiquidationDashboard | null> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/liquidation/dashboard`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getLiquidationOpportunities(): Promise<LiquidationOpportunity[]> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/liquidation/opportunities`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.opportunities || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getProtocolStatus(): Promise<ProtocolStatus[]> {
+  try {
+    const res = await fetch(`${BASE}/api/protocols/status`, { cache: 'no-cache' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.protocols || [];
+  } catch {
+    return [];
+  }
+}
+
+// ---- Micro Arbitrage v2.0 Scheduler API ----
+export type SchedulerMetrics = {
+  price_update_frequency: number; // 실제 주기 (ms)
+  orderbook_refresh_frequency: number;
+  opportunity_scan_frequency: number;
+  price_updates_per_second: number;
+  orderbook_updates_per_second: number;
+  opportunities_scanned_per_second: number;
+  scheduler_efficiency: number; // 0-1
+  missed_cycles_count: number;
+  avg_cycle_latency_ms: number;
+};
+
+export type FundingModeMetrics = {
+  auto_mode_decisions: {
+    flashloan_selected: number;
+    wallet_selected: number;
+    skipped_unprofitable: number;
+    total_decisions: number;
+  };
+  profitability_comparison: {
+    flashloan_avg_net_profit: string;
+    wallet_avg_net_profit: string;
+    flashloan_success_rate: number;
+    wallet_success_rate: number;
+  };
+  cost_analysis: {
+    flashloan_avg_cost: string;
+    wallet_avg_cost: string;
+    gas_savings_percentage: number;
+  };
+};
+
+export type MicroArbitrageV2Dashboard = {
+  scheduler_metrics: SchedulerMetrics;
+  funding_mode_metrics: FundingModeMetrics;
+  traditional_metrics: MicroArbitrageMetrics;
+  real_time_status: {
+    price_monitor_active: boolean;
+    orderbook_monitor_active: boolean;
+    opportunity_scanner_active: boolean;
+    current_funding_mode: 'auto' | 'flashloan' | 'wallet';
+    next_scan_in_ms: number;
+  };
+};
+
+export async function getMicroArbitrageV2Dashboard(): Promise<MicroArbitrageV2Dashboard | null> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/micro/v2/dashboard`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getSchedulerMetrics(): Promise<SchedulerMetrics | null> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/micro/scheduler/metrics`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getFundingModeMetrics(): Promise<FundingModeMetrics | null> {
+  try {
+    const res = await fetch(`${BASE}/api/strategies/micro/funding/metrics`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
   }
 }
 

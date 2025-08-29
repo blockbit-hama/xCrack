@@ -122,50 +122,153 @@ export default function SettingsPage() {
                   </div>
                 </form>
 
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  const v = (e.currentTarget.elements.namedItem('v2') as HTMLInputElement).value;
-                  const res = await updateStrategyParams('liquidation', { min_profit_eth: v });
-                  setMsg(res.ok ? 'Liquidation 저장 완료(재시작 필요)' : `Liquidation 저장 실패: ${res.error}`);
-                }}>
-                  <label style={{ fontSize: 12, color: '#666' }}>Liquidation min_profit_eth</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input name="v2" defaultValue={params.liquidation.min_profit_eth} className="border p-2" />
-                    <button type="submit" className="px-3 py-2 bg-black text-white rounded">Save</button>
-                  </div>
-                </form>
+                {/* Liquidation v2.0 Settings */}
+                <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 16, backgroundColor: '#f8fafc' }}>
+                  <h4 style={{ margin: '0 0 12px 0', color: '#374151' }}>Liquidation v2.0 설정</h4>
+                  
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const v = (e.currentTarget.elements.namedItem('v2') as HTMLInputElement).value;
+                    const res = await updateStrategyParams('liquidation', { min_profit_eth: v });
+                    setMsg(res.ok ? 'Liquidation 저장 완료(재시작 필요)' : `Liquidation 저장 실패: ${res.error}`);
+                  }}>
+                    <label style={{ fontSize: 12, color: '#666' }}>min_profit_eth</label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input name="v2" defaultValue={params.liquidation.min_profit_eth} className="border p-2" />
+                      <button type="submit" className="px-3 py-2 bg-black text-white rounded">Save</button>
+                    </div>
+                  </form>
 
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  const v = (e.currentTarget.elements.namedItem('v3') as HTMLInputElement).value;
-                  const res = await updateStrategyParams('micro', { min_profit_usd: v });
-                  setMsg(res.ok ? 'Micro 저장 완료(재시작 필요)' : `Micro 저장 실패: ${res.error}`);
-                }}>
-                  <label style={{ fontSize: 12, color: '#666' }}>Micro min_profit_usd</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input name="v3" defaultValue={params.micro_arbitrage.min_profit_usd} className="border p-2" />
-                    <button type="submit" className="px-3 py-2 bg-black text-white rounded">Save</button>
-                  </div>
-                </form>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const fundingMode = (e.currentTarget.elements.namedItem('l_funding') as HTMLSelectElement).value;
+                    const maxFee = (e.currentTarget.elements.namedItem('l_max_fee') as HTMLInputElement).value;
+                    const gasBuffer = (e.currentTarget.elements.namedItem('l_gas_buffer') as HTMLInputElement).value;
+                    const updates: any = { funding_mode: fundingMode };
+                    if (maxFee) updates.max_flashloan_fee_bps = parseInt(maxFee);
+                    if (gasBuffer) updates.gas_buffer_pct = parseFloat(gasBuffer);
+                    const res = await updateStrategyParams('liquidation', updates);
+                    setMsg(res.ok ? 'Liquidation v2.0 설정 저장 완료(재시작 필요)' : `Liquidation v2.0 설정 실패: ${res.error}`);
+                  }}>
+                    <label style={{ fontSize: 12, color: '#666' }}>자금 조달 모드</label>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      <select name="l_funding" defaultValue={(params as any).liquidation?.funding_mode || 'auto'} className="border p-2">
+                        <option value="auto">자동 선택 (최적 수익성)</option>
+                        <option value="flashloan">플래시론 모드</option>
+                        <option value="wallet">지갑 모드</option>
+                      </select>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input name="l_max_fee" placeholder="최대 플래시론 수수료 (bps)" defaultValue={(params as any).liquidation?.max_flashloan_fee_bps || '9'} className="border p-2" />
+                        <input name="l_gas_buffer" placeholder="가스 버퍼 (%)" defaultValue={(params as any).liquidation?.gas_buffer_pct || '20'} className="border p-2" />
+                      </div>
+                      <button type="submit" className="px-3 py-2 bg-black text-white rounded" style={{ width: 'fit-content' }}>Save</button>
+                    </div>
+                  </form>
+
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const maxConcurrent = (e.currentTarget.elements.namedItem('l_concurrent') as HTMLInputElement).value;
+                    const timeout = (e.currentTarget.elements.namedItem('l_timeout') as HTMLInputElement).value;
+                    const dexEnabled = (e.currentTarget.elements.namedItem('l_dex_enabled') as HTMLInputElement).checked;
+                    const preferredDex = (e.currentTarget.elements.namedItem('l_preferred_dex') as HTMLSelectElement).value;
+                    const updates: any = {};
+                    if (maxConcurrent) updates.max_concurrent_liquidations = parseInt(maxConcurrent);
+                    if (timeout) updates.execution_timeout_ms = parseInt(timeout);
+                    updates.dex_aggregator_enabled = dexEnabled;
+                    if (dexEnabled) updates.preferred_dex_aggregator = preferredDex;
+                    const res = await updateStrategyParams('liquidation', updates);
+                    setMsg(res.ok ? 'Liquidation 실행 설정 저장 완료(재시작 필요)' : `Liquidation 실행 설정 실패: ${res.error}`);
+                  }}>
+                    <label style={{ fontSize: 12, color: '#666' }}>실행 설정</label>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input name="l_concurrent" placeholder="최대 동시 청산 수" defaultValue={(params as any).liquidation?.max_concurrent_liquidations || '3'} className="border p-2" />
+                        <input name="l_timeout" placeholder="실행 타임아웃 (ms)" defaultValue={(params as any).liquidation?.execution_timeout_ms || '5000'} className="border p-2" />
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <input type="checkbox" name="l_dex_enabled" defaultChecked={(params as any).liquidation?.dex_aggregator_enabled || false} />
+                          <span>DEX 어그리게이터 사용</span>
+                        </label>
+                        <select name="l_preferred_dex" defaultValue={(params as any).liquidation?.preferred_dex_aggregator || 'auto'} className="border p-2">
+                          <option value="auto">자동 선택</option>
+                          <option value="0x">0x Protocol</option>
+                          <option value="1inch">1inch</option>
+                        </select>
+                      </div>
+                      <button type="submit" className="px-3 py-2 bg-black text-white rounded" style={{ width: 'fit-content' }}>Save</button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Micro Arbitrage v2.0 Settings */}
+                <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 16, backgroundColor: '#f0f9ff' }}>
+                  <h4 style={{ margin: '0 0 12px 0', color: '#374151' }}>Micro Arbitrage v2.0 설정</h4>
+                  
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const v = (e.currentTarget.elements.namedItem('v3') as HTMLInputElement).value;
+                    const res = await updateStrategyParams('micro_arbitrage', { min_profit_usd: v });
+                    setMsg(res.ok ? 'Micro 저장 완료(재시작 필요)' : `Micro 저장 실패: ${res.error}`);
+                  }}>
+                    <label style={{ fontSize: 12, color: '#666' }}>min_profit_usd</label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input name="v3" defaultValue={params.micro_arbitrage.min_profit_usd} className="border p-2" />
+                      <button type="submit" className="px-3 py-2 bg-black text-white rounded">Save</button>
+                    </div>
+                  </form>
+
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const fundingMode = (e.currentTarget.elements.namedItem('m_funding') as HTMLSelectElement).value;
+                    const maxFee = (e.currentTarget.elements.namedItem('m_max_fee') as HTMLInputElement).value;
+                    const gasBuffer = (e.currentTarget.elements.namedItem('m_gas_buffer') as HTMLInputElement).value;
+                    const updates: any = { funding_mode: fundingMode };
+                    if (maxFee) updates.max_flashloan_fee_bps = parseInt(maxFee);
+                    if (gasBuffer) updates.gas_buffer_pct = parseFloat(gasBuffer);
+                    const res = await updateStrategyParams('micro_arbitrage', updates);
+                    setMsg(res.ok ? 'Micro v2.0 자금조달 설정 저장 완료(재시작 필요)' : `Micro v2.0 자금조달 설정 실패: ${res.error}`);
+                  }}>
+                    <label style={{ fontSize: 12, color: '#666' }}>자금 조달 모드 (v2.0)</label>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      <select name="m_funding" defaultValue={(params as any).micro_arbitrage?.funding_mode || 'auto'} className="border p-2">
+                        <option value="auto">자동 선택 (수익성 기반)</option>
+                        <option value="flashloan">플래시론 모드</option>
+                        <option value="wallet">지갑 모드</option>
+                      </select>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input name="m_max_fee" placeholder="최대 플래시론 수수료 (bps)" defaultValue={(params as any).micro_arbitrage?.max_flashloan_fee_bps || '9'} className="border p-2" />
+                        <input name="m_gas_buffer" placeholder="가스 버퍼 (%)" defaultValue={(params as any).micro_arbitrage?.gas_buffer_pct || '20'} className="border p-2" />
+                      </div>
+                      <button type="submit" className="px-3 py-2 bg-black text-white rounded" style={{ width: 'fit-content' }}>Save</button>
+                    </div>
+                  </form>
+
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const priceInterval = (e.currentTarget.elements.namedItem('m_price_interval') as HTMLInputElement).value;
+                    const orderbookInterval = (e.currentTarget.elements.namedItem('m_orderbook_interval') as HTMLInputElement).value;
+                    const scanInterval = (e.currentTarget.elements.namedItem('m_scan_interval') as HTMLInputElement).value;
+                    const updates: any = {};
+                    if (priceInterval) updates.price_update_interval = parseInt(priceInterval);
+                    if (orderbookInterval) updates.orderbook_refresh_interval = parseInt(orderbookInterval);
+                    if (scanInterval) updates.opportunity_scan_interval = parseInt(scanInterval);
+                    const res = await updateStrategyParams('micro_arbitrage', updates);
+                    setMsg(res.ok ? 'RealTimeScheduler 설정 저장 완료(재시작 필요)' : `RealTimeScheduler 설정 실패: ${res.error}`);
+                  }}>
+                    <label style={{ fontSize: 12, color: '#666' }}>RealTimeScheduler 주배 설정 (ms)</label>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input name="m_price_interval" placeholder="가격 업데이트 (10ms)" defaultValue={(params as any).micro_arbitrage?.price_update_interval || '10'} className="border p-2" />
+                        <input name="m_orderbook_interval" placeholder="오더북 갱신 (50ms)" defaultValue={(params as any).micro_arbitrage?.orderbook_refresh_interval || '50'} className="border p-2" />
+                        <input name="m_scan_interval" placeholder="기회 스캔 (100ms)" defaultValue={(params as any).micro_arbitrage?.opportunity_scan_interval || '100'} className="border p-2" />
+                      </div>
+                      <button type="submit" className="px-3 py-2 bg-black text-white rounded" style={{ width: 'fit-content' }}>Save</button>
+                    </div>
+                  </form>
+                </div>
 
                 {/* Sandwich flashloan is disabled by policy: toggle removed */}
-
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  const enabled = (e.currentTarget.elements.namedItem('m_flash') as HTMLInputElement).checked;
-                  const amount = (e.currentTarget.elements.namedItem('m_amt') as HTMLInputElement).value;
-                  const updates: any = { use_flashloan: enabled };
-                  if (amount) updates.flash_loan_amount = amount;
-                  const res = await updateStrategyParams('micro', updates);
-                  setMsg(res.ok ? 'Micro flashloan 저장 완료(재시작 필요)' : `Micro flashloan 저장 실패: ${res.error}`);
-                }}>
-                  <label style={{ fontSize: 12, color: '#666' }}>Micro Flashloan</label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="checkbox" name="m_flash" defaultChecked={Boolean((params as any).micro_arbitrage?.use_flashloan)} />
-                    <input name="m_amt" placeholder="amount (optional)" defaultValue={(params as any).micro_arbitrage?.flash_loan_amount || ''} className="border p-2" />
-                    <button type="submit" className="px-3 py-2 bg-black text-white rounded">Save</button>
-                  </div>
-                </form>
 
                 {/* Micro Aggregator Execution Settings */}
                 <form onSubmit={async (e) => {

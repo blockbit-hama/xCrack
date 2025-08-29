@@ -112,30 +112,72 @@ flowchart LR
 
 ## 🔄 실행 흐름
 
-### 전체 시퀀스
+### 전체 아키텍처 (실제 구현 기준)
 ```mermaid
 graph TD
-    A[가격 데이터 수신] --> B[기회 스캔]
-    B --> C{수익성 확인}
-    C -->|Pass| D[자금 조달 모드 결정]
-    C -->|Fail| X[Skip]
-    
-    D --> E{선택된 모드}
-    E -->|auto| F[수익성 계산 & 자동 선택]
-    E -->|flashloan| G[플래시론 실행]
-    E -->|wallet| H[지갑 실행]
-    
-    F --> I{최적 모드}
-    I -->|flashloan| G
-    I -->|wallet| H
-    I -->|skip| X
-    
-    G --> J[Arbitrage.sol 호출]
-    H --> K[직접 스왑 실행]
-    
-    J --> L[공개 브로드캐스트]
-    K --> L
-    L --> M[실행 완료]
+    A[MicroArbitrageOrchestrator] --> B[ExchangeMonitor]
+    A --> C[PriceFeedManager]
+    A --> D[OrderExecutor]
+    A --> E[RealTimeScheduler]
+
+    B --> F[CEX API 연결]
+    B --> G[DEX 가격 조회]
+    F --> H[Binance]
+    F --> I[Coinbase]
+    F --> J[Kraken]
+    G --> K[Uniswap V3]
+    G --> L[SushiSwap]
+    G --> M[1inch]
+
+    C --> N[실시간 가격 처리]
+    C --> O[오더북 분석]
+    N --> P[차익거래 기회 탐지]
+    O --> P
+
+    P --> Q[MicroArbitrageStrategy]
+    Q --> D
+```
+
+### RealTimeScheduler 역할 (핵심)
+**RealTimeScheduler**는 다층적 스케줄링을 관리합니다:
+
+```rust
+// 3가지 독립적인 실행 주기
+pub struct RealTimeScheduler {
+    price_update_interval: Duration,    // 10ms - 초고속 가격 모니터링
+    orderbook_refresh_interval: Duration, // 50ms - 오더북 갱신
+    opportunity_scan_interval: Duration,  // 100ms - 기회 스캔 및 실행
+}
+```
+
+1. **가격 모니터링 (10ms)**: ExchangeMonitor 트리거 → 실시간 가격 수집
+2. **오더북 갱신 (50ms)**: 유동성 깊이 분석 → PriceFeedManager 데이터 보강
+3. **기회 실행 (100ms)**: 전체 차익거래 기회 스캔 → MicroArbitrageStrategy 실행
+
+### 실행 시퀀스
+```mermaid
+sequenceDiagram
+    participant RS as RealTimeScheduler
+    participant EM as ExchangeMonitor
+    participant PM as PriceFeedManager
+    participant MS as MicroArbitrageStrategy
+    participant OE as OrderExecutor
+
+    loop 10ms 주기
+        RS->>EM: 가격 데이터 수집 트리거
+        EM->>PM: PriceData 전송
+    end
+
+    loop 50ms 주기
+        RS->>EM: 오더북 갱신 트리거
+        EM->>PM: OrderBookSnapshot 전송
+    end
+
+    loop 100ms 주기
+        RS->>PM: 기회 스캔 트리거
+        PM->>MS: 차익거래 기회 분석
+        MS->>OE: 수익성 있는 기회 실행
+    end
 ```
 
 ### 세부 단계

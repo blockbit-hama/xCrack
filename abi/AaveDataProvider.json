@@ -1,0 +1,18 @@
+[
+  {
+    "inputs": [],
+    "name": "getAllReservesTokens",
+    "outputs": [
+      {
+        "components": [
+          {"name": "symbol", "type": "string"},
+          {"name": "tokenAddress", "type": "address"}
+        ],
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

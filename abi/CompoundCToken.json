@@ -1,0 +1,46 @@
+[
+  {
+    "inputs": [
+      {"name": "borrower", "type": "address"},
+      {"name": "repayAmount", "type": "uint256"},
+      {"name": "cTokenCollateral", "type": "address"}
+    ],
+    "name": "liquidateBorrow",
+    "outputs": [
+      {"name": "", "type": "uint256"}
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"name": "redeemTokens", "type": "uint256"}
+    ],
+    "name": "redeem",
+    "outputs": [
+      {"name": "", "type": "uint256"}
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"name": "owner", "type": "address"}
+    ],
+    "name": "balanceOf",
+    "outputs": [
+      {"name": "", "type": "uint256"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "underlying",
+    "outputs": [
+      {"name": "", "type": "address"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

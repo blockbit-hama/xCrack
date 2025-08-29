@@ -1,13 +1,16 @@
 pub mod flashbots;
 pub mod bundle;
+pub mod bundle_executor;
 pub mod simulation;
 pub mod mempool;
+pub mod opportunity;
 pub mod relay;
 pub mod boost;
 pub mod protection;
 pub mod analytics;
 
 pub use flashbots::{FlashbotsClient, FlashbotsRelay, BundleStatus, BundleTracker, BundleOptions};
+pub use bundle_executor::{MEVBundleExecutor, ExecutionBundle, BundleExecutionResult, ExecutionStats, BundleStatus as ExecutorBundleStatus};
 pub use bundle::{
     Bundle, BundleBuilder, BundleOptimizer, BundleType, PriorityLevel, 
     BundleMetadata, OptimizationInfo, ValidationStatus, OptimizationResult,

@@ -1,0 +1,17 @@
+[
+  {
+    "inputs": [
+      {"name": "ilk", "type": "bytes32"}
+    ],
+    "name": "ilks",
+    "outputs": [
+      {"name": "Art", "type": "uint256"},
+      {"name": "rate", "type": "uint256"},
+      {"name": "spot", "type": "uint256"},
+      {"name": "line", "type": "uint256"},
+      {"name": "dust", "type": "uint256"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

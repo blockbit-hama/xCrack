@@ -52,6 +52,11 @@ pub struct Config {
     pub monitoring: MonitoringConfig,
     pub performance: PerformanceConfig,
     pub dexes: Vec<DexConfig>,
+    pub dex: DexApiConfig,
+    pub execution: ExecutionConfig,
+    pub liquidation: LiquidationV2Config,
+    pub protocols: ProtocolConfig,
+    pub contracts: ContractConfig,
     pub tokens: HashMap<String, String>, // symbol -> address
 }
 
@@ -220,6 +225,58 @@ pub struct PerformanceConfig {
     pub mempool_filter_max_gas_price: String, // gwei
     pub enable_metrics: bool,
     pub cache_size: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DexApiConfig {
+    pub ox_api_key: Option<String>,
+    pub oneinch_api_key: Option<String>,
+    pub request_timeout_ms: u64,
+    pub retry_count: u32,
+    pub rate_limit_per_second: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionConfig {
+    pub gas_price_gwei: Option<f64>,
+    pub gas_multiplier: f64,
+    pub transaction_timeout_ms: u64,
+    pub max_pending_transactions: u32,
+    pub private_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiquidationV2Config {
+    pub min_profit_threshold_usd: Option<f64>,
+    pub scan_interval_seconds: Option<u64>,
+    pub max_concurrent_liquidations: u32,
+    pub use_flashloan: bool,
+    pub preferred_flashloan_provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtocolConfig {
+    pub aave: ProtocolSettings,
+    pub compound_v2: ProtocolSettings,
+    pub compound_v3: ProtocolSettings,
+    pub makerdao: ProtocolSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtocolSettings {
+    pub enabled: bool,
+    pub contract_address: Option<String>,
+    pub oracle_address: Option<String>,
+    pub liquidation_threshold: f64,
+    pub close_factor: f64,
+    pub liquidation_bonus: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractConfig {
+    pub liquidation_strategy: Option<String>,
+    pub flashloan_receiver: Option<String>,
+    pub dex_router: Option<String>,
 }
 
 // 기본값 함수들
@@ -460,6 +517,66 @@ impl Config {
                     enabled: true,
                 },
             ],
+            dex: DexApiConfig {
+                ox_api_key: None,
+                oneinch_api_key: None,
+                request_timeout_ms: 5000,
+                retry_count: 3,
+                rate_limit_per_second: 10,
+            },
+            execution: ExecutionConfig {
+                gas_price_gwei: Some(20.0),
+                gas_multiplier: 1.2,
+                transaction_timeout_ms: 30000,
+                max_pending_transactions: 5,
+                private_key: None,
+            },
+            liquidation: LiquidationV2Config {
+                min_profit_threshold_usd: Some(50.0),
+                scan_interval_seconds: Some(30),
+                max_concurrent_liquidations: 3,
+                use_flashloan: true,
+                preferred_flashloan_provider: Some("aave".to_string()),
+            },
+            protocols: ProtocolConfig {
+                aave: ProtocolSettings {
+                    enabled: true,
+                    contract_address: Some("0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9".to_string()), // Aave v2 LendingPool
+                    oracle_address: Some("0xA50ba011c48153De246E5192C8f9258A2ba79Ca9".to_string()), // Aave Oracle
+                    liquidation_threshold: 0.8,
+                    close_factor: 0.5,
+                    liquidation_bonus: 0.05,
+                },
+                compound_v2: ProtocolSettings {
+                    enabled: true,
+                    contract_address: Some("0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B".to_string()), // Comptroller
+                    oracle_address: Some("0x046728da7cb8272284238bD3e47909823d63A58D".to_string()), // Price Oracle
+                    liquidation_threshold: 0.75,
+                    close_factor: 0.5,
+                    liquidation_bonus: 0.08,
+                },
+                compound_v3: ProtocolSettings {
+                    enabled: false,
+                    contract_address: None,
+                    oracle_address: None,
+                    liquidation_threshold: 0.83,
+                    close_factor: 0.4,
+                    liquidation_bonus: 0.05,
+                },
+                makerdao: ProtocolSettings {
+                    enabled: false,
+                    contract_address: None,
+                    oracle_address: None,
+                    liquidation_threshold: 1.5,
+                    close_factor: 1.0,
+                    liquidation_bonus: 0.13,
+                },
+            },
+            contracts: ContractConfig {
+                liquidation_strategy: None, // Will be set after deployment
+                flashloan_receiver: None,
+                dex_router: Some("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".to_string()), // Uniswap V2 Router
+            },
             tokens: {
                 let mut tokens = HashMap::new();
                 tokens.insert("WETH".to_string(), "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".to_string());
@@ -555,6 +672,24 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn load_test_config() -> Self {
+        let mut config = Self::default();
+        
+        // Test-friendly settings
+        config.flashbots.private_key = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef".to_string();
+        config.liquidation.min_profit_threshold_usd = Some(10.0); // Lower threshold for testing
+        config.execution.gas_price_gwei = Some(10.0); // Lower gas for testing
+        
+        // Enable all protocols for comprehensive testing
+        config.protocols.aave.enabled = true;
+        config.protocols.compound_v2.enabled = true;
+        config.protocols.compound_v3.enabled = true;
+        config.protocols.makerdao.enabled = true;
+        
+        config
     }
 }
 

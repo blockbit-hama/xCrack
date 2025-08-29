@@ -22,7 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <div className="px-3 py-2 text-xs uppercase tracking-wider text-gray-400">전략 / 실행</div>
                 <div className="flex flex-col pb-2">
                   <a href="/strategies" className="text-white no-underline px-3 py-2 hover:bg-white/10">전략</a>
+                  <a href="/liquidation" className="text-white no-underline px-3 py-2 hover:bg-white/10">청산 v2.0</a>
                   <a href="/micro" className="text-white no-underline px-3 py-2 hover:bg-white/10">마이크로</a>
+                  <a href="/micro-v2" className="text-white no-underline px-3 py-2 hover:bg-white/10">마이크로 v2.0</a>
                   <a href="/flashloan" className="text-white no-underline px-3 py-2 hover:bg-white/10">플래시론</a>
                   <a href="/multi-asset" className="text-white no-underline px-3 py-2 hover:bg-white/10">다중자산</a>
                   <a href="/bundles" className="text-white no-underline px-3 py-2 hover:bg-white/10">번들</a>
@@ -33,6 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <div className="rounded-md" style={{ backgroundColor: '#0b0b0b', border: '1px solid #222' }}>
                 <div className="px-3 py-2 text-xs uppercase tracking-wider text-gray-400">온체인 / 데이터</div>
                 <div className="flex flex-col pb-2">
+                  <a href="/protocols" className="text-white no-underline px-3 py-2 hover:bg-white/10">프로토콜</a>
                   <a href="/mempool" className="text-white no-underline px-3 py-2 hover:bg-white/10">멤풀</a>
                   <a href="/onchain" className="text-white no-underline px-3 py-2 hover:bg-white/10">온체인</a>
                   <a href="/network" className="text-white no-underline px-3 py-2 hover:bg-white/10">네트워크</a>

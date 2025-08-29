@@ -5,6 +5,7 @@ pub mod crypto;
 pub mod time;
 pub mod network;
 pub mod abi;
+pub mod profitability;
 
 // Re-exports
 // pub use math::*;

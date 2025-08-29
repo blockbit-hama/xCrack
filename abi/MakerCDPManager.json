@@ -1,0 +1,14 @@
+[
+  {
+    "inputs": [
+      {"name": "cdpId", "type": "uint256"}
+    ],
+    "name": "getCdpInfo",
+    "outputs": [
+      {"name": "collateral", "type": "uint256"},
+      {"name": "debt", "type": "uint256"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]

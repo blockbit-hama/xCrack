@@ -11,6 +11,10 @@ repository = "https://github.com/xcrack/mev-searcher-rust"
 name = "searcher"
 path = "src/main.rs"
 
+[[bin]]
+name = "liquidation_bot"
+path = "src/bin/liquidation_bot.rs"
+
 
 
 [dependencies]
