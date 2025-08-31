@@ -13,11 +13,11 @@ export default async function BundlesPage() {
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="p-4 border rounded">
           <div className="text-gray-500">Total Submitted</div>
-          <div className="text-xl">{summary.stats.total_submitted}</div>
+          <div className="text-xl">{summary?.stats?.total_submitted || 0}</div>
         </div>
         <div className="p-4 border rounded">
           <div className="text-gray-500">Total Included</div>
-          <div className="text-xl">{summary.stats.total_included}</div>
+          <div className="text-xl">{summary?.stats?.total_included || 0}</div>
         </div>
       </div>
 
@@ -33,7 +33,7 @@ export default async function BundlesPage() {
           </tr>
         </thead>
         <tbody>
-          {recent.map((b) => (
+          {(recent || []).map((b) => (
             <tr key={b.id} className="border-t">
               <td className="p-2">
                 <Link href={`/bundles/${b.id}`} className="text-blue-600 underline">{b.id.slice(0, 10)}...</Link>

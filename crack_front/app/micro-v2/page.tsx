@@ -234,16 +234,14 @@ export default function MicroArbitrageV2Page() {
                   <div className="flex justify-between items-center mb-2">
                     <span className="font-medium">플래시론 선택</span>
                     <span className="text-xl font-bold text-blue-600">
-                      {fundingMetrics.auto_mode_decisions.flashloan_selected}
+                      {fundingMetrics.auto_mode_decisions?.flashloan_selected || 0}
                     </span>
                   </div>
                   <div className="w-full bg-blue-200 rounded-full h-2">
                     <div 
                       className="bg-blue-600 h-2 rounded-full" 
                       style={{ 
-                        width: `${(fundingMetrics.auto_mode_decisions.flashloan_selected / 
-                                 fundingMetrics.auto_mode_decisions.total_decisions * 100)}%` 
-                      }}
+                        width: `${((fundingMetrics.auto_mode_decisions?.flashloan_selected || 0) / (fundingMetrics.auto_mode_decisions?.total_decisions || 1)) * 100}%`                      }}
                     ></div>
                   </div>
                 </div>
@@ -252,28 +250,23 @@ export default function MicroArbitrageV2Page() {
                   <div className="flex justify-between items-center mb-2">
                     <span className="font-medium">지갑 선택</span>
                     <span className="text-xl font-bold text-green-600">
-                      {fundingMetrics.auto_mode_decisions.wallet_selected}
+                      {fundingMetrics.auto_mode_decisions?.wallet_selected || 0}
                     </span>
                   </div>
                   <div className="w-full bg-green-200 rounded-full h-2">
                     <div 
                       className="bg-green-600 h-2 rounded-full" 
                       style={{ 
-                        width: `${(fundingMetrics.auto_mode_decisions.wallet_selected / 
-                                 fundingMetrics.auto_mode_decisions.total_decisions * 100)}%` 
-                      }}
-                    ></div>
-                  </div>
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <div className="flex justify-between">
                     <span className="text-sm">수익성 없어 건너뜀:</span>
-                    <span className="font-medium">{fundingMetrics.auto_mode_decisions.skipped_unprofitable}</span>
+                    <span className="font-medium">{fundingMetrics.auto_mode_decisions?.skipped_unprofitable || 0}</span>
                   </div>
                   <div className="flex justify-between border-t pt-2 mt-2">
                     <span className="text-sm font-medium">총 결정:</span>
-                    <span className="font-bold">{fundingMetrics.auto_mode_decisions.total_decisions}</span>
+                    <span className="font-bold">{fundingMetrics.auto_mode_decisions?.total_decisions || 1}</span>
                   </div>
                 </div>
               </div>

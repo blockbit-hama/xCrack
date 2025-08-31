@@ -169,11 +169,11 @@ export default function AlertsPage() {
         <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">총 알림</h3>
-            <p className="text-2xl font-bold">{stats.total_alerts.toLocaleString()}</p>
+            <p className="text-2xl font-bold">{(stats?.total_alerts || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">미확인</h3>
-            <p className="text-2xl font-bold text-orange-600">{stats.unacknowledged_count.toLocaleString()}</p>
+            <p className="text-2xl font-bold text-orange-600">{(stats?.unacknowledged_count || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">긴급</h3>
