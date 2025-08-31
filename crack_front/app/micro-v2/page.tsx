@@ -152,21 +152,21 @@ export default function MicroArbitrageV2Page() {
                   <span className="text-sm">가격 업데이트:</span>
                   <div className="text-right">
                     <div className="font-medium">{schedulerMetrics.price_update_frequency}ms</div>
-                    <div className="text-xs text-gray-500">{schedulerMetrics.price_updates_per_second.toFixed(1)}/s</div>
+                    <div className="text-xs text-gray-500">{(schedulerMetrics.price_updates_per_second || 0).toFixed(1)}/s</div>
                   </div>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm">오더북 갱신:</span>
                   <div className="text-right">
                     <div className="font-medium">{schedulerMetrics.orderbook_refresh_frequency}ms</div>
-                    <div className="text-xs text-gray-500">{schedulerMetrics.orderbook_updates_per_second.toFixed(1)}/s</div>
+                    <div className="text-xs text-gray-500">{(schedulerMetrics.orderbook_updates_per_second || 0).toFixed(1)}/s</div>
                   </div>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm">기회 스캔:</span>
                   <div className="text-right">
                     <div className="font-medium">{schedulerMetrics.opportunity_scan_frequency}ms</div>
-                    <div className="text-xs text-gray-500">{schedulerMetrics.opportunities_scanned_per_second.toFixed(1)}/s</div>
+                    <div className="text-xs text-gray-500">{(schedulerMetrics.opportunities_scanned_per_second || 0).toFixed(1)}/s</div>
                   </div>
                 </div>
               </div>
@@ -179,7 +179,7 @@ export default function MicroArbitrageV2Page() {
                 <div>
                   <div className="flex justify-between mb-1">
                     <span className="text-sm">전체 효율성:</span>
-                    <span className="font-medium">{(schedulerMetrics.scheduler_efficiency * 100).toFixed(1)}%</span>
+                    <span className="font-medium">{((schedulerMetrics.scheduler_efficiency || 0) * 100).toFixed(1)}%</span>
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-2">
                     <div 
@@ -194,7 +194,7 @@ export default function MicroArbitrageV2Page() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm">평균 지연시간:</span>
-                  <span className="font-medium">{schedulerMetrics.avg_cycle_latency_ms.toFixed(2)}ms</span>
+                  <span className="font-medium">{(schedulerMetrics.avg_cycle_latency_ms || 0).toFixed(2)}ms</span>
                 </div>
               </div>
             </div>
@@ -205,15 +205,15 @@ export default function MicroArbitrageV2Page() {
               <div className="space-y-3">
                 <div className="bg-blue-50 p-3 rounded-lg">
                   <div className="text-sm text-blue-700">가격 업데이트/초</div>
-                  <div className="text-xl font-bold text-blue-800">{schedulerMetrics.price_updates_per_second.toFixed(0)}</div>
+                  <div className="text-xl font-bold text-blue-800">{(schedulerMetrics.price_updates_per_second || 0).toFixed(0)}</div>
                 </div>
                 <div className="bg-green-50 p-3 rounded-lg">
                   <div className="text-sm text-green-700">오더북 업데이트/초</div>
-                  <div className="text-xl font-bold text-green-800">{schedulerMetrics.orderbook_updates_per_second.toFixed(0)}</div>
+                  <div className="text-xl font-bold text-green-800">{(schedulerMetrics.orderbook_updates_per_second || 0).toFixed(0)}</div>
                 </div>
                 <div className="bg-purple-50 p-3 rounded-lg">
                   <div className="text-sm text-purple-700">기회 스캔/초</div>
-                  <div className="text-xl font-bold text-purple-800">{schedulerMetrics.opportunities_scanned_per_second.toFixed(1)}</div>
+                  <div className="text-xl font-bold text-purple-800">{(schedulerMetrics.opportunities_scanned_per_second || 0).toFixed(1)}</div>
                 </div>
               </div>
             </div>
@@ -288,13 +288,13 @@ export default function MicroArbitrageV2Page() {
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-sm">플래시론:</span>
                     <span className="font-bold text-blue-600">
-                      ${parseFloat(fundingMetrics.profitability_comparison.flashloan_avg_net_profit).toFixed(2)}
+                      ${parseFloat(fundingMetrics.profitability_comparison?.flashloan_avg_net_profit || 0).toFixed(2)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm">지갑:</span>
                     <span className="font-bold text-green-600">
-                      ${parseFloat(fundingMetrics.profitability_comparison.wallet_avg_net_profit).toFixed(2)}
+                      ${parseFloat(fundingMetrics.profitability_comparison?.wallet_avg_net_profit || 0).toFixed(2)}
                     </span>
                   </div>
                 </div>
