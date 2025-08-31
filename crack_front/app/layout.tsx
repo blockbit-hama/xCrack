@@ -71,6 +71,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     <Link href="/micro-v2" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">🔄</span>
                       <span>마이크로 아비트래지</span>
+                    </Link>
                     <Link href="/sandwich" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">🥪</span>
                       <span>샌드위치</span>
@@ -80,7 +81,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                       <span className="text-lg">🌉</span>
                       <span>크로스체인 아비트래지</span>
                       <Badge variant="info" className="text-xs">Mock</Badge>
-                    </Link>                    </Link>
+                    </Link>
                     <Link href="/flashloan" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">⚡</span>
                       <span>플래시론</span>
