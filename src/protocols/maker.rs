@@ -7,7 +7,7 @@ use ethers::{
     providers::{Provider, Ws, Middleware},
     contract::Contract,
     abi::Abi,
-    types::{H160, U256 as EthersU256, Filter, Log},
+    types::{H160, H256, U256 as EthersU256, Filter, Log, BlockNumber},
 };
 use async_trait::async_trait;
 
@@ -88,9 +88,9 @@ impl MakerScanner {
         // Get CDPs from recent events
         let open_filter = Filter::new()
             .address(self.cdp_manager_address)
-            .topic0("0x91e78c6c7d214de6657ff94d886adb4b377b1a8a5f7c4b8b8b8b8b8b8b8b8b8b")
+            .topic0(H256::from_slice(&hex::decode("91e78c6c7d214de6657ff94d886adb4b377b1a8a5f7c4b8b8b8b8b8b8b8b8b8b").unwrap()))
             .from_block(from_block)
-            .to_block("latest");
+            .to_block(BlockNumber::Latest);
             
         if let Ok(open_logs) = self.provider.get_logs(&open_filter).await {
             for log in open_logs {
@@ -115,7 +115,7 @@ impl MakerScanner {
         
         let cdp_data = CdpData {
             cdp_id,
-            owner: Address::random(),
+            owner: Address::from_slice(&rand::random::<[u8; 20]>()),
             ilk: "ETH-A".to_string(),
             collateral: U256::from(10_000_000_000_000_000_000u64), // 10 ETH
             debt: U256::from(2_000_000_000_000_000_000u64), // 2000 DAI
@@ -182,8 +182,8 @@ impl ProtocolScanner for MakerScanner {
 impl MakerScanner {
     async fn is_liquidatable(&self, cdp_data: &CdpData) -> Result<bool> {
         // MakerDAO 청산 조건: 담보 비율 < 청산 비율
-        let collateral_ratio = (cdp_data.collateral.as_u128() as f64 * cdp_data.collateral_price) 
-                              / (cdp_data.debt.as_u128() as f64 / 1e18);
+        let collateral_ratio = (cdp_data.collateral.to::<u128>() as f64 * cdp_data.collateral_price) 
+                              / (cdp_data.debt.to::<u128>() as f64 / 1e18);
         
         let is_liquidatable = collateral_ratio < cdp_data.liquidation_ratio;
         
@@ -194,8 +194,8 @@ impl MakerScanner {
     }
     
     async fn build_liquidatable_user(&self, cdp_data: CdpData) -> Result<LiquidatableUser> {
-        let collateral_ratio = (cdp_data.collateral.as_u128() as f64 * cdp_data.collateral_price) 
-                              / (cdp_data.debt.as_u128() as f64 / 1e18);
+        let collateral_ratio = (cdp_data.collateral.to::<u128>() as f64 * cdp_data.collateral_price) 
+                              / (cdp_data.debt.to::<u128>() as f64 / 1e18);
         
         let health_factor = collateral_ratio / cdp_data.liquidation_ratio;
         
@@ -203,7 +203,7 @@ impl MakerScanner {
         let collateral_position = CollateralPosition {
             asset: Address::ZERO, // TODO: 실제 담보 토큰 주소
             amount: cdp_data.collateral,
-            usd_value: cdp_data.collateral.as_u128() as f64 * cdp_data.collateral_price / 1e18,
+            usd_value: cdp_data.collateral.to::<u128>() as f64 * cdp_data.collateral_price / 1e18,
             liquidation_threshold: cdp_data.liquidation_ratio,
             price_usd: cdp_data.collateral_price,
         };
@@ -212,7 +212,7 @@ impl MakerScanner {
         let debt_position = DebtPosition {
             asset: Address::ZERO, // TODO: 실제 DAI 주소
             amount: cdp_data.debt,
-            usd_value: cdp_data.debt.as_u128() as f64 / 1e18,
+            usd_value: cdp_data.debt.to::<u128>() as f64 / 1e18,
             borrow_rate: 0.0, // TODO: 실제 대출 이자율
             price_usd: 1.0, // DAI = $1
         };
@@ -235,6 +235,8 @@ impl MakerScanner {
         let mut liquidation_bonus = HashMap::new();
         liquidation_bonus.insert(Address::ZERO, 0.13); // 13% 청산 보너스
         
+        let priority_score = self.calculate_priority_score(health_factor, debt_position.usd_value);
+        
         Ok(LiquidatableUser {
             address: cdp_data.owner,
             protocol: ProtocolType::MakerDAO,
@@ -243,7 +245,7 @@ impl MakerScanner {
             debt_positions: vec![debt_position],
             max_liquidatable_debt,
             liquidation_bonus,
-            priority_score: self.calculate_priority_score(health_factor, debt_position.usd_value),
+            priority_score,
         })
     }
     

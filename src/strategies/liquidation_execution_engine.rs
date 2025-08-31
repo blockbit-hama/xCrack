@@ -3,7 +3,7 @@ use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn, error};
 use alloy::primitives::{Address, U256};
 use ethers::providers::{Provider, Ws};
-use serde::{Deserialize, Serialize};
+use ethers::types::H256;
 use tokio::time::{sleep, Duration};
 
 use crate::config::Config;
@@ -21,7 +21,7 @@ pub struct LiquidationExecutionEngine {
 }
 
 /// 제출 결과
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SubmissionResult {
     pub bundle_hash: String,
     pub status: BundleStatus,
@@ -33,7 +33,7 @@ pub struct SubmissionResult {
 }
 
 /// 실행 통계
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ExecutionStats {
     pub total_submissions: u64,
     pub successful_inclusions: u64,
@@ -69,19 +69,19 @@ impl LiquidationExecutionEngine {
         let submission_time = chrono::Utc::now();
         
         info!("🚀 Executing liquidation bundle with estimated profit: {} ETH", 
-              format_eth_amount(bundle.estimated_profit));
+              format_eth_amount(U256::from_limbs(bundle.estimated_profit.0)));
         
         // 1. 번들 시뮬레이션
         let simulation_result = self.simulate_bundle(&bundle).await?;
         if !simulation_result.success {
             return Ok(SubmissionResult {
                 bundle_hash: "".to_string(),
-                status: BundleStatus::Rejected,
+                status: BundleStatus::Rejected(simulation_result.error_message.clone().unwrap_or("Simulation failed".to_string())),
                 submission_time,
                 inclusion_time: None,
                 profit_realized: None,
                 gas_used: None,
-                error_message: Some(simulation_result.error_message),
+                error_message: simulation_result.error_message,
             });
         }
         
@@ -104,7 +104,7 @@ impl LiquidationExecutionEngine {
         // TODO: 실제 시뮬레이션 로직 구현
         // 현재는 간단한 검증만 수행
         
-        let success = bundle.estimated_profit > U256::from(0) && 
+        let success = bundle.estimated_profit > ethers::types::U256::from(0) && 
                      bundle.success_probability > 0.5;
         
         Ok(SimulationResult {
@@ -121,7 +121,7 @@ impl LiquidationExecutionEngine {
         // TODO: 실제 Flashbots 제출 로직 구현
         // 현재는 더미 번들 해시 반환
         
-        let bundle_hash = format!("0x{:064x}", bundle.estimated_profit.as_u128());
+        let bundle_hash = format!("0x{:064x}", bundle.estimated_profit.low_u128());
         
         debug!("Bundle submitted with hash: {}", bundle_hash);
         
@@ -155,10 +155,10 @@ impl LiquidationExecutionEngine {
                 
                 return Ok(SubmissionResult {
                     bundle_hash,
-                    status: BundleStatus::Included,
+                    status: BundleStatus::Included(H256::zero()),
                     submission_time,
                     inclusion_time: Some(inclusion_time),
-                    profit_realized: Some(bundle.estimated_profit),
+                    profit_realized: Some(U256::from_limbs(bundle.estimated_profit.0)),
                     gas_used: Some(bundle.scenario.estimated_gas),
                     error_message: None,
                 });
@@ -172,7 +172,7 @@ impl LiquidationExecutionEngine {
         
         Ok(SubmissionResult {
             bundle_hash,
-            status: BundleStatus::Rejected,
+            status: BundleStatus::Rejected("Timeout - bundle not included".to_string()),
             submission_time,
             inclusion_time: None,
             profit_realized: None,
@@ -200,8 +200,11 @@ impl LiquidationExecutionEngine {
             BundleStatus::Rejected(_) => {
                 stats.failed_submissions += 1;
             },
-            BundleStatus::Submitted => {
+            BundleStatus::Pending => {
                 // 아직 처리 중
+            },
+            BundleStatus::Timeout | BundleStatus::Replaced => {
+                stats.failed_submissions += 1;
             },
         }
         
@@ -253,11 +256,11 @@ impl LiquidationExecutionEngine {
             super::liquidation_bundle_builder::CompetitionLevel::Critical => 2.0,
         };
         
-        let adjusted_gas_price = bundle.scenario.max_gas_price * U256::from((competition_multiplier * 100.0) as u64) / U256::from(100);
+        let adjusted_gas_price = bundle.scenario.max_gas_price * ethers::types::U256::from((competition_multiplier * 100.0) as u64) / ethers::types::U256::from(100);
         bundle.scenario.max_gas_price = adjusted_gas_price;
         
         debug!("Adjusted gas price: {} gwei (multiplier: {:.1}x)", 
-               adjusted_gas_price.as_u128() / 1_000_000_000, competition_multiplier);
+               adjusted_gas_price.low_u128() / 1_000_000_000, competition_multiplier);
         
         Ok(())
     }
@@ -273,7 +276,7 @@ struct SimulationResult {
 
 /// ETH 금액 포맷팅 헬퍼
 fn format_eth_amount(amount: U256) -> String {
-    let eth_amount = amount.as_u128() as f64 / 1e18;
+    let eth_amount = amount.to::<u128>() as f64 / 1e18;
     format!("{:.6}", eth_amount)
 }
 

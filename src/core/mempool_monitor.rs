@@ -189,7 +189,7 @@ impl CoreMempoolMonitor {
         
         // 최소 가치 필터
         let min_value = self.config.performance.mempool_filter_min_value.parse::<u64>().unwrap_or(0);
-        if tx.value.to::<u128>() < min_value as u128 * 1_000_000_000_000_000_000 {
+        if tx.value.as_limbs()[0] < min_value as u64 * 1_000_000_000_000_000_000 {
             return Ok(false);
         }
         

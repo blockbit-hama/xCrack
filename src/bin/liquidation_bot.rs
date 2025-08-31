@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use tracing::{info, error, warn};
 use tracing_subscriber;
 use tokio::signal;
-use ethers::providers::{Provider, Ws};
+use ethers::providers::{Provider, Ws, Middleware};
 
 use xcrack_rust_mev_searcher::{Config, IntegratedLiquidationManager};
 

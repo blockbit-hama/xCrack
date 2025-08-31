@@ -271,7 +271,7 @@ impl BundleSimulator {
         let cache_key = self.generate_cache_key(transactions, &options);
         if let Some(cached_result) = self.simulation_cache.get(&cache_key) {
             info!("📋 캐시된 시뮬레이션 결과 사용");
-            return Ok(cached_result.result);
+            return Ok(cached_result.result.clone());
         }
 
         // 시뮬레이션 블록 결정
@@ -425,7 +425,7 @@ impl BundleSimulator {
 
         let total_gas_cost = execution_trace.iter()
             .map(|t| t.gas_price * U256::from(t.gas_used))
-            .sum();
+            .fold(U256::zero(), |acc, x| acc + x);
 
         Ok(DetailedSimulationResult {
             success: true,
@@ -466,7 +466,7 @@ impl BundleSimulator {
             U256::from(200_000_000_000u64), // 200 gwei
         ];
 
-        let mut best_result = None;
+        let mut best_result: Option<DetailedSimulationResult> = None;
         let mut worst_case_gas = 0u64;
 
         for gas_price in gas_scenarios {
@@ -476,7 +476,7 @@ impl BundleSimulator {
             match self.accurate_simulation(transactions, &modified_options, block_number).await {
                 Ok(result) => {
                     worst_case_gas = worst_case_gas.max(result.total_gas_used);
-                    if best_result.is_none() || result.profit_after_gas > best_result.as_ref().unwrap().profit_after_gas {
+                    if best_result.is_none() || result.net_profit > best_result.as_ref().unwrap().net_profit {
                         best_result = Some(result);
                     }
                 }
@@ -499,7 +499,7 @@ impl BundleSimulator {
         debug!("🔗 다중 블록 시뮬레이션 실행");
 
         let blocks_to_test = 3; // 3개 블록에서 테스트
-        let mut best_result = None;
+        let mut best_result: Option<DetailedSimulationResult> = None;
 
         for i in 0..blocks_to_test {
             let test_block = start_block + i;
@@ -508,7 +508,7 @@ impl BundleSimulator {
 
             match self.accurate_simulation(transactions, &modified_options, test_block).await {
                 Ok(result) => {
-                    if best_result.is_none() || result.profit_after_gas > best_result.as_ref().unwrap().profit_after_gas {
+                    if best_result.is_none() || result.net_profit > best_result.as_ref().unwrap().net_profit {
                         best_result = Some(result);
                     }
                 }
@@ -631,7 +631,7 @@ impl BundleSimulator {
             .collect::<Vec<_>>()
             .join("");
         
-        format!("{:x}", ethers::utils::keccak256(concatenated.as_bytes()))
+        format!("{}", hex::encode(ethers::utils::keccak256(concatenated.as_bytes())))
     }
 
     /// 캐시 키 생성

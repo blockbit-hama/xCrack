@@ -3,8 +3,9 @@ use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn, error};
 use alloy::primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
+use async_trait::async_trait;
 
-use super::{DexAggregator, SwapQuote, SwapParams, DexType};
+use super::{DexAggregator, SwapQuote, SwapParams, DexType, SwapSource};
 
 /// Uniswap V2 어그리게이터
 pub struct UniswapV2Aggregator {
@@ -72,10 +73,10 @@ impl UniswapV2Aggregator {
         
         let dummy_calldata = format!(
             "0x38ed1739{:064x}{:064x}{:064x}{:064x}{:064x}",
-            params.sell_amount.as_u128(),
-            params.sell_amount.as_u128() * 95 / 100, // minAmountOut
-            params.sell_token.as_u128(),
-            params.buy_token.as_u128(),
+            params.sell_amount.to::<u128>(),
+            params.sell_amount.to::<u128>() * 95 / 100, // minAmountOut
+            0u128, // sell_token address placeholder
+            0u128, // buy_token address placeholder
             chrono::Utc::now().timestamp() + 300 // deadline (5분 후)
         );
         
@@ -83,17 +84,18 @@ impl UniswapV2Aggregator {
     }
 }
 
+#[async_trait]
 impl DexAggregator for UniswapV2Aggregator {
-    fn get_quote(&self, params: SwapParams) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<SwapQuote>> + Send + '_>> {
-        Box::pin(async move { self.get_quote_async(params).await })
+    async fn get_quote(&self, params: SwapParams) -> anyhow::Result<SwapQuote> {
+        self.get_quote_async(params).await
     }
     
-    fn get_price(&self, sell_token: Address, buy_token: Address) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<f64>> + Send + '_>> {
-        Box::pin(async move { self.get_price_async(sell_token, buy_token).await })
+    async fn get_price(&self, sell_token: Address, buy_token: Address) -> anyhow::Result<f64> {
+        self.get_price_async(sell_token, buy_token).await
     }
     
-    fn get_liquidity(&self, token: Address) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<U256>> + Send + '_>> {
-        Box::pin(async move { self.get_liquidity_async(token).await })
+    async fn get_liquidity(&self, token: Address) -> anyhow::Result<U256> {
+        self.get_liquidity_async(token).await
     }
     
     fn aggregator_type(&self) -> DexType {
@@ -175,13 +177,13 @@ impl UniswapV3Aggregator {
         
         let dummy_calldata = format!(
             "0x414bf389{:064x}{:064x}{:064x}{:064x}{:064x}{:064x}{:064x}{:064x}",
-            params.sell_token.as_u128(),
-            params.buy_token.as_u128(),
+            0u128, // sell_token address placeholder
+            0u128, // buy_token address placeholder
             500, // fee tier (0.05%)
-            Address::ZERO.as_u128(), // recipient
+            0u128, // recipient placeholder
             chrono::Utc::now().timestamp() + 300, // deadline
-            params.sell_amount.as_u128(),
-            params.sell_amount.as_u128() * 95 / 100, // amountOutMinimum
+            params.sell_amount.to::<u128>(),
+            params.sell_amount.to::<u128>() * 95 / 100, // amountOutMinimum
             0 // sqrtPriceLimitX96
         );
         
@@ -189,17 +191,18 @@ impl UniswapV3Aggregator {
     }
 }
 
+#[async_trait]
 impl DexAggregator for UniswapV3Aggregator {
-    fn get_quote(&self, params: SwapParams) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<SwapQuote>> + Send + '_>> {
-        Box::pin(async move { self.get_quote_async(params).await })
+    async fn get_quote(&self, params: SwapParams) -> anyhow::Result<SwapQuote> {
+        self.get_quote_async(params).await
     }
     
-    fn get_price(&self, sell_token: Address, buy_token: Address) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<f64>> + Send + '_>> {
-        Box::pin(async move { self.get_price_async(sell_token, buy_token).await })
+    async fn get_price(&self, sell_token: Address, buy_token: Address) -> anyhow::Result<f64> {
+        self.get_price_async(sell_token, buy_token).await
     }
     
-    fn get_liquidity(&self, token: Address) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<U256>> + Send + '_>> {
-        Box::pin(async move { self.get_liquidity_async(token).await })
+    async fn get_liquidity(&self, token: Address) -> anyhow::Result<U256> {
+        self.get_liquidity_async(token).await
     }
     
     fn aggregator_type(&self) -> DexType {
@@ -215,12 +218,6 @@ impl DexAggregator for UniswapV3Aggregator {
     }
 }
 
-/// 스왑 소스
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SwapSource {
-    pub name: String,
-    pub proportion: f64,
-}
 
 #[cfg(test)]
 mod tests {

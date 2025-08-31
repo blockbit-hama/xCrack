@@ -165,8 +165,8 @@ impl FlashbotsClient {
         for tx in &transactions {
             // 트랜잭션 서명 (실제 구현에서는 이미 서명된 트랜잭션이어야 함)
             let signed_tx = self.sign_transaction(tx).await?;
-            let encoded = rlp::encode(&signed_tx);
-            let hex_string = format!("0x{}", hex::encode(encoded));
+            let encoded = signed_tx.rlp();
+            let hex_string = format!("0x{}", hex::encode(&encoded));
             
             encoded_txs.push(hex_string);
             tx_hashes.push(tx.hash);

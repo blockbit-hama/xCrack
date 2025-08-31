@@ -11,6 +11,7 @@ pub use uniswap::*;
 use alloy::primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use async_trait::async_trait;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub enum DexType {
@@ -22,7 +23,7 @@ pub enum DexType {
     Curve,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SwapQuote {
     pub aggregator: DexType,
     pub sell_token: Address,
@@ -41,13 +42,13 @@ pub struct SwapQuote {
     pub quote_timestamp: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SwapSource {
     pub name: String,
     pub proportion: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SwapParams {
     pub sell_token: Address,
     pub buy_token: Address,
@@ -71,7 +72,7 @@ pub struct SwapResult {
     pub execution_time_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QuoteComparison {
     pub best_quote: SwapQuote,
     pub all_quotes: Vec<SwapQuote>,
@@ -81,31 +82,13 @@ pub struct QuoteComparison {
 }
 
 // Object-safe trait for dynamic dispatch
+#[async_trait]
 pub trait DexAggregator: Send + Sync {
-    fn get_quote(&self, params: SwapParams) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<SwapQuote>> + Send + '_>>;
-    fn get_price(&self, sell_token: Address, buy_token: Address) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<f64>> + Send + '_>>;
-    fn get_liquidity(&self, token: Address) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<U256>> + Send + '_>>;
+    async fn get_quote(&self, params: SwapParams) -> anyhow::Result<SwapQuote>;
+    async fn get_price(&self, sell_token: Address, buy_token: Address) -> anyhow::Result<f64>;
+    async fn get_liquidity(&self, token: Address) -> anyhow::Result<U256>;
     fn aggregator_type(&self) -> DexType;
     fn is_available(&self) -> bool;
     fn supported_networks(&self) -> Vec<u64>; // Chain IDs
 }
 
-// Helper macro to implement the trait more easily
-#[macro_export]
-macro_rules! impl_dex_aggregator {
-    ($struct:ty) => {
-        impl DexAggregator for $struct {
-            fn get_quote(&self, params: SwapParams) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<SwapQuote>> + Send + '_>> {
-                Box::pin(async move { self.get_quote_async(params).await })
-            }
-            
-            fn get_price(&self, sell_token: Address, buy_token: Address) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<f64>> + Send + '_>> {
-                Box::pin(async move { self.get_price_async(sell_token, buy_token).await })
-            }
-            
-            fn get_liquidity(&self, token: Address) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<U256>> + Send + '_>> {
-                Box::pin(async move { self.get_liquidity_async(token).await })
-            }
-        }
-    };
-}

@@ -330,8 +330,8 @@ impl OnChainLiquidationStrategy {
             gas: ethers::types::U256::from_little_endian(&tx.gas_limit.to_le_bytes::<32>()),
             input: ethers::types::Bytes::from(tx.data.clone()),
             v: ethers::types::U64::zero(),
-            r: ethers::types::U256::zero(),
-            s: ethers::types::U256::zero(),
+            r: EthersU256::zero(),
+            s: EthersU256::zero(),
             chain_id: Some(ethers::types::U256::from(1)),
             transaction_type: None,
             access_list: None,
@@ -489,7 +489,7 @@ impl OnChainLiquidationStrategy {
         let borrow_base_ethers = comet
             .borrow_balance_of(H160::from_slice(user.as_slice()))
             .await
-            .unwrap_or_else(|_| ethers::types::U256::zero());
+            .unwrap_or_else(|_| EthersU256::zero());
         if borrow_base_ethers.is_zero() { return Ok(None); }
         let borrow_base = U256::from_str_radix(&borrow_base_ethers.to_string(), 10)
             .unwrap_or(U256::ZERO);
@@ -610,14 +610,14 @@ impl OnChainLiquidationStrategy {
             ilk_bytes[..tag.len()].copy_from_slice(tag);
 
             // urns(ilk, urn): (ink collateral, art normalized debt)
-            let (ink_e, art_e) = vat.urns(ilk_bytes, H160::from_slice(user.as_slice())).await.unwrap_or((ethers::types::U256::zero(), ethers::types::U256::zero()));
+            let (ink_e, art_e) = vat.urns(ilk_bytes, H160::from_slice(user.as_slice())).await.unwrap_or((EthersU256::zero(), EthersU256::zero()));
             if art_e.is_zero() { continue; }
             let ink = U256::from_str_radix(&ink_e.to_string(), 10).unwrap_or(U256::ZERO);
             let art = U256::from_str_radix(&art_e.to_string(), 10).unwrap_or(U256::ZERO);
             if art.is_zero() { continue; }
 
             // ilks(ilk): (..., rate, spot, ...)
-            let (_Art_e, rate_e, spot_e, _line_e, _dust_e) = vat.ilks(ilk_bytes).await.unwrap_or((ethers::types::U256::zero(), ethers::types::U256::from(1u64), ethers::types::U256::zero(), ethers::types::U256::zero(), ethers::types::U256::zero()));
+            let (_Art_e, rate_e, spot_e, _line_e, _dust_e) = vat.ilks(ilk_bytes).await.unwrap_or((EthersU256::zero(), ethers::types::U256::from(1u64), EthersU256::zero(), EthersU256::zero(), EthersU256::zero()));
             let rate = U256::from_str_radix(&rate_e.to_string(), 10).unwrap_or(U256::from(1u64));
             let spot = U256::from_str_radix(&spot_e.to_string(), 10).unwrap_or(U256::ZERO);
 

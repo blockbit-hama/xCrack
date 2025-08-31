@@ -2,7 +2,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
     providers::{Provider, Http},
-    types::{Transaction, H256, U256, Address, Bytes, TransactionRequest},
+    types::{Transaction, H256, U256, Address, Bytes, TransactionRequest, NameOrAddress},
     signers::{LocalWallet, Signer},
 };
 use serde::{Deserialize, Serialize};
@@ -238,7 +238,7 @@ impl Bundle {
             .join("");
         
         let combined = format!("{}{}", tx_hashes, target_block);
-        format!("bundle_{:x}", ethers::utils::keccak256(combined.as_bytes()))
+        format!("bundle_{}", hex::encode(ethers::utils::keccak256(combined.as_bytes())))
     }
 
     /// 번들 해시 계산
@@ -251,7 +251,7 @@ impl Bundle {
     pub fn total_gas_limit(&self) -> U256 {
         self.transactions.iter()
             .map(|tx| tx.gas)
-            .sum()
+            .fold(U256::zero(), |acc, x| acc + x)
     }
 
     /// 번들 크기 (바이트)
@@ -505,10 +505,42 @@ impl BundleBuilder {
             .gas_price(gas_price)
             .nonce(self.get_next_nonce().await?);
 
-        // 트랜잭션 서명
-        let signed_tx = self.wallet.sign_transaction(&tx_request.into()).await?;
+        // 트랜잭션 서명 및 Transaction 타입으로 변환
+        let signed_tx = self.wallet.sign_transaction(&tx_request.clone().into()).await?;
         
-        Ok(signed_tx)
+        // Transaction 구조체 생성 (hash는 나중에 계산)
+        let mut transaction = Transaction {
+            hash: H256::zero(), // 임시값
+            nonce: tx_request.nonce.unwrap_or_default(),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            from: self.wallet.address(),
+            to: tx_request.to.and_then(|addr| {
+                match addr {
+                    NameOrAddress::Name(_) => None, // ENS names는 현재 지원하지 않음
+                    NameOrAddress::Address(addr) => Some(addr),
+                }
+            }),
+            value: tx_request.value.unwrap_or_default(),
+            gas_price: Some(gas_price),
+            gas: tx_request.gas.unwrap_or_default(),
+            input: tx_request.data.unwrap_or_default(),
+            r: signed_tx.r,
+            s: signed_tx.s,
+            v: signed_tx.v.into(),
+            transaction_type: None,
+            access_list: None,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            chain_id: tx_request.chain_id.map(|id| U256::from(id.as_u64())),
+            other: Default::default(),
+        };
+        
+        // 트랜잭션 해시 계산
+        transaction.hash = transaction.hash();
+        
+        Ok(transaction)
     }
 
     /// 백런 트랜잭션 생성
@@ -528,9 +560,41 @@ impl BundleBuilder {
             .gas_price(params.gas_price)
             .nonce(self.get_next_nonce().await?);
 
-        let signed_tx = self.wallet.sign_transaction(&tx_request.into()).await?;
+        let signed_tx = self.wallet.sign_transaction(&tx_request.clone().into()).await?;
         
-        Ok(signed_tx)
+        // Transaction 구조체 생성 (hash는 나중에 계산)
+        let mut transaction = Transaction {
+            hash: H256::zero(), // 임시값
+            nonce: tx_request.nonce.unwrap_or_default(),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            from: self.wallet.address(),
+            to: tx_request.to.and_then(|addr| {
+                match addr {
+                    NameOrAddress::Name(_) => None, // ENS names는 현재 지원하지 않음
+                    NameOrAddress::Address(addr) => Some(addr),
+                }
+            }),
+            value: tx_request.value.unwrap_or_default(),
+            gas_price: Some(params.gas_price),
+            gas: tx_request.gas.unwrap_or_default(),
+            input: tx_request.data.unwrap_or_default(),
+            r: signed_tx.r,
+            s: signed_tx.s,
+            v: signed_tx.v.into(),
+            transaction_type: None,
+            access_list: None,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            chain_id: tx_request.chain_id.map(|id| U256::from(id.as_u64())),
+            other: Default::default(),
+        };
+        
+        // 트랜잭션 해시 계산
+        transaction.hash = transaction.hash();
+        
+        Ok(transaction)
     }
 
     /// 차익거래 트랜잭션 생성
@@ -548,9 +612,41 @@ impl BundleBuilder {
             .gas_price(trade.gas_price)
             .nonce(self.get_next_nonce().await?);
 
-        let signed_tx = self.wallet.sign_transaction(&tx_request.into()).await?;
+        let signed_tx = self.wallet.sign_transaction(&tx_request.clone().into()).await?;
         
-        Ok(signed_tx)
+        // Transaction 구조체 생성 (hash는 나중에 계산)
+        let mut transaction = Transaction {
+            hash: H256::zero(), // 임시값
+            nonce: tx_request.nonce.unwrap_or_default(),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            from: self.wallet.address(),
+            to: tx_request.to.and_then(|addr| {
+                match addr {
+                    NameOrAddress::Name(_) => None, // ENS names는 현재 지원하지 않음
+                    NameOrAddress::Address(addr) => Some(addr),
+                }
+            }),
+            value: tx_request.value.unwrap_or_default(),
+            gas_price: tx_request.gas_price,
+            gas: tx_request.gas.unwrap_or_default(),
+            input: tx_request.data.unwrap_or_default(),
+            r: signed_tx.r,
+            s: signed_tx.s,
+            v: signed_tx.v.into(),
+            transaction_type: None,
+            access_list: None,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            chain_id: tx_request.chain_id.map(|id| U256::from(id.as_u64())),
+            other: Default::default(),
+        };
+        
+        // 해시 계산
+        transaction.hash = transaction.hash();
+        
+        Ok(transaction)
     }
 
     /// 청산 트랜잭션 생성
@@ -567,9 +663,41 @@ impl BundleBuilder {
             .gas_price(params.gas_price)
             .nonce(self.get_next_nonce().await?);
 
-        let signed_tx = self.wallet.sign_transaction(&tx_request.into()).await?;
+        let signed_tx = self.wallet.sign_transaction(&tx_request.clone().into()).await?;
         
-        Ok(signed_tx)
+        // Transaction 구조체 생성 (hash는 나중에 계산)
+        let mut transaction = Transaction {
+            hash: H256::zero(), // 임시값
+            nonce: tx_request.nonce.unwrap_or_default(),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            from: self.wallet.address(),
+            to: tx_request.to.and_then(|addr| {
+                match addr {
+                    NameOrAddress::Name(_) => None, // ENS names는 현재 지원하지 않음
+                    NameOrAddress::Address(addr) => Some(addr),
+                }
+            }),
+            value: tx_request.value.unwrap_or_default(),
+            gas_price: tx_request.gas_price,
+            gas: tx_request.gas.unwrap_or_default(),
+            input: tx_request.data.unwrap_or_default(),
+            r: signed_tx.r,
+            s: signed_tx.s,
+            v: signed_tx.v.into(),
+            transaction_type: None,
+            access_list: None,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            chain_id: tx_request.chain_id.map(|id| U256::from(id.as_u64())),
+            other: Default::default(),
+        };
+        
+        // 해시 계산
+        transaction.hash = transaction.hash();
+        
+        Ok(transaction)
     }
 
     /// 플래시론 + 청산 + 상환을 하나의 번들로 구성 (간단 구성)
@@ -609,9 +737,41 @@ impl BundleBuilder {
             .gas_price(params.gas_price)
             .nonce(self.get_next_nonce().await?);
 
-        let signed_tx = self.wallet.sign_transaction(&tx_request.into()).await?;
+        let signed_tx = self.wallet.sign_transaction(&tx_request.clone().into()).await?;
         
-        Ok(signed_tx)
+        // Transaction 구조체 생성 (hash는 나중에 계산)
+        let mut transaction = Transaction {
+            hash: H256::zero(), // 임시값
+            nonce: tx_request.nonce.unwrap_or_default(),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            from: self.wallet.address(),
+            to: tx_request.to.and_then(|addr| {
+                match addr {
+                    NameOrAddress::Name(_) => None, // ENS names는 현재 지원하지 않음
+                    NameOrAddress::Address(addr) => Some(addr),
+                }
+            }),
+            value: tx_request.value.unwrap_or_default(),
+            gas_price: tx_request.gas_price,
+            gas: tx_request.gas.unwrap_or_default(),
+            input: tx_request.data.unwrap_or_default(),
+            r: signed_tx.r,
+            s: signed_tx.s,
+            v: signed_tx.v.into(),
+            transaction_type: None,
+            access_list: None,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+            chain_id: tx_request.chain_id.map(|id| U256::from(id.as_u64())),
+            other: Default::default(),
+        };
+        
+        // 해시 계산
+        transaction.hash = transaction.hash();
+        
+        Ok(transaction)
     }
 
     /// 다음 논스 가져오기
@@ -622,9 +782,10 @@ impl BundleBuilder {
             Ok(nonce)
         } else {
             // 블록체인에서 현재 논스 조회
-            let current_nonce = self.blockchain_client.get_transaction_count(address).await?;
-            self.nonce_manager.set_base_nonce(address, current_nonce);
-            Ok(current_nonce)
+            let current_nonce = self.blockchain_client.get_nonce(address).await?;
+            let current_nonce_u64 = current_nonce.as_u64();
+            self.nonce_manager.set_base_nonce(address, current_nonce_u64);
+            Ok(current_nonce_u64)
         }
     }
 }

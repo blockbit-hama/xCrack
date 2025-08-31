@@ -80,7 +80,7 @@ pub enum LiquidationUrgency {
 }
 
 /// 상환 임팩트
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RepayImpact {
     Neutral,     // 청산 기회에 영향 없음
     Reduces,     // 청산 기회 감소
@@ -89,7 +89,7 @@ pub enum RepayImpact {
 }
 
 /// 네트워크 혼잡 수준
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum CongestionLevel {
     Low,      // 낮은 혼잡
     Medium,   // 중간 혼잡
@@ -232,22 +232,22 @@ impl LiquidationMempoolWatcher {
         
         match signal_type {
             0 => LiquidationSignal::OracleUpdate {
-                asset: Address::random(),
+                asset: Address::from_slice(&rand::random::<[u8; 20]>()),
                 old_price: U256::from(1000),
                 new_price: U256::from(950), // 5% 하락
-                affected_positions: vec![Address::random()],
+                affected_positions: vec![Address::from_slice(&rand::random::<[u8; 20]>())],
                 urgency: LiquidationUrgency::High,
                 timestamp: chrono::Utc::now(),
             },
             1 => LiquidationSignal::UserRepay {
-                user: Address::random(),
+                user: Address::from_slice(&rand::random::<[u8; 20]>()),
                 protocol: ProtocolType::Aave,
                 repay_amount: U256::from(1000),
                 impact: RepayImpact::Reduces,
                 timestamp: chrono::Utc::now(),
             },
             2 => LiquidationSignal::CompetitorLiquidation {
-                user: Address::random(),
+                user: Address::from_slice(&rand::random::<[u8; 20]>()),
                 protocol: ProtocolType::CompoundV2,
                 competitor_gas_price: U256::from(50_000_000_000u64), // 50 gwei
                 our_advantage: false,

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn, error};
-use alloy::primitives::{Address, U256, Bytes};
+use alloy::primitives::{Address as AlloyAddress, U256 as AlloyU256, Bytes as AlloyBytes};
+use ethers::types::{Address, U256, Bytes, H160};
 use ethers::providers::{Provider, Ws};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::dex::{DexAggregator, SwapQuote, SwapParams, DexType};
 use crate::protocols::{LiquidatableUser, ProtocolType};
-use crate::mev::{Bundle, BundleBuilder, BundleType, PriorityLevel};
+use crate::mev::{Bundle, BundleBuilder, BundleType, PriorityLevel, LiquidationParams};
+use crate::blockchain::BlockchainClient;
+use ethers::signers::{LocalWallet, Signer};
 use crate::utils::profitability::LiquidationProfitabilityAnalysis;
 
 /// 청산 번들 빌더 - MEV 번들 생성 및 최적화
@@ -21,7 +24,7 @@ pub struct LiquidationBundleBuilder {
 }
 
 /// 청산 시나리오
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct LiquidationScenario {
     pub user: LiquidatableUser,
     pub liquidation_amount: U256,
@@ -33,7 +36,7 @@ pub struct LiquidationScenario {
 }
 
 /// 청산 번들
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct LiquidationBundle {
     pub scenario: LiquidationScenario,
     pub bundle: Bundle,
@@ -59,7 +62,10 @@ impl LiquidationBundleBuilder {
     ) -> Result<Self> {
         info!("🔧 Initializing Liquidation Bundle Builder...");
         
-        let bundle_builder = BundleBuilder::new(config.clone()).await?;
+        // Create dummy blockchain client and wallet for mock mode
+        let blockchain_client = Arc::new(BlockchainClient::new("http://localhost:8545", None).await?);
+        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let bundle_builder = BundleBuilder::new(blockchain_client, wallet);
         
         Ok(Self {
             config,
@@ -71,7 +77,7 @@ impl LiquidationBundleBuilder {
     
     /// 청산 번들 생성
     pub async fn build_liquidation_bundle(
-        &self,
+        &mut self,
         scenario: LiquidationScenario,
     ) -> Result<LiquidationBundle> {
         info!("🏗️ Building liquidation bundle for user: {:?}", scenario.user.address);
@@ -108,7 +114,7 @@ impl LiquidationBundleBuilder {
         // 현재는 간단한 휴리스틱 사용
         
         let health_factor = scenario.user.account_data.health_factor;
-        let profit_margin = scenario.profitability_analysis.profit_margin;
+        let profit_margin = scenario.profitability_analysis.profit_margin_percent / 100.0;
         
         let competition_level = if health_factor < 0.95 && profit_margin > 0.1 {
             CompetitionLevel::Critical
@@ -163,17 +169,30 @@ impl LiquidationBundleBuilder {
     }
     
     /// MEV 번들 생성
-    async fn create_mev_bundle(&self, scenario: &LiquidationScenario) -> Result<Bundle> {
+    async fn create_mev_bundle(&mut self, scenario: &LiquidationScenario) -> Result<Bundle> {
         // 청산 트랜잭션 생성
         let liquidation_tx = self.create_liquidation_transaction(scenario).await?;
         
+        // 청산 파라미터 생성 (mock implementation)
+        let liquidation_params = LiquidationParams {
+            protocol_contract: Address::zero(), // dummy address
+            liquidation_calldata: Bytes::from(vec![0x30, 0x78]), // "0x" in bytes
+            gas_limit: U256::from(200000),
+            gas_price: U256::from(20_000_000_000u64), // 20 gwei
+            expected_profit: U256::from(scenario.profitability_analysis.estimated_net_profit_usd as u64 * 1e18 as u64),
+            auto_sell: true,
+            sell_contract: None,
+            sell_calldata: None,
+            use_flash_loan: true,
+            flash_loan_amount: Some({
+                let limbs = scenario.profitability_analysis.recommended_liquidation_amount.into_limbs();
+                ethers::types::U256::from_little_endian(&limbs[0].to_le_bytes())
+            }),
+        };
+        
         // 번들 빌드
         let bundle = self.bundle_builder
-            .create_bundle(
-                vec![liquidation_tx],
-                BundleType::Liquidation,
-                scenario.execution_priority.clone(),
-            )
+            .create_liquidation_bundle(liquidation_params, 0) // target_block = 0 for mock
             .await?;
         
         Ok(bundle)
@@ -182,13 +201,20 @@ impl LiquidationBundleBuilder {
     /// 청산 트랜잭션 생성
     async fn create_liquidation_transaction(&self, scenario: &LiquidationScenario) -> Result<Bytes> {
         // TODO: 실제 청산 컨트랙트 호출 트랜잭션 생성
-        // 현재는 플레이스홀더
+        // 현재는 더미 데이터 반환
         
+        // 더미 청산 파라미터 생성 (mock implementation)
         let liquidation_params = LiquidationParams {
-            protocol: scenario.user.protocol.clone(),
-            user: scenario.user.address,
-            liquidation_amount: scenario.liquidation_amount,
-            swap_quote: scenario.swap_quote.clone(),
+            protocol_contract: Address::zero(), // dummy address
+            liquidation_calldata: Bytes::from(vec![0x30, 0x78]), // "0x" in bytes
+            gas_limit: U256::from(200000),
+            gas_price: U256::from(20_000_000_000u64), // 20 gwei
+            expected_profit: U256::from(100000),
+            auto_sell: true,
+            sell_contract: None,
+            sell_calldata: None,
+            use_flash_loan: true,
+            flash_loan_amount: Some(U256::from(10000)),
         };
         
         // 트랜잭션 데이터 인코딩
@@ -204,22 +230,22 @@ impl LiquidationBundleBuilder {
         
         let dummy_data = format!(
             "0xexecuteLiquidation({},{},{})",
-            params.user,
-            params.liquidation_amount,
-            params.swap_quote.buy_amount
+            params.protocol_contract,
+            params.expected_profit,
+            params.gas_limit
         );
         
-        Ok(Bytes::from(dummy_data.as_bytes()))
+        Ok(Bytes::from(dummy_data.into_bytes()))
     }
     
     /// 예상 수익 계산
     async fn calculate_estimated_profit(&self, scenario: &LiquidationScenario) -> Result<U256> {
-        let net_profit = scenario.profitability_analysis.net_profit;
+        let net_profit_wei = U256::from((scenario.profitability_analysis.estimated_net_profit_usd * 1e18) as u64);
         
         // 가스 비용 차감
         let gas_cost = scenario.max_gas_price * U256::from(scenario.estimated_gas);
-        let final_profit = if net_profit > gas_cost {
-            net_profit - gas_cost
+        let final_profit = if net_profit_wei > gas_cost {
+            net_profit_wei - gas_cost
         } else {
             U256::from(0)
         };
@@ -229,17 +255,11 @@ impl LiquidationBundleBuilder {
 }
 
 /// 청산 파라미터
-#[derive(Debug, Clone)]
-struct LiquidationParams {
-    protocol: ProtocolType,
-    user: Address,
-    liquidation_amount: U256,
-    swap_quote: SwapQuote,
-}
+// LiquidationParams is now imported from crate::mev module
 
 /// ETH 금액 포맷팅 헬퍼
 fn format_eth_amount(amount: U256) -> String {
-    let eth_amount = amount.as_u128() as f64 / 1e18;
+    let eth_amount = amount.low_u128() as f64 / 1e18;
     format!("{:.6}", eth_amount)
 }
 

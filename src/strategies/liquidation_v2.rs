@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn};
@@ -21,7 +22,7 @@ use crate::mev::opportunity::{Opportunity, MEVStrategy};
 pub struct LiquidationStrategyV2 {
     config: Arc<Config>,
     provider: Arc<Provider<Ws>>,
-    protocol_scanner: Arc<MultiProtocolScanner>,
+    protocol_scanner: Arc<Mutex<MultiProtocolScanner>>,
     profitability_calculator: ProfitabilityCalculator,
     dex_aggregators: HashMap<DexType, Box<dyn DexAggregator>>,
     transaction_builder: TransactionBuilder,
@@ -29,7 +30,7 @@ pub struct LiquidationStrategyV2 {
     eth_price_cache: Arc<tokio::sync::RwLock<(f64, chrono::DateTime<chrono::Utc>)>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LiquidationOpportunity {
     pub user: LiquidatableUser,
     pub strategy: ProfitabilityStrategy,
@@ -43,7 +44,7 @@ impl LiquidationStrategyV2 {
     pub async fn new(
         config: Arc<Config>,
         provider: Arc<Provider<Ws>>,
-        protocol_scanner: Arc<MultiProtocolScanner>,
+        protocol_scanner: Arc<Mutex<MultiProtocolScanner>>,
     ) -> Result<Self> {
         info!("💰 Initializing Liquidation Strategy v2...");
         
@@ -94,7 +95,7 @@ impl LiquidationStrategyV2 {
         let start_time = std::time::Instant::now();
         
         // 1. 모든 프로토콜에서 청산 대상자 스캔
-        let liquidatable_users = self.protocol_scanner.scan_all_protocols().await?;
+        let liquidatable_users = self.protocol_scanner.lock().await.scan_all_protocols().await?;
         let total_users: usize = liquidatable_users.values().map(|users| users.len()).sum();
         
         if total_users == 0 {
@@ -339,7 +340,7 @@ impl LiquidationStrategyV2 {
             confidence *= 0.95; // 큰 금액은 위험
         }
         
-        confidence.min(1.0).max(0.0)
+        f64::min(confidence, 1.0).max(0.0)
     }
     
     /// ETH 가격 업데이트
@@ -378,7 +379,7 @@ impl LiquidationStrategyV2 {
     pub async fn analyze_specific_user(&self, user_address: Address) -> Result<Option<LiquidationOpportunity>> {
         debug!("🎯 Analyzing specific user: {}", user_address);
         
-        if let Some(user) = self.protocol_scanner.get_user_data(user_address).await? {
+        if let Some(user) = self.protocol_scanner.lock().await.get_user_data(user_address).await? {
             let eth_price = self.eth_price_cache.read().await.0;
             self.analyze_user_profitability(&user, eth_price).await
         } else {
@@ -438,7 +439,7 @@ impl LiquidationStrategyV2 {
         let mut breakdown = HashMap::new();
         
         for opportunity in opportunities {
-            *breakdown.entry(opportunity.user.protocol).or_insert(0) += 1;
+            *breakdown.entry(opportunity.user.protocol.clone()).or_insert(0) += 1;
         }
         
         breakdown
@@ -457,14 +458,22 @@ pub struct LiquidationStrategyStats {
 /// MEV 통합을 위한 Opportunity 변환
 impl From<LiquidationOpportunity> for Opportunity {
     fn from(liquidation_opp: LiquidationOpportunity) -> Self {
+        let profit_usd = liquidation_opp.strategy.net_profit_usd;
+        let gas_cost_usd = liquidation_opp.strategy.cost_breakdown.total_cost_usd;
+        
+        // Convert USD values to Wei (assuming $1 = 1e18 for simplicity, should use actual price)
+        let estimated_profit = U256::from((profit_usd * 1e18) as u128);
+        let gas_cost = U256::from((gas_cost_usd * 1e18) as u128);
+        
         Opportunity {
-            strategy: MEVStrategy::Liquidation,
-            profit_estimate: liquidation_opp.strategy.net_profit_usd,
-            gas_estimate: liquidation_opp.strategy.cost_breakdown.total_cost_usd,
-            execution_data: liquidation_opp.execution_transaction.unwrap_or_default(),
-            priority_score: liquidation_opp.profitability_analysis.estimated_net_profit_usd,
-            target_transaction: None, // 청산은 멤풀 기반이 아님
-            detected_at: chrono::Utc::now(),
+            id: uuid::Uuid::new_v4().to_string(),
+            strategy_type: MEVStrategy::Liquidation,
+            estimated_profit,
+            gas_cost,
+            net_profit: estimated_profit.saturating_sub(gas_cost),
+            success_probability: liquidation_opp.confidence_score,
+            execution_time_ms: liquidation_opp.estimated_execution_time.as_millis() as u64,
+            created_at: chrono::Utc::now(),
             expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
         }
     }

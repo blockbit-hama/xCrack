@@ -141,9 +141,10 @@ impl OneInchAggregator {
             .await
             .map_err(|e| anyhow!("1inch API request failed: {}", e))?;
         
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("1inch API error {}: {}", response.status(), error_text));
+            return Err(anyhow!("1inch API error {}: {}", status, error_text));
         }
         
         let quote: OneInchQuoteResponse = response
@@ -199,9 +200,10 @@ impl OneInchAggregator {
             .await
             .map_err(|e| anyhow!("1inch swap API request failed: {}", e))?;
         
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("1inch swap API error {}: {}", response.status(), error_text));
+            return Err(anyhow!("1inch swap API error {}: {}", status, error_text));
         }
         
         let swap: OneInchSwapResponse = response
@@ -236,7 +238,7 @@ impl DexAggregator for OneInchAggregator {
         let min_amount_f64 = buy_amount.to::<u128>() as f64 * slippage_multiplier;
         let buy_amount_min = U256::from(min_amount_f64 as u128);
         
-        let router_address = Address::from_hex(&swap_response.tx.to)
+        let router_address = swap_response.tx.to.parse::<Address>()
             .map_err(|e| anyhow!("Invalid router address: {}", e))?;
         
         // For 1inch, allowance target is usually the same as router

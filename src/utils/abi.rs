@@ -660,7 +660,7 @@ impl ABICodec {
             sqrtPriceLimitX96: Uint::<160, 3>::from({
                 let val = sqrt_price_limit_x96.to::<u128>();
                 if val <= u128::from(u64::MAX) {
-                    val as u128
+                    val
                 } else {
                     0u128
                 }

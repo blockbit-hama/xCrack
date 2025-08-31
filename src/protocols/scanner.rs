@@ -135,31 +135,23 @@ impl MultiProtocolScanner {
     }
     
     /// Perform single scan of all protocols
-    pub async fn scan_all_protocols(&self) -> Result<HashMap<ProtocolType, Vec<LiquidatableUser>>> {
+    pub async fn scan_all_protocols(&mut self) -> Result<HashMap<ProtocolType, Vec<LiquidatableUser>>> {
         info!("🔍 Scanning all protocols for liquidatable positions...");
         let start_time = std::time::Instant::now();
         
-        let mut scan_futures = Vec::new();
-        let mut protocol_types = Vec::new();
-        
-        for (protocol_type, scanner) in &self.scanners {
-            protocol_types.push(protocol_type.clone());
-            scan_futures.push(scanner.scan_all_users());
-        }
-        
-        let results = join_all(scan_futures).await;
         let mut all_users = HashMap::new();
         let mut total_liquidatable = 0;
         
-        for (protocol_type, result) in protocol_types.into_iter().zip(results.into_iter()) {
-            match result {
+        // Process scanners sequentially to avoid mutable borrow conflicts
+        for (protocol_type, scanner) in &mut self.scanners {
+            match scanner.scan_all_users().await {
                 Ok(users) => {
                     total_liquidatable += users.len();
-                    all_users.insert(protocol_type, users);
+                    all_users.insert(protocol_type.clone(), users);
                 }
                 Err(e) => {
                     error!("❌ Failed to scan {}: {}", protocol_type, e);
-                    all_users.insert(protocol_type, Vec::new());
+                    all_users.insert(protocol_type.clone(), Vec::new());
                 }
             }
         }
@@ -178,7 +170,7 @@ impl MultiProtocolScanner {
     }
     
     /// Get aggregated liquidatable users sorted by priority
-    pub async fn get_top_liquidatable_users(&self, limit: usize) -> Result<Vec<LiquidatableUser>> {
+    pub async fn get_top_liquidatable_users(&mut self, limit: usize) -> Result<Vec<LiquidatableUser>> {
         let all_users = self.scan_all_protocols().await?;
         
         let mut aggregated_users = Vec::new();

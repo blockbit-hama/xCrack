@@ -11,6 +11,7 @@ pub use scanner::*;
 use alloy::primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use async_trait::async_trait;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub enum ProtocolType {
@@ -75,10 +76,11 @@ pub struct ProtocolStats {
 }
 
 // Object-safe trait for dynamic dispatch
+#[async_trait]
 pub trait ProtocolScanner: Send + Sync {
-    fn scan_all_users(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Vec<LiquidatableUser>>> + Send + '_>>;
-    fn get_user_data(&self, user: Address) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Option<LiquidatableUser>>> + Send + '_>>;
-    fn get_protocol_stats(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<ProtocolStats>> + Send + '_>>;
+    async fn scan_all_users(&self) -> anyhow::Result<Vec<LiquidatableUser>>;
+    async fn get_user_data(&self, user: Address) -> anyhow::Result<Option<LiquidatableUser>>;
+    async fn get_protocol_stats(&self) -> anyhow::Result<ProtocolStats>;
     fn protocol_type(&self) -> ProtocolType;
     fn is_healthy(&self) -> bool;
 }

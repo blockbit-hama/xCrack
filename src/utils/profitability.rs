@@ -402,7 +402,7 @@ impl ProfitabilityCalculator {
             ProtocolType::MakerDAO => risk_score += 0.03,    // 중간 위험
         }
         
-        risk_score.min(1.0) // 최대 1.0
+        f64::min(risk_score, 1.0) // 최대 1.0
     }
     
     /// 수익성 필터링

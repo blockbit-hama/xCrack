@@ -230,11 +230,13 @@ impl TransactionBuilder {
             });
         }
         
+        let recommended_provider = self.select_best_provider(&providers);
+        
         Ok(FlashLoanAvailability {
             asset,
             amount,
             providers,
-            recommended_provider: self.select_best_provider(&providers),
+            recommended_provider,
         })
     }
     
@@ -254,7 +256,7 @@ impl TransactionBuilder {
     fn select_best_provider(&self, providers: &[FlashLoanProviderInfo]) -> Option<String> {
         providers.iter()
             .filter(|p| p.available)
-            .min_by_key(|p| p.fee_bps + p.estimated_gas / 10_000) // Fee + gas cost 최적화
+            .min_by_key(|p| p.fee_bps as u64 + p.estimated_gas / 10_000) // Fee + gas cost 최적화
             .map(|p| p.provider.clone())
     }
 }

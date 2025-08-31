@@ -63,7 +63,7 @@ impl Opportunity {
     }
     
     pub fn priority_score(&self) -> f64 {
-        let profit_score = self.net_profit.as_u128() as f64 / 1e18;
+        let profit_score = self.net_profit.to::<u128>() as f64 / 1e18;
         let time_score = 1.0 - (chrono::Utc::now() - self.created_at).num_seconds() as f64 / 300.0;
         let success_score = self.success_probability;
         

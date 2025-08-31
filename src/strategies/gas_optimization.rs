@@ -2,7 +2,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
     providers::{Provider, Http, Middleware},
-    types::{U256, Address, TransactionRequest, BlockId},
+    types::{U256, Address, TransactionRequest, BlockId, transaction::eip2718::TypedTransaction},
 };
 use tracing::{info, debug, warn};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,21 @@ use serde::{Deserialize, Serialize};
 // 임시 타입 정의 (MEV 모듈이 없으므로)
 #[derive(Debug, Clone)]
 pub struct BundleSimulator;
+
+impl BundleSimulator {
+    pub async fn simulate_bundle(&self, _transactions: &[TypedTransaction], _options: SimulationOptions) -> Result<DetailedSimulationResult> {
+        // Mock implementation
+        Ok(DetailedSimulationResult {
+            success: true,
+            total_gas_cost: U256::from(100000),
+            execution_trace: vec![
+                TransactionTrace { gas_used: 50000 },
+                TransactionTrace { gas_used: 50000 },
+            ],
+            revert_reason: None,
+        })
+    }
+}
 #[derive(Debug, Clone)]
 pub struct SimulationOptions {
     pub block_number: Option<u64>,
@@ -200,7 +215,7 @@ impl GasOptimizer {
             frontrun_gas_limit: simulation_result.frontrun_gas_used,
             backrun_gas_limit: simulation_result.backrun_gas_used,
             eip1559_enabled: self.eip1559_enabled,
-            max_fee_per_gas: eip1559_info.map(|info| info.max_fee_per_gas),
+            max_fee_per_gas: eip1559_info.clone().map(|info| info.max_fee_per_gas),
             max_priority_fee_per_gas: eip1559_info.map(|info| info.max_priority_fee_per_gas),
             bundle_order_fixed: true, // MEV 번들은 순서 고정
         })
@@ -285,7 +300,8 @@ impl GasOptimizer {
         let frontrun_tx = self.create_frontrun_transaction_request(sandwich_opp).await?;
 
         // eth_estimateGas 호출
-        let gas_estimate = self.provider.estimate_gas(&frontrun_tx, None).await?;
+        let typed_tx = TypedTransaction::Legacy(frontrun_tx.clone().into());
+        let gas_estimate = self.provider.estimate_gas(&typed_tx, None).await?;
         
         // 20% 여유분 추가
         let gas_with_buffer = gas_estimate.as_u64() * 120 / 100;
@@ -300,7 +316,8 @@ impl GasOptimizer {
         let backrun_tx = self.create_backrun_transaction_request(sandwich_opp).await?;
 
         // eth_estimateGas 호출
-        let gas_estimate = self.provider.estimate_gas(&backrun_tx, None).await?;
+        let typed_tx = TypedTransaction::Legacy(backrun_tx.clone().into());
+        let gas_estimate = self.provider.estimate_gas(&typed_tx, None).await?;
         
         // 20% 여유분 추가
         let gas_with_buffer = gas_estimate.as_u64() * 120 / 100;
@@ -320,9 +337,10 @@ impl GasOptimizer {
         let frontrun_tx = self.create_frontrun_transaction_request(sandwich_opp).await?;
         let backrun_tx = self.create_backrun_transaction_request(sandwich_opp).await?;
 
+        // TransactionRequest를 TypedTransaction으로 변환
         let transactions = vec![
-            ethers::types::Transaction::from(frontrun_tx),
-            ethers::types::Transaction::from(backrun_tx),
+            TypedTransaction::Legacy(frontrun_tx.clone().into()),
+            TypedTransaction::Legacy(backrun_tx.clone().into()),
         ];
 
         let simulation_options = SimulationOptions {
@@ -421,7 +439,7 @@ struct FlashbotsSimulationResult {
 
 /// ETH 금액 포맷팅 헬퍼 함수
 fn format_eth_amount(wei: U256) -> String {
-    let eth = wei.to::<u128>() as f64 / 1e18;
+    let eth = wei.as_u128() as f64 / 1e18;
     format!("{:.6} ETH", eth)
 }
 

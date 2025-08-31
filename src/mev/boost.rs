@@ -92,7 +92,7 @@ pub struct PerformanceMetrics {
 }
 
 /// 릴레이 메트릭
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct RelayMetrics {
     pub submissions: u64,
     pub inclusions: u64,
@@ -436,7 +436,7 @@ impl MEVBoostClient {
     /// 블록 헤더 생성
     async fn create_block_header(&self, block_number: u64, value: U256) -> Result<BlockHeader> {
         let parent_block = self.blockchain_client.get_block(block_number - 1).await?;
-        let parent_hash = parent_block.hash.unwrap_or_default();
+        let parent_hash = parent_block.and_then(|b| b.hash).unwrap_or_default();
 
         Ok(BlockHeader {
             parent_hash,
@@ -636,7 +636,7 @@ impl BlockBuilder {
         let base_fee = self.gas_limit_manager.get_base_fee().await?;
 
         let mut template = BlockTemplate {
-            parent_hash: parent_block.hash.unwrap_or_default(),
+            parent_hash: parent_block.and_then(|b| b.hash).unwrap_or_default(),
             block_number: target_block,
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -727,7 +727,7 @@ impl OptimizationEngine {
                 let gas_price = tx.gas_price.unwrap_or_default();
                 gas_price * tx.gas
             })
-            .sum();
+            .fold(U256::zero(), |acc, x| acc + x);
 
         Ok(template)
     }

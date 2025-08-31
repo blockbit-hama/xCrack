@@ -217,6 +217,67 @@ factory = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
 fee = 500  # Variable fees
 enabled = true
 
+# DEX API Configuration
+[dex]
+ox_api_key = ""
+oneinch_api_key = ""
+request_timeout_ms = 5000
+retry_count = 3
+rate_limit_per_second = 10
+
+# Execution Configuration
+[execution]
+gas_price_gwei = 20.0
+gas_multiplier = 1.2
+transaction_timeout_ms = 30000
+max_pending_transactions = 10
+
+# Liquidation V2 Configuration
+[liquidation]
+min_profit_threshold_usd = 50.0
+scan_interval_seconds = 30
+max_concurrent_liquidations = 5
+use_flashloan = false
+preferred_flashloan_provider = "aave"
+
+# Protocol Configuration
+[protocols]
+[protocols.aave]
+enabled = true
+contract_address = "0x87870Bca3F3fD633543545F15f8073B8A42aD6f8"
+oracle_address = "0x54586bE62E3c3580375aE3723C145253060Ca0C2"
+liquidation_threshold = 0.8
+close_factor = 0.5
+liquidation_bonus = 0.05
+
+[protocols.compound_v2]
+enabled = true
+contract_address = "0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B"
+oracle_address = "0x50ce56A3239671Ab62f185704Caedf626352741e"
+liquidation_threshold = 0.75
+close_factor = 0.5
+liquidation_bonus = 0.08
+
+[protocols.compound_v3]
+enabled = false
+liquidation_threshold = 0.8
+close_factor = 0.5
+liquidation_bonus = 0.05
+
+[protocols.makerdao]
+enabled = true
+contract_address = "0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B"
+oracle_address = "0x81FE72B5A8d1A857d176C3E7d5Bd2679A9B85763"
+liquidation_threshold = 0.75
+close_factor = 1.0
+liquidation_bonus = 0.13
+
+# Contract Configuration
+[contracts]
+liquidation_strategy = "0x0000000000000000000000000000000000000000"
+flashloan_receiver = "0x0000000000000000000000000000000000000000"
+dex_router = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+
 # Token Addresses
 [tokens]
 WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"

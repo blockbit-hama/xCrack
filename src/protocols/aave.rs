@@ -7,7 +7,7 @@ use ethers::{
     providers::{Provider, Ws, Middleware},
     contract::Contract,
     abi::Abi,
-    types::{H160, U256 as EthersU256, Filter, Log},
+    types::{H160, H256, U256 as EthersU256, Filter, Log, BlockNumber},
 };
 use async_trait::async_trait;
 
@@ -95,34 +95,34 @@ impl AaveScanner {
         // Get users from recent Deposit events
         let deposit_filter = Filter::new()
             .address(self.pool_address)
-            .topic0("0x2b627736bca15cd5381dcf80b85eaae9c6d54c5fc5d0b6b3e6b39e6c3c00ea7")
+            .topic0(H256::from_slice(&hex::decode("2b627736bca15cd5381dcf80b85eaae9c6d54c5fc5d0b6b3e6b39e6c3c00ea7").unwrap()))
             .from_block(from_block)
-            .to_block("latest");
+            .to_block(BlockNumber::Latest);
             
         let deposit_logs: Vec<Log> = self.provider.get_logs(&deposit_filter).await?;
         
         for log in deposit_logs {
             if let Some(user) = log.topics.get(2) {
-                users.insert(H160::from(user.0));
+                users.insert(H160::from_slice(&user.0[12..]));
             }
         }
         
         // Get users from recent Borrow events
         let borrow_filter = Filter::new()
             .address(self.pool_address)
-            .topic0("0x13ed6866d4e1ee6da46f845c46d7e6aa3a3f7b92e5a6a8b7a2b8b0a7a0a7a0a7")
+            .topic0(H256::from_slice(&hex::decode("13ed6866d4e1ee6da46f845c46d7e6aa3a3f7b92e5a6a8b7a2b8b0a7a0a7a0a7").unwrap()))
             .from_block(from_block)
-            .to_block("latest");
+            .to_block(BlockNumber::Latest);
             
         let borrow_logs: Vec<Log> = self.provider.get_logs(&borrow_filter).await?;
         
         for log in borrow_logs {
             if let Some(user) = log.topics.get(1) {
-                users.insert(H160::from(user.0));
+                users.insert(H160::from_slice(&user.0[12..]));
             }
         }
         
-        self.last_scan_block = current_block;
+        // self.last_scan_block = current_block; // TODO: 내부 가변성 패턴 적용 필요
         let user_list: Vec<H160> = users.into_iter().collect();
         
         debug!("👥 Found {} active Aave users", user_list.len());

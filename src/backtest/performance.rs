@@ -183,7 +183,7 @@ impl PerformanceAnalyzer {
     /// Calculate profit factor (gross profit / gross loss)
     fn calculate_profit_factor(&self) -> f64 {
         let (gross_profit, gross_loss) = self.executions.iter().fold((0u128, 0u128), |(profit, loss), execution| {
-            let pnl = execution.filled_amount.to::<u128>() as i128 - execution.fees.to::<u128>() as i128;
+            let pnl = execution.filled_amount.as_limbs()[0] as i128 - execution.fees.as_limbs()[0] as i128;
             if pnl > 0 {
                 (profit + pnl as u128, loss)
             } else {

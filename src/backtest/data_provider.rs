@@ -117,7 +117,7 @@ impl DataProvider for MockDataProvider {
             price_data.iter().map(|pd| HistoricalDataPoint {
                 timestamp: pd.timestamp,
                 price: pd.last_price.to_string().parse().unwrap_or(0.0),
-                volume: pd.volume_24h.to::<u128>() as f64,
+                volume: pd.volume_24h.as_limbs()[0] as f64,
             }).collect()
         } else {
             vec![]

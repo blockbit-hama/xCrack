@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn, error};
@@ -14,7 +15,7 @@ use crate::protocols::{MultiProtocolScanner, LiquidatableUser, ProtocolType, Use
 pub struct LiquidationStateIndexer {
     config: Arc<Config>,
     provider: Arc<Provider<Ws>>,
-    protocol_scanner: Arc<MultiProtocolScanner>,
+    protocol_scanner: Arc<Mutex<MultiProtocolScanner>>,
     
     // 인덱싱된 상태
     indexed_positions: Arc<tokio::sync::RwLock<HashMap<Address, UserPosition>>>,
@@ -99,7 +100,7 @@ impl LiquidationStateIndexer {
     pub async fn new(
         config: Arc<Config>,
         provider: Arc<Provider<Ws>>,
-        protocol_scanner: Arc<MultiProtocolScanner>,
+        protocol_scanner: Arc<Mutex<MultiProtocolScanner>>,
     ) -> Result<Self> {
         info!("📊 Initializing Liquidation State Indexer...");
         
@@ -178,7 +179,7 @@ impl LiquidationStateIndexer {
         info!("🔍 Scanning all protocols for user positions...");
         
         // 모든 프로토콜에서 청산 가능한 사용자 스캔
-        let liquidatable_users = self.protocol_scanner.scan_all_protocols().await?;
+        let liquidatable_users = self.protocol_scanner.lock().await.scan_all_protocols().await?;
         
         let mut total_users = 0;
         let mut liquidatable_count = 0;
@@ -349,7 +350,7 @@ impl LiquidationStateIndexer {
     
     /// 우선순위 점수 계산
     fn calculate_priority_score(&self, position: &UserPosition, estimated_profit: U256) -> f64 {
-        let profit_score = estimated_profit.as_u128() as f64 / 1e18;
+        let profit_score = estimated_profit.to::<u128>() as f64 / 1e18;
         let urgency_score = match self.determine_urgency(position.health_factor) {
             LiquidationUrgency::Critical => 1.0,
             LiquidationUrgency::High => 0.8,

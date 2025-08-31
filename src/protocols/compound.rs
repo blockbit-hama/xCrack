@@ -7,7 +7,7 @@ use ethers::{
     providers::{Provider, Ws, Middleware},
     contract::Contract,
     abi::Abi,
-    types::{H160, U256 as EthersU256, Filter, Log},
+    types::{H160, H256, U256 as EthersU256, Filter, Log, BlockNumber},
 };
 use async_trait::async_trait;
 
@@ -93,14 +93,14 @@ impl CompoundV2Scanner {
             // Mint events (supply)
             let mint_filter = Filter::new()
                 .address(ctoken)
-                .topic0("0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f")
+                .topic0(H256::from_slice(&hex::decode("4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c03821c4f").unwrap()))
                 .from_block(from_block)
-                .to_block("latest");
+                .to_block(BlockNumber::Latest);
                 
             if let Ok(mint_logs) = self.provider.get_logs(&mint_filter).await {
                 for log in mint_logs {
                     if let Some(user) = log.topics.get(1) {
-                        users.insert(H160::from(user.0));
+                        users.insert(H160::from_slice(&user.0[12..]));
                     }
                 }
             }
@@ -108,14 +108,14 @@ impl CompoundV2Scanner {
             // Borrow events
             let borrow_filter = Filter::new()
                 .address(ctoken)
-                .topic0("0x13ed6866d4e1ee6da46f845c46d7e6aa3a3f7b92c2b8a7a7a0a6f2f1f5b9a8b7")
+                .topic0(H256::from_slice(&hex::decode("13ed6866d4e1ee6da46f845c46d7e6aa3a3f7b92c2b8a7a7a0a6f2f1f5b9a8b7").unwrap()))
                 .from_block(from_block)
-                .to_block("latest");
+                .to_block(BlockNumber::Latest);
                 
             if let Ok(borrow_logs) = self.provider.get_logs(&borrow_filter).await {
                 for log in borrow_logs {
                     if let Some(user) = log.topics.get(1) {
-                        users.insert(H160::from(user.0));
+                        users.insert(H160::from_slice(&user.0[12..]));
                     }
                 }
             }

@@ -11,6 +11,10 @@ mod config;
 mod types;
 mod utils;
 mod strategies;
+mod protocols;
+mod dex;
+mod execution;
+mod mev;
 mod adapters;
 mod flashbots;
 mod mempool;
@@ -33,7 +37,7 @@ use monitoring::manager::MonitoringManager;
 
 /// ETH 금액을 포맷팅하는 헬퍼 함수
 fn format_eth_amount(wei: alloy::primitives::U256) -> String {
-    let eth = wei.to::<u128>() as f64 / 1e18;
+    let eth = wei.as_limbs()[0] as f64 / 1e18;
     format!("{:.6} ETH", eth)
 }
 

@@ -165,7 +165,7 @@ struct MempoolStats {
 }
 
 /// 풀 통계
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct PoolStats {
     transactions_received: u64,
     unique_transactions: u64,
@@ -375,7 +375,7 @@ impl PrivateMempoolClient {
                 // 트랜잭션 파싱
                 if let Ok(tx_hex) = serde_json::from_value::<String>(result.clone()) {
                     if let Ok(tx_bytes) = hex::decode(tx_hex.trim_start_matches("0x")) {
-                        if let Ok(tx) = alloy::rlp::Decodable::decode(&tx_bytes) {
+                        if let Ok(tx) = ethers::utils::rlp::decode::<Transaction>(&tx_bytes) {
                             let pending_tx = PendingTransaction {
                                 hash: tx.hash,
                                 transaction: tx,

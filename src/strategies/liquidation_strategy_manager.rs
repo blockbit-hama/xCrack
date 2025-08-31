@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn, error};
@@ -19,7 +20,7 @@ use super::liquidation_bundle_builder::{LiquidationBundleBuilder, LiquidationBun
 pub struct LiquidationStrategyManager {
     config: Arc<Config>,
     provider: Arc<Provider<Ws>>,
-    protocol_scanner: Arc<MultiProtocolScanner>,
+    protocol_scanner: Arc<Mutex<MultiProtocolScanner>>,
     profitability_calculator: ProfitabilityCalculator,
     bundle_builder: LiquidationBundleBuilder,
     flashbots_client: FlashbotsClient,
@@ -62,7 +63,7 @@ impl LiquidationStrategyManager {
     pub async fn new(
         config: Arc<Config>,
         provider: Arc<Provider<Ws>>,
-        protocol_scanner: Arc<MultiProtocolScanner>,
+        protocol_scanner: Arc<Mutex<MultiProtocolScanner>>,
         profitability_calculator: ProfitabilityCalculator,
         bundle_builder: LiquidationBundleBuilder,
         flashbots_client: FlashbotsClient,
@@ -87,7 +88,7 @@ impl LiquidationStrategyManager {
     }
     
     /// 메인 청산 전략 실행 루프
-    pub async fn run_liquidation_strategy(&self) -> Result<()> {
+    pub async fn run_liquidation_strategy(&mut self) -> Result<()> {
         info!("🚀 Starting liquidation strategy execution...");
         
         // 실행 상태 설정
@@ -130,7 +131,7 @@ impl LiquidationStrategyManager {
         let start_time = std::time::Instant::now();
         
         // 모든 프로토콜에서 청산 가능한 사용자 스캔
-        let liquidatable_users = self.protocol_scanner.scan_all_protocols().await?;
+        let liquidatable_users = self.protocol_scanner.lock().await.scan_all_protocols().await?;
         let total_users: usize = liquidatable_users.values().map(|users| users.len()).sum();
         
         info!("🔍 Found {} liquidatable users across all protocols", total_users);
@@ -144,8 +145,10 @@ impl LiquidationStrategyManager {
                 let optimal_liquidation_amount = self.calculate_optimal_liquidation_amount(&user).await?;
                 
                 // 수익성 분석
+                let empty_swap_quotes = HashMap::new(); // TODO: 실제 스왑 시세 데이터 연결
+                let eth_price_usd = 2000.0; // TODO: 실제 ETH 가격 데이터 연결
                 let profitability_analysis = self.profitability_calculator
-                    .analyze_liquidation_profitability(&user, optimal_liquidation_amount)
+                    .analyze_liquidation_profitability(&user, &empty_swap_quotes, eth_price_usd)
                     .await?;
                 
                 // 우선순위 점수 계산
@@ -186,18 +189,19 @@ impl LiquidationStrategyManager {
         &self,
         opportunities: Vec<LiquidationOpportunity>,
     ) -> Result<Vec<LiquidationOpportunity>> {
-        let min_profit_threshold = U256::from(100_000_000_000_000_000u64); // 0.1 ETH
+        let min_profit_threshold_usd = 200.0; // $200 minimum profit (assuming $2000 ETH = 0.1 ETH)
+        let total_opportunities = opportunities.len();
         
         let profitable_opportunities: Vec<LiquidationOpportunity> = opportunities
             .into_iter()
             .filter(|opp| {
                 opp.profitability_analysis.is_profitable && 
-                opp.profitability_analysis.net_profit > min_profit_threshold
+                opp.profitability_analysis.estimated_net_profit_usd > min_profit_threshold_usd
             })
             .collect();
         
         info!("💰 Filtered {} profitable opportunities from {} total", 
-              profitable_opportunities.len(), opportunities.len());
+              profitable_opportunities.len(), total_opportunities);
         
         // 메트릭 업데이트
         {
@@ -221,7 +225,7 @@ impl LiquidationStrategyManager {
     }
     
     /// 청산 기회 실행
-    async fn execute_liquidation_opportunity(&self, opportunity: LiquidationOpportunity) -> Result<()> {
+    async fn execute_liquidation_opportunity(&mut self, opportunity: LiquidationOpportunity) -> Result<()> {
         let start_time = std::time::Instant::now();
         
         info!("🎯 Executing liquidation opportunity for user: {:?}", opportunity.user.address);
@@ -232,12 +236,12 @@ impl LiquidationStrategyManager {
         // 2. 청산 시나리오 생성
         let scenario = LiquidationScenario {
             user: opportunity.user.clone(),
-            liquidation_amount: opportunity.liquidation_amount,
+            liquidation_amount: ethers::types::U256::from_little_endian(&opportunity.liquidation_amount.to_le_bytes::<32>()),
             profitability_analysis: opportunity.profitability_analysis.clone(),
             swap_quote,
             execution_priority: self.determine_execution_priority(&opportunity),
             estimated_gas: 500_000, // TODO: 정확한 가스 추정
-            max_gas_price: U256::from(200_000_000_000u64), // 200 gwei
+            max_gas_price: ethers::types::U256::from(200_000_000_000u64), // 200 gwei
         };
         
         // 3. 청산 번들 생성
@@ -279,7 +283,7 @@ impl LiquidationStrategyManager {
     
     /// 우선순위 점수 계산
     fn calculate_priority_score(&self, user: &LiquidatableUser, analysis: &LiquidationProfitabilityAnalysis) -> f64 {
-        let profit_score = analysis.net_profit.as_u128() as f64 / 1e18;
+        let profit_score = analysis.estimated_net_profit_usd / 1e18; // Already in USD
         let urgency_score = if user.account_data.health_factor < 0.95 { 1.0 } else { 0.5 };
         let size_score = user.account_data.total_debt_usd / 1_000_000.0; // 100만 달러 기준
         
@@ -288,7 +292,7 @@ impl LiquidationStrategyManager {
     
     /// 신뢰도 점수 계산
     fn calculate_confidence_score(&self, user: &LiquidatableUser, analysis: &LiquidationProfitabilityAnalysis) -> f64 {
-        let profit_margin = analysis.profit_margin;
+        let profit_margin = analysis.profit_margin_percent;
         let health_factor = user.account_data.health_factor;
         
         // 수익 마진이 높고 헬스팩터가 낮을수록 높은 신뢰도
@@ -337,7 +341,7 @@ impl LiquidationStrategyManager {
         // TODO: 실제 Flashbots 제출 로직 구현
         // 현재는 더미 응답 반환
         
-        Ok(BundleStatus::Submitted)
+        Ok(BundleStatus::Pending)
     }
     
     /// 제출 결과 처리
@@ -354,7 +358,7 @@ impl LiquidationStrategyManager {
                 {
                     let mut metrics = self.performance_metrics.write().await;
                     metrics.bundles_included += 1;
-                    metrics.total_profit += opportunity.profitability_analysis.net_profit;
+                    metrics.total_profit += alloy::primitives::U256::from((opportunity.profitability_analysis.estimated_net_profit_usd * 1e18) as u64);
                     metrics.avg_profit_per_liquidation = metrics.total_profit / U256::from(metrics.bundles_included);
                     metrics.success_rate = metrics.bundles_included as f64 / metrics.bundles_submitted as f64;
                 }
@@ -362,8 +366,14 @@ impl LiquidationStrategyManager {
             BundleStatus::Rejected(_) => {
                 warn!("❌ Liquidation bundle rejected");
             },
-            BundleStatus::Submitted => {
+            BundleStatus::Pending => {
                 info!("⏳ Liquidation bundle submitted, waiting for inclusion...");
+            },
+            BundleStatus::Timeout => {
+                warn!("⏰ Liquidation bundle timed out");
+            },
+            BundleStatus::Replaced => {
+                warn!("🔄 Liquidation bundle was replaced by higher bidder");
             },
         }
         

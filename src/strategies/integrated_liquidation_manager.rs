@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn, error};
@@ -16,9 +17,9 @@ use crate::mev::{MEVBundleExecutor, BundleExecutionResult, ExecutionStats};
 pub struct IntegratedLiquidationManager {
     config: Arc<Config>,
     provider: Arc<Provider<Ws>>,
-    protocol_scanner: Arc<MultiProtocolScanner>,
+    protocol_scanner: Arc<Mutex<MultiProtocolScanner>>,
     liquidation_strategy: Arc<LiquidationStrategyV2>,
-    bundle_executor: Arc<MEVBundleExecutor>,
+    bundle_executor: Arc<Mutex<MEVBundleExecutor>>,
     
     // 상태 관리
     is_running: Arc<RwLock<bool>>,
@@ -59,9 +60,9 @@ impl IntegratedLiquidationManager {
         info!("🏭 Initializing Integrated Liquidation Manager...");
         
         // 프로토콜 스캐너 초기화
-        let protocol_scanner = Arc::new(
+        let protocol_scanner = Arc::new(Mutex::new(
             MultiProtocolScanner::new(Arc::clone(&config), Arc::clone(&provider)).await?
-        );
+        ));
         
         // 청산 전략 초기화
         let liquidation_strategy = Arc::new(
@@ -73,9 +74,9 @@ impl IntegratedLiquidationManager {
         );
         
         // MEV Bundle 실행자 초기화
-        let bundle_executor = Arc::new(
+        let bundle_executor = Arc::new(Mutex::new(
             MEVBundleExecutor::new(Arc::clone(&config), Arc::clone(&provider)).await?
-        );
+        ));
         
         info!("✅ Integrated Liquidation Manager initialized");
         
@@ -127,7 +128,7 @@ impl IntegratedLiquidationManager {
         *is_running = false;
         
         // 프로토콜 스캐너 중지
-        self.protocol_scanner.stop_background_scanning().await?;
+        self.protocol_scanner.lock().await.stop_background_scanning().await?;
         
         info!("🛑 Automated liquidation bot stopped");
         Ok(())
@@ -135,7 +136,7 @@ impl IntegratedLiquidationManager {
     
     /// 백그라운드 스캐닝 시작
     async fn start_background_scanning(&self) -> Result<()> {
-        self.protocol_scanner.start_background_scanning().await
+        self.protocol_scanner.lock().await.start_background_scanning().await
     }
     
     /// 메인 실행 루프
@@ -216,7 +217,7 @@ impl IntegratedLiquidationManager {
             .collect();
         
         // Bundle 실행
-        let results = self.bundle_executor
+        let results = self.bundle_executor.lock().await
             .execute_liquidation_opportunities(top_opportunities, target_block)
             .await?;
         
@@ -250,8 +251,9 @@ impl IntegratedLiquidationManager {
         history.extend(results);
         
         // 최근 100개만 유지
-        if history.len() > 100 {
-            history.drain(0..history.len() - 100);
+        let current_len = history.len();
+        if current_len > 100 {
+            history.drain(0..current_len - 100);
         }
         
         // 메트릭 업데이트
@@ -290,7 +292,7 @@ impl IntegratedLiquidationManager {
     /// 만료된 데이터 정리
     async fn cleanup_expired_data(&self) {
         // Bundle 정리
-        let cleaned_bundles = self.bundle_executor.cleanup_expired_bundles().await;
+        let cleaned_bundles = self.bundle_executor.lock().await.cleanup_expired_bundles().await;
         if cleaned_bundles > 0 {
             debug!("🧹 Cleaned up {} expired bundles", cleaned_bundles);
         }
@@ -317,7 +319,7 @@ impl IntegratedLiquidationManager {
             info!("💰 Found liquidation opportunity for {}: ${:.2} profit", 
                   user_address, opportunity.strategy.net_profit_usd);
             
-            let result = self.bundle_executor.execute_single_opportunity(opportunity).await?;
+            let result = self.bundle_executor.lock().await.execute_single_opportunity(opportunity).await?;
             
             // 결과를 실행 기록에 추가
             self.execution_history.write().await.push(result.clone());
@@ -334,7 +336,7 @@ impl IntegratedLiquidationManager {
         let execution_history = self.execution_history.read().await;
         let metrics = self.performance_metrics.read().await.clone();
         
-        let pending_executions = self.bundle_executor.get_pending_bundle_count().await;
+        let pending_executions = self.bundle_executor.lock().await.get_pending_bundle_count().await;
         
         let total_potential_profit: f64 = opportunities.iter()
             .map(|opp| opp.strategy.net_profit_usd)
@@ -370,7 +372,7 @@ impl IntegratedLiquidationManager {
     
     /// 실행 통계 조회
     pub async fn get_execution_stats(&self) -> ExecutionStats {
-        self.bundle_executor.get_execution_stats().await
+        self.bundle_executor.lock().await.get_execution_stats().await
     }
     
     /// 전략 통계 조회
@@ -380,7 +382,7 @@ impl IntegratedLiquidationManager {
     
     /// 프로토콜 요약 조회
     pub async fn get_protocol_summary(&self) -> Result<crate::protocols::LiquidationSummary> {
-        self.protocol_scanner.get_liquidation_summary().await
+        self.protocol_scanner.lock().await.get_liquidation_summary().await
     }
     
     /// 봇 실행 상태 확인

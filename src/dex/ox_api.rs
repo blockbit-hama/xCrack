@@ -134,9 +134,10 @@ impl ZeroXAggregator {
             .await
             .map_err(|e| anyhow!("0x API request failed: {}", e))?;
         
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("0x API error {}: {}", response.status(), error_text));
+            return Err(anyhow!("0x API error {}: {}", status, error_text));
         }
         
         let quote: ZeroXQuoteResponse = response
@@ -153,7 +154,7 @@ impl ZeroXAggregator {
         let mut query_params = HashMap::new();
         query_params.insert("sellToken", format!("{:#x}", sell_token));
         query_params.insert("buyToken", format!("{:#x}", buy_token));
-        query_params.insert("sellAmount", "1000000000000000000"); // 1 token (18 decimals)
+        query_params.insert("sellAmount", "1000000000000000000".to_string()); // 1 token (18 decimals)
         
         let url = format!("{}/swap/v1/price", self.base_url);
         
@@ -165,9 +166,10 @@ impl ZeroXAggregator {
             .await
             .map_err(|e| anyhow!("0x price API request failed: {}", e))?;
         
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(anyhow!("0x price API error {}: {}", response.status(), error_text));
+            return Err(anyhow!("0x price API error {}: {}", status, error_text));
         }
         
         response
@@ -198,10 +200,10 @@ impl DexAggregator for ZeroXAggregator {
             U256::from(min_amount_f64 as u128)
         };
         
-        let router_address = Address::from_hex(&quote_response.to)
+        let router_address = quote_response.to.parse::<Address>()
             .map_err(|e| anyhow!("Invalid router address: {}", e))?;
             
-        let allowance_target = Address::from_hex(&quote_response.allowance_target)
+        let allowance_target = quote_response.allowance_target.parse::<Address>()
             .map_err(|e| anyhow!("Invalid allowance target: {}", e))?;
         
         // Parse calldata
