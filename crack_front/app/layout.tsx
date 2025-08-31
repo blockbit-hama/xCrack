@@ -68,15 +68,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                       <span>청산 v2.0</span>
                       <Badge variant="info" className="text-xs">NEW</Badge>
                     </Link>
-                    <Link href="/micro" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">🔄</span>
-                      <span>마이크로</span>
-                    </Link>
                     <Link href="/micro-v2" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">⚡</span>
-                      <span>마이크로 v2.0</span>
-                      <Badge variant="info" className="text-xs">NEW</Badge>
+                      <span className="text-lg">🔄</span>
+                      <span>마이크로 아비트래지</span>
+                    <Link href="/sandwich" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🥪</span>
+                      <span>샌드위치</span>
+                      <Badge variant="warning" className="text-xs">고위험</Badge>
                     </Link>
+                    <Link href="/cross-chain" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🌉</span>
+                      <span>크로스체인 아비트래지</span>
+                      <Badge variant="info" className="text-xs">Mock</Badge>
+                    </Link>                    </Link>
                     <Link href="/flashloan" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">⚡</span>
                       <span>플래시론</span>
