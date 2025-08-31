@@ -1,9 +1,7 @@
 /// Backtesting scenarios and test cases
-use crate::types::{PriceData, OrderBookSnapshot, StrategyType};
+use crate::types::StrategyType;
 use chrono::{DateTime, Utc, Duration};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestScenario {
@@ -231,7 +229,7 @@ impl ScenarioBuilder {
         name: String,
         description: String,
         duration_days: i64,
-        initial_balance: u128,
+        _initial_balance: u128,
         strategies: Vec<StrategyType>,
         market_conditions: MarketConditions,
     ) -> BacktestScenario {

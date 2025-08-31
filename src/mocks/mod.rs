@@ -6,11 +6,8 @@ pub mod exchange_clients;
 pub mod arbitrage_simulator;
 
 pub use flashbots_mock::MockFlashbotsClient;
-pub use rpc_mock::MockRpcProvider;
 pub use mempool_mock::MockMempoolMonitor;
 pub use provider_mock::create_mock_ws_provider;
-pub use exchange_clients::{MockDexClient, MockCexClient};
-pub use arbitrage_simulator::ArbitrageOpportunitySimulator;
 
 use std::env;
 

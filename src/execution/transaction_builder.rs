@@ -1,10 +1,9 @@
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
-use tracing::{debug, warn, error, info};
+use tracing::{debug, warn, info};
 use alloy::primitives::{Address, U256, Bytes};
 use ethers::{
     providers::{Provider, Ws, Middleware},
-    contract::Contract,
     abi::{Abi, Token},
     types::{H160, U256 as EthersU256, TransactionRequest, Bytes as EthersBytes},
     core::utils::hex,
@@ -97,7 +96,7 @@ impl TransactionBuilder {
         &self,
         contract_address: Address,
         calldata: Bytes,
-        estimated_gas_cost_usd: f64,
+        _estimated_gas_cost_usd: f64,
     ) -> Result<String> {
         info!("📤 Sending liquidation transaction to {}", contract_address);
         
@@ -108,7 +107,7 @@ impl TransactionBuilder {
         debug!("⛽ Gas price: {} gwei, Gas limit: {}", gas_price.as_u64() / 1e9 as u64, gas_limit);
         
         // Transaction 구성
-        let tx_request = TransactionRequest::new()
+        let _tx_request = TransactionRequest::new()
             .to(H160::from_slice(contract_address.as_slice()))
             .data(EthersBytes::from(calldata.to_vec()))
             .gas_price(gas_price)

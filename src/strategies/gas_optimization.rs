@@ -4,8 +4,7 @@ use ethers::{
     providers::{Provider, Http, Middleware},
     types::{U256, Address, TransactionRequest, BlockId, transaction::eip2718::TypedTransaction},
 };
-use tracing::{info, debug, warn};
-use serde::{Deserialize, Serialize};
+use tracing::{info, debug};
 
 // MEV 모듈이 없으므로 임시로 주석 처리
 // use crate::mev::simulation::{BundleSimulator, SimulationOptions, SimulationMode};
@@ -158,7 +157,7 @@ impl GasOptimizer {
         info!("⛽ 가스 가격 최적화 시작");
 
         // 1. 기본 가스 정보 수집
-        let base_gas_price = self.provider.get_gas_price().await?;
+        let _base_gas_price = self.provider.get_gas_price().await?;
         let victim_gas_price = sandwich_opp.target_tx.gas_price;
 
         // 2. EIP-1559 지원 확인 및 처리
@@ -386,7 +385,7 @@ impl GasOptimizer {
             .unwrap_or(victim_gas_price / U256::from(2)); // 언더플로우 시 절반으로
 
         // Priority fee는 동일하게 유지
-        let priority_fee = eip1559_info.suggested_priority_fee;
+        let _priority_fee = eip1559_info.suggested_priority_fee;
 
         Ok((frontrun_max_fee, backrun_max_fee))
     }

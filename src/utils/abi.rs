@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use alloy::primitives::{Address, U256, Bytes, FixedBytes, B256, Uint};
-use alloy::sol_types::{SolCall, SolEvent, SolValue};
+use alloy::sol_types::{SolCall, SolValue};
 use alloy::sol;
 use std::collections::HashMap;
 use tracing::warn;

@@ -3,9 +3,6 @@ pub mod compound;
 pub mod maker;
 pub mod scanner;
 
-pub use aave::*;
-pub use compound::*;
-pub use maker::*;
 pub use scanner::*;
 
 use alloy::primitives::{Address, U256};

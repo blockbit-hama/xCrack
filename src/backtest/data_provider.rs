@@ -48,7 +48,7 @@ impl MockDataProvider {
     
     /// Get data at specific timestamp for backtesting
     pub async fn get_data_at_time(&self, symbol: &str, timestamp: u64) -> anyhow::Result<HistoricalDataPoint> {
-        use anyhow::anyhow;
+        
         
         // Convert timestamp to DateTime
         let target_time = chrono::DateTime::from_timestamp(timestamp as i64, 0)

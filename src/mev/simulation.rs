@@ -2,16 +2,13 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
     providers::{Provider, Http, Middleware},
-    types::{Transaction, H256, U256, Address, Bytes, Block, TransactionRequest},
-    abi::{AbiEncode, AbiDecode},
+    types::{Transaction, H256, U256, Address, Bytes},
 };
-use serde::{Deserialize, Serialize};
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, warn};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::time::sleep;
 use std::collections::HashMap;
 
-use crate::mev::flashbots::{FlashbotsClient, SimulationResult as FlashbotsSimulationResult};
+use crate::mev::flashbots::FlashbotsClient;
 use crate::blockchain::BlockchainClient;
 
 /// 번들 시뮬레이터
@@ -42,6 +39,7 @@ struct CachedSimulation {
 
 /// 가스 오라클
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct GasOracle {
     base_fee_cache: Option<U256>,
     cache_timestamp: Option<SystemTime>,
@@ -566,7 +564,7 @@ impl BundleSimulator {
     /// 수익 계산
     async fn calculate_profits(
         &self,
-        traces: &[TransactionTrace],
+        _traces: &[TransactionTrace],
         total_gas_cost: U256,
     ) -> Result<(U256, U256, U256)> {
         // 실제 구현에서는 더 정교한 수익 계산이 필요

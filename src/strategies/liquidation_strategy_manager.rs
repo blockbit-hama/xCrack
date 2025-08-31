@@ -1,16 +1,15 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
-use anyhow::{Result, anyhow};
-use tracing::{info, debug, warn, error};
+use anyhow::Result;
+use tracing::{info, warn};
 use alloy::primitives::{Address, U256};
 use ethers::providers::{Provider, Ws};
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep, Duration};
 
 use crate::config::Config;
-use crate::protocols::{MultiProtocolScanner, LiquidatableUser, ProtocolType};
+use crate::protocols::{MultiProtocolScanner, LiquidatableUser};
 use crate::dex::{DexAggregator, DexType};
 use crate::utils::profitability::{ProfitabilityCalculator, LiquidationProfitabilityAnalysis};
 use crate::mev::{FlashbotsClient, BundleStatus};
@@ -139,7 +138,7 @@ impl LiquidationStrategyManager {
         let mut opportunities = Vec::new();
         
         // 각 사용자에 대해 청산 기회 분석
-        for (protocol_type, users) in liquidatable_users {
+        for (_protocol_type, users) in liquidatable_users {
             for user in users {
                 // 최적 청산 금액 계산
                 let optimal_liquidation_amount = self.calculate_optimal_liquidation_amount(&user).await?;
@@ -335,7 +334,7 @@ impl LiquidationStrategyManager {
     }
     
     /// 청산 번들 제출
-    async fn submit_liquidation_bundle(&self, bundle: LiquidationBundle) -> Result<BundleStatus> {
+    async fn submit_liquidation_bundle(&self, _bundle: LiquidationBundle) -> Result<BundleStatus> {
         info!("📤 Submitting liquidation bundle to Flashbots...");
         
         // TODO: 실제 Flashbots 제출 로직 구현

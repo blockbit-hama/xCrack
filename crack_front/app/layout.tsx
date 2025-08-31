@@ -1,74 +1,190 @@
 import './globals.css';
+import { Badge } from '../components/ui/badge';
+import { ThemeProvider } from '../components/theme-provider';
+import { ThemeToggle } from '../components/ui/theme-toggle';
+import Link from 'next/link';
+
 export const metadata = {
-  title: 'xCrack Dashboard',
-  description: 'xCrack MEV Searcher UI',
+  title: 'xCrack MEV Dashboard',
+  description: 'Advanced MEV Searcher and Arbitrage Bot Dashboard',
+  keywords: 'MEV, arbitrage, DeFi, Ethereum, trading bot',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const ApiHealth = require('./components/ApiHealth').default;
   return (
-    <html lang="ko">
-      <body style={{ fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial', margin: 0 }}>
-        <div style={{ display: 'flex', minHeight: '100vh' }}>
-          <aside className="w-[220px] bg-black text-white p-4 flex flex-col gap-4">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ fontWeight: 800, fontSize: 16 }}>xCrack</div>
-            </div>
-            <nav className="flex flex-col gap-3">
-              <a href="/" className="text-white no-underline px-3 py-2 rounded-md hover:bg-white/10">대시보드</a>
-
-              {/* 전략/실행 그룹 */}
-              <div className="rounded-md" style={{ backgroundColor: '#0b0b0b', border: '1px solid #222' }}>
-                <div className="px-3 py-2 text-xs uppercase tracking-wider text-gray-400">전략 / 실행</div>
-                <div className="flex flex-col pb-2">
-                  <a href="/strategies" className="text-white no-underline px-3 py-2 hover:bg-white/10">전략</a>
-                  <a href="/liquidation" className="text-white no-underline px-3 py-2 hover:bg-white/10">청산 v2.0</a>
-                  <a href="/micro" className="text-white no-underline px-3 py-2 hover:bg-white/10">마이크로</a>
-                  <a href="/micro-v2" className="text-white no-underline px-3 py-2 hover:bg-white/10">마이크로 v2.0</a>
-                  <a href="/flashloan" className="text-white no-underline px-3 py-2 hover:bg-white/10">플래시론</a>
-                  <a href="/multi-asset" className="text-white no-underline px-3 py-2 hover:bg-white/10">다중자산</a>
-                  <a href="/bundles" className="text-white no-underline px-3 py-2 hover:bg-white/10">번들</a>
+    <html lang="ko" suppressHydrationWarning>
+      <head>
+        <link rel="icon" href="/favicon.ico" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
+      <body className="min-h-screen bg-background font-sans antialiased">
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <div className="flex min-h-screen">
+            {/* 사이드바 */}
+            <aside className="w-64 bg-gray-900 text-white flex flex-col border-r border-gray-800">
+              {/* 로고 */}
+              <div className="p-6 border-b border-gray-800">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                    <span className="text-white font-bold text-sm">XC</span>
+                  </div>
+                  <div>
+                    <h1 className="text-xl font-bold">xCrack</h1>
+                    <p className="text-xs text-gray-400">MEV Searcher v2.0</p>
+                  </div>
                 </div>
               </div>
 
-              {/* 온체인/데이터 그룹 */}
-              <div className="rounded-md" style={{ backgroundColor: '#0b0b0b', border: '1px solid #222' }}>
-                <div className="px-3 py-2 text-xs uppercase tracking-wider text-gray-400">온체인 / 데이터</div>
-                <div className="flex flex-col pb-2">
-                  <a href="/protocols" className="text-white no-underline px-3 py-2 hover:bg-white/10">프로토콜</a>
-                  <a href="/mempool" className="text-white no-underline px-3 py-2 hover:bg-white/10">멤풀</a>
-                  <a href="/onchain" className="text-white no-underline px-3 py-2 hover:bg-white/10">온체인</a>
-                  <a href="/network" className="text-white no-underline px-3 py-2 hover:bg-white/10">네트워크</a>
+              {/* 네비게이션 */}
+              <nav className="flex-1 p-4 space-y-6">
+                {/* 대시보드 */}
+                <div>
+                  <Link 
+                    href="/" 
+                    className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors"
+                  >
+                    <span className="text-lg">📊</span>
+                    <span>대시보드</span>
+                  </Link>
                 </div>
-              </div>
 
-              {/* 운영/모니터링 그룹 */}
-              <div className="rounded-md" style={{ backgroundColor: '#0b0b0b', border: '1px solid #222' }}>
-                <div className="px-3 py-2 text-xs uppercase tracking-wider text-gray-400">운영 / 모니터링</div>
-                <div className="flex flex-col pb-2">
-                  <a href="/performance" className="text-white no-underline px-3 py-2 hover:bg-white/10">성능</a>
-                  <a href="/alerts" className="text-white no-underline px-3 py-2 hover:bg-white/10">알림</a>
-                  <a href="/logs" className="text-white no-underline px-3 py-2 hover:bg-white/10">로그</a>
+                {/* 전략 / 실행 */}
+                <div>
+                  <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                    전략 / 실행
+                  </h3>
+                  <div className="space-y-1">
+                    <Link href="/strategies" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">⚡</span>
+                      <span>전략 관리</span>
+                    </Link>
+                    <Link href="/liquidation" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">💥</span>
+                      <span>청산 v2.0</span>
+                      <Badge variant="info" className="text-xs">NEW</Badge>
+                    </Link>
+                    <Link href="/micro" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🔄</span>
+                      <span>마이크로</span>
+                    </Link>
+                    <Link href="/micro-v2" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">⚡</span>
+                      <span>마이크로 v2.0</span>
+                      <Badge variant="info" className="text-xs">NEW</Badge>
+                    </Link>
+                    <Link href="/flashloan" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">⚡</span>
+                      <span>플래시론</span>
+                    </Link>
+                    <Link href="/multi-asset" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">💎</span>
+                      <span>다중자산</span>
+                    </Link>
+                    <Link href="/bundles" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">📦</span>
+                      <span>번들</span>
+                    </Link>
+                  </div>
                 </div>
-              </div>
 
-              {/* 설정 */}
-              <div className="rounded-md" style={{ backgroundColor: '#0b0b0b', border: '1px solid #222' }}>
-                <div className="px-3 py-2 text-xs uppercase tracking-wider text-gray-400">설정</div>
-                <div className="flex flex-col pb-2">
-                  <a href="/settings" className="text-white no-underline px-3 py-2 hover:bg-white/10">설정</a>
-                  <a href="/system" className="text-white no-underline px-3 py-2 hover:bg-white/10">시스템</a>
+                {/* 온체인 / 데이터 */}
+                <div>
+                  <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                    온체인 / 데이터
+                  </h3>
+                  <div className="space-y-1">
+                    <Link href="/protocols" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🏛️</span>
+                      <span>프로토콜</span>
+                    </Link>
+                    <Link href="/mempool" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🌊</span>
+                      <span>멤풀</span>
+                    </Link>
+                    <Link href="/onchain" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">⛓️</span>
+                      <span>온체인</span>
+                    </Link>
+                    <Link href="/network" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🌐</span>
+                      <span>네트워크</span>
+                    </Link>
+                  </div>
+                </div>
+
+                {/* 운영 / 모니터링 */}
+                <div>
+                  <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                    운영 / 모니터링
+                  </h3>
+                  <div className="space-y-1">
+                    <Link href="/performance" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">📈</span>
+                      <span>성능</span>
+                    </Link>
+                    <Link href="/alerts" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🚨</span>
+                      <span>알림</span>
+                    </Link>
+                    <Link href="/logs" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">📋</span>
+                      <span>로그</span>
+                    </Link>
+                    <Link href="/risk" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">⚠️</span>
+                      <span>리스크</span>
+                    </Link>
+                  </div>
+                </div>
+
+                {/* 설정 */}
+                <div>
+                  <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                    설정
+                  </h3>
+                  <div className="space-y-1">
+                    <Link href="/settings" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">⚙️</span>
+                      <span>설정</span>
+                    </Link>
+                    <Link href="/system" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🖥️</span>
+                      <span>시스템</span>
+                    </Link>
+                  </div>
+                </div>
+              </nav>
+
+              {/* API 상태 및 테마 토글 */}
+              <div className="p-4 border-t border-gray-800 space-y-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-gray-400">API 상태</span>
+                  <Badge variant="success" className="text-xs">
+                    정상
+                  </Badge>
+                </div>
+                <div className="text-xs text-gray-500">
+                  마지막 체크: {new Date().toLocaleTimeString()}
+                </div>
+                <div className="flex justify-center">
+                  <ThemeToggle />
                 </div>
               </div>
-            </nav>
-            <div className="mt-auto">
-              <ApiHealth />
-            </div>
-          </aside>
-          <main className="flex-1 p-6">
-            {children}
-          </main>
-        </div>
+            </aside>
+
+            {/* 메인 콘텐츠 */}
+            <main className="flex-1 bg-gray-50 dark:bg-gray-900">
+              <div className="p-6">
+                {children}
+              </div>
+            </main>
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );

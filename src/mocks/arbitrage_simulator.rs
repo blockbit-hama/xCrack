@@ -1,8 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use anyhow::Result;
-use tokio::time::{sleep, Duration};
-use tracing::{info, debug, warn};
+use tracing::{info, debug};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use chrono::Utc;
@@ -27,7 +26,7 @@ pub struct ArbitrageOpportunitySimulator {
 
 /// 시장 상황 시뮬레이션
 #[derive(Debug, Clone)]
-struct MarketConditions {
+pub struct MarketConditions {
     volatility_multiplier: f64,      // 변동성 배수 (0.5 ~ 2.0)
     arbitrage_efficiency: f64,       // 아비트래지 효율성 (높을수록 기회 적음)
     network_congestion: f64,         // 네트워크 혼잡도 (0.0 ~ 1.0)

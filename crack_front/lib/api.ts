@@ -1,4 +1,74 @@
-type Status = {
+// API 기본 설정
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
+// API 클라이언트 클래스
+class ApiClient {
+  private baseUrl: string;
+  private timeout: number;
+
+  constructor(baseUrl: string = API_BASE_URL, timeout: number = 10000) {
+    this.baseUrl = baseUrl;
+    this.timeout = timeout;
+  }
+
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T | null> {
+    const url = `${this.baseUrl}${endpoint}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.warn(`API 요청 실패: ${response.status} ${response.statusText} - ${url}`);
+        return null; // 에러 대신 null 반환
+      }
+
+      return await response.json();
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.warn(`API 요청 오류: ${url}`, error);
+      return null; // 에러 대신 null 반환
+    }
+  }
+
+  async get<T>(endpoint: string): Promise<T | null> {
+    return this.request<T>(endpoint, { method: 'GET' });
+  }
+
+  async post<T>(endpoint: string, data?: any): Promise<T | null> {
+    return this.request<T>(endpoint, {
+      method: 'POST',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  async put<T>(endpoint: string, data?: any): Promise<T | null> {
+    return this.request<T>(endpoint, {
+      method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined,
+    });
+  }
+
+  async delete<T>(endpoint: string): Promise<T | null> {
+    return this.request<T>(endpoint, { method: 'DELETE' });
+  }
+}
+
+// API 클라이언트 인스턴스
+const apiClient = new ApiClient();
+
+// 타입 정의
+export type Status = {
   is_running: boolean;
   active_opportunities: number;
   submitted_bundles: number;
@@ -52,1500 +122,550 @@ export type PerformanceReport = {
   recommendations: string[];
 };
 
-export type StrategyStats = Record<string, {
-  transactions_analyzed: number;
-  opportunities_found: number;
-  avg_analysis_time_ms: number;
-}>;
-
-// ---- System Info ----
-export type EnvVarStatus = { key: string; set: boolean };
-export type ExternalApiInfo = {
-  name: string;
-  category: string;
-  description: string;
-  docs?: string | null;
-  env: EnvVarStatus[];
-};
-
 export type SystemInfo = {
   api_mode: string;
   network: string;
   rpc_url: string;
-  ws_url?: string | null;
+  ws_url?: string;
   flashbots_relay_url: string;
   simulation_mode: boolean;
-  external_apis: ExternalApiInfo[];
+  external_apis: Array<{
+    name: string;
+    category: string;
+    description: string;
+    docs?: string;
+    env: Array<{
+      key: string;
+      set: boolean;
+    }>;
+  }>;
 };
 
-export async function getSystemInfo(): Promise<SystemInfo | null> {
-  try {
-    const res = await fetch(`${BASE}/api/system`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    const data = await res.json();
-    // Normalize legacy string array format -> rich object format
-    if (Array.isArray(data?.external_apis)) {
-      data.external_apis = data.external_apis.map((item: any) => {
-        if (typeof item === 'string') {
-          return {
-            name: item,
-            category: 'external',
-            description: item,
-            docs: null,
-            env: [],
-          } as ExternalApiInfo;
-        }
-        // Ensure required fields exist
-        return {
-          name: item?.name ?? 'Unknown',
-          category: item?.category ?? 'external',
-          description: item?.description ?? item?.name ?? '',
-          docs: item?.docs ?? null,
-          env: Array.isArray(item?.env) ? item.env : [],
-        } as ExternalApiInfo;
-      });
-    }
-    return data as SystemInfo;
-  } catch {
-    return null;
-  }
-}
-
-// ---- Strategy Params ----
-export type SandwichParams = {
-  enabled: boolean;
-  min_target_value: string;
-  max_slippage: number;
-  max_frontrun_size: string;
-  min_profit_eth: string;
-  min_profit_percentage: number;
-  gas_multiplier: number;
-  max_gas_price_gwei: string;
-  use_flashloan?: boolean;
-  flash_loan_amount?: string | null;
+export type MempoolTransaction = {
+  hash: string;
+  from: string;
+  to: string;
+  value: string;
+  gas_price: string;
+  gas_limit: number;
+  timestamp: string;
+  method?: string;
 };
 
-export type LiquidationParams = {
-  enabled: boolean;
-  protocols: string[];
-  min_health_factor: number;
-  max_liquidation_amount: string;
-  min_profit_eth: string;
-  min_liquidation_amount: string;
-  gas_multiplier: number;
-  max_gas_price_gwei: string;
-  health_factor_threshold: number;
-  max_liquidation_size: string;
-  // v2.0 새로운 파라미터들
-  funding_mode: 'auto' | 'flashloan' | 'wallet';
-  max_flashloan_fee_bps: number;
-  gas_buffer_pct: number;
-  max_concurrent_liquidations: number;
-  execution_timeout_ms: number;
-  dex_aggregator_enabled: boolean;
-  preferred_dex_aggregator: '0x' | '1inch' | 'auto';
+export type ProtocolInfo = {
+  name: string;
+  address: string;
+  type: string;
+  tvl: string;
+  volume_24h: string;
+  fees_24h: string;
+  last_updated: string;
 };
 
-export type MicroParams = {
-  enabled: boolean;
-  exchanges: any[];
-  trading_pairs: string[];
-  min_profit_percentage: number;
-  min_profit_usd: string;
-  max_position_size: string;
-  max_concurrent_trades: number;
-  execution_timeout_ms: number;
-  latency_threshold_ms: number;
-  price_update_interval_ms: number;
-  order_book_depth: number;
-  slippage_tolerance: number;
-  fee_tolerance: number;
-  risk_limit_per_trade: string;
-  daily_volume_limit: string;
-  enable_cex_trading: boolean;
-  enable_dex_trading: boolean;
-  blacklist_tokens: string[];
-  priority_tokens: string[];
-  runtime_blacklist_ttl_secs: number;
-  use_flashloan?: boolean;
-  flash_loan_amount?: string | null;
-  // v2.0 자금 조달 시스템
-  funding_mode: 'auto' | 'flashloan' | 'wallet';
-  max_flashloan_fee_bps: number;
-  gas_buffer_pct: number;
-  // v2.0 RealTimeScheduler 설정
-  price_update_interval: number; // 10ms
-  orderbook_refresh_interval: number; // 50ms
-  opportunity_scan_interval: number; // 100ms
-};
-
-export type StrategyParamsResp = {
-  sandwich: SandwichParams;
-  liquidation: LiquidationParams;
-  micro_arbitrage: MicroParams;
-  cross_chain_arbitrage?: { enabled: boolean; use_flashloan?: boolean; flash_loan_amount?: string | null };
-}
-
-export async function getStrategyParams(): Promise<StrategyParamsResp | null> {
-  const res = await fetch(`${BASE}/api/strategies/params`, { cache: 'no-cache' });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-export async function updateStrategyParams(strategy: 'sandwich'|'liquidation'|'micro'|'cross_chain_arbitrage'|'micro_arbitrage', updates: Record<string, any>): Promise<{ ok: boolean; restart_required?: boolean; error?: string; }> {
-  const res = await fetch(`${BASE}/api/strategies/params`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ strategy, updates }),
-  });
-  if (!res.ok) return { ok: false, error: 'request failed' };
-  return res.json();
-}
-
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
-
-export async function getStatus(): Promise<Status> {
-  const res = await fetch(`${BASE}/api/status`, { cache: 'no-cache' });
-  if (!res.ok) {
-    // fallback to metrics server status
-    const res2 = await fetch(`${BASE.replace(':8080', ':9090')}/status`, { cache: 'no-cache' });
-    if (!res2.ok) throw new Error('status fetch failed');
-    return res2.json();
-  }
-  return res.json();
-}
-
+// 기본 상태 반환 함수
 export function defaultStatus(): Status {
   return {
     is_running: false,
     active_opportunities: 0,
     submitted_bundles: 0,
-    total_profit_eth: '0.0',
+    total_profit_eth: '0',
     success_rate: 0,
     uptime_seconds: 0,
   };
 }
 
-// ---- Strategies API ----
-function normalizeStrategiesMap(input: Record<string, boolean>): Strategies {
-  // Backend enum keys: Sandwich, Liquidation, MicroArbitrage, CrossChainArbitrage
-  const map: Strategies = { sandwich: false, liquidation: false, micro: false, cross: false };
-  Object.entries(input || {}).forEach(([k, v]) => {
-    switch (k) {
-      case 'Sandwich':
-        map.sandwich = v; break;
-      case 'Liquidation':
-        map.liquidation = v; break;
-      case 'MicroArbitrage':
-        map.micro = v; break;
-      case 'CrossChainArbitrage':
-        map.cross = v; break;
-      default:
-        break;
-    }
-  });
-  return map;
+// API 함수들 - 안전한 방식으로 수정
+export async function getStatus(): Promise<Status> {
+  const result = await apiClient.get<Status>('/api/status');
+  return result || defaultStatus();
+}
+
+export async function getBundlesSummary(): Promise<BundlesSummary> {
+  const result = await apiClient.get<BundlesSummary>('/api/bundles/summary');
+  return result || { stats: { total_created: 0, total_submitted: 0, total_included: 0, total_failed: 0, total_profit: 0, total_gas_spent: 0, avg_submission_time_ms: 0, success_rate: 0 }, submitted_count: 0, pending_count: 0 };
+}
+
+export async function getBundlesRecent(limit: number = 10): Promise<BundleRow[]> {
+  const result = await apiClient.get<BundleRow[]>(`/api/bundles/recent?limit=${limit}`);
+  return result || [];
+}
+
+export async function getReport(): Promise<PerformanceReport> {
+  const result = await apiClient.get<PerformanceReport>('/api/performance/report');
+  return result || { summary: { transactions_processed: 0, opportunities_found: 0, bundles_submitted: 0, bundles_included: 0, total_profit_eth: '0', success_rate: 0, avg_analysis_time_ms: 0, avg_submission_time_ms: 0 }, recommendations: [] };
+}
+
+export async function getSystemInfo(): Promise<SystemInfo> {
+  const result = await apiClient.get<SystemInfo>('/api/system/info');
+  return result || {
+    api_mode: 'unknown',
+    network: 'unknown',
+    rpc_url: 'unknown',
+    flashbots_relay_url: 'unknown',
+    simulation_mode: false,
+    external_apis: []
+  };
+}
+
+export async function getMempoolTransactions(limit: number = 50): Promise<MempoolTransaction[]> {
+  const result = await apiClient.get<MempoolTransaction[]>(`/api/mempool/transactions?limit=${limit}`);
+  return result || [];
+}
+
+export async function getProtocols(): Promise<ProtocolInfo[]> {
+  const result = await apiClient.get<ProtocolInfo[]>('/api/protocols');
+  return result || [];
 }
 
 export async function getStrategies(): Promise<Strategies> {
-  const res = await fetch(`${BASE}/api/strategies`, { cache: 'no-cache' });
-  if (!res.ok) return { sandwich: false, liquidation: false, micro: false, cross: false };
-  const json = await res.json();
-  return normalizeStrategiesMap(json.enabled || {});
+  const result = await apiClient.get<Strategies>('/api/strategies');
+  return result || { sandwich: false, liquidation: false, micro: false, cross: false };
 }
 
-export async function toggleStrategy(key: StrategyKey, enabled: boolean): Promise<boolean> {
-  const res = await fetch(`${BASE}/api/strategies/toggle`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ strategy: key, enabled }),
-  });
-  if (!res.ok) return false;
-  const json = await res.json();
-  return !!json.ok;
-}
-
-export async function getStrategyStats(): Promise<StrategyStats> {
-  const res = await fetch(`${BASE}/api/strategies/stats`, { cache: 'no-cache' });
-  if (!res.ok) return {};
-  const json = await res.json();
-  return json.stats || {};
-}
-
-// ---- Bundles API ----
-export async function getBundlesSummary(): Promise<BundlesSummary> {
-  try {
-    const res = await fetch(`${BASE}/api/bundles`, { cache: 'no-cache' });
-    if (!res.ok) {
-      return {
-        stats: {
-          total_created: 0,
-          total_submitted: 0,
-          total_included: 0,
-          total_failed: 0,
-          total_profit: 0,
-          total_gas_spent: 0,
-          avg_submission_time_ms: 0,
-          success_rate: 0,
-        },
-        submitted_count: 0,
-        pending_count: 0,
-      };
-    }
-    const json = await res.json();
-    const submitted_count = Array.isArray(json.submitted) ? json.submitted.length : 0;
-    const pending_count = Array.isArray(json.pending) ? json.pending.length : 0;
-    return { stats: json.stats || {}, submitted_count, pending_count } as BundlesSummary;
-  } catch {
-    return {
-      stats: {
-        total_created: 0,
-        total_submitted: 0,
-        total_included: 0,
-        total_failed: 0,
-        total_profit: 0,
-        total_gas_spent: 0,
-        avg_submission_time_ms: 0,
-        success_rate: 0,
-      },
-      submitted_count: 0,
-      pending_count: 0,
-    };
+export async function updateStrategies(strategies: Partial<Strategies>): Promise<Strategies> {
+  const result = await apiClient.put<Strategies>('/api/strategies', strategies);
+  if (!result) {
+    throw new Error('전략 업데이트 실패');
   }
+  return result;
 }
 
-export async function getBundlesRecent(limit = 5): Promise<BundleRow[]> {
-  try {
-    const res = await fetch(`${BASE}/api/bundles`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    const mapList = (arr: any[], state: 'submitted' | 'pending'): BundleRow[] =>
-      (arr || []).slice(0, limit).map((b: any) => ({
-        id: b.id,
-        strategy: String(b.strategy || ''),
-        expected_profit: typeof b.expected_profit === 'string' ? b.expected_profit : JSON.stringify(b.expected_profit ?? '0'),
-        gas_estimate: Number(b.gas_estimate || 0),
-        timestamp: b.timestamp || '',
-        state,
-      }));
-    return [...mapList(json.submitted, 'submitted'), ...mapList(json.pending, 'pending')]
-      .slice(0, limit);
-  } catch {
-    return [];
+export async function startSearcher(): Promise<{ success: boolean; message: string }> {
+  const result = await apiClient.post<{ success: boolean; message: string }>('/api/searcher/start');
+  if (!result) {
+    throw new Error('서처 시작 실패');
   }
+  return result;
 }
 
-// ---- Bundle detail ----
-export async function getBundle(id: string): Promise<any | null> {
-  try {
-    const res = await fetch(`${BASE}/api/bundles/${id}`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json.bundle || null;
-  } catch {
-    return null;
+export async function stopSearcher(): Promise<{ success: boolean; message: string }> {
+  const result = await apiClient.post<{ success: boolean; message: string }>('/api/searcher/stop');
+  if (!result) {
+    throw new Error('서처 중지 실패');
   }
+  return result;
 }
 
-// ---- Report API ----
-export async function getReport(): Promise<PerformanceReport> {
-  const res = await fetch(`${BASE}/api/report`, { cache: 'no-cache' });
-  if (!res.ok) {
-    return {
-      summary: {
-        transactions_processed: 0,
-        opportunities_found: 0,
-        bundles_submitted: 0,
-        bundles_included: 0,
-        total_profit_eth: '0',
-        success_rate: 0,
-        avg_analysis_time_ms: 0,
-        avg_submission_time_ms: 0,
-      },
-      recommendations: [],
-    };
-  }
-  const json = await res.json();
-  return { summary: json.summary, recommendations: json.recommendations } as PerformanceReport;
-}
-
-// ---- Mempool Monitor API ----
-export type MempoolTransaction = {
-  hash: string;
-  from: string;
-  to?: string | null;
-  value: string;
-  gas_price: string;
-  gas_limit: string;
+export async function getLogs(limit: number = 100): Promise<Array<{
   timestamp: string;
-  decoded_type?: string;
-  potential_mev?: boolean;
-};
+  level: string;
+  message: string;
+  source: string;
+}>> {
+  const result = await apiClient.get<Array<{
+    timestamp: string;
+    level: string;
+    message: string;
+    source: string;
+  }>>(`/api/logs?limit=${limit}`);
+  return result || [];
+}
 
-export type MempoolStats = {
+export async function getAlerts(): Promise<Array<{
+  id: string;
+  type: 'info' | 'warning' | 'error';
+  title: string;
+  message: string;
+  timestamp: string;
+  resolved: boolean;
+}>> {
+  const result = await apiClient.get<Array<{
+    id: string;
+    type: 'info' | 'warning' | 'error';
+    title: string;
+    message: string;
+    timestamp: string;
+    resolved: boolean;
+  }>>('/api/alerts');
+  return result || [];
+}
+
+export async function resolveAlert(alertId: string): Promise<{ success: boolean }> {
+  const result = await apiClient.post<{ success: boolean }>(`/api/alerts/${alertId}/resolve`);
+  if (!result) {
+    throw new Error('알림 해결 실패');
+  }
+  return result;
+}
+
+// 추가 API 함수들 - 안전한 방식으로 수정
+export async function getDetailedPerformance(): Promise<{
+  cpu_usage: number;
+  memory_usage: number;
+  network_latency: number;
+  response_time: number;
+  throughput: number;
+  error_rate: number;
+}> {
+  const result = await apiClient.get('/api/performance/detailed');
+  return result || {
+    cpu_usage: 0,
+    memory_usage: 0,
+    network_latency: 0,
+    response_time: 0,
+    throughput: 0,
+    error_rate: 0
+  };
+}
+
+export async function getAlertStats(): Promise<{
+  total: number;
+  active: number;
+  resolved: number;
+  critical: number;
+}> {
+  const result = await apiClient.get('/api/alerts/stats');
+  return result || { total: 0, active: 0, resolved: 0, critical: 0 };
+}
+
+export async function acknowledgeAlert(alertId: string): Promise<{ success: boolean }> {
+  const result = await apiClient.post(`/api/alerts/${alertId}/acknowledge`);
+  return result || { success: false };
+}
+
+export async function acknowledgeAllAlerts(): Promise<{ success: boolean }> {
+  const result = await apiClient.post('/api/alerts/acknowledge-all');
+  return result || { success: false };
+}
+
+export async function dismissAlert(alertId: string): Promise<{ success: boolean }> {
+  const result = await apiClient.post(`/api/alerts/${alertId}/dismiss`);
+  return result || { success: false };
+}
+
+export async function getFlashloanDashboard(): Promise<{
+  total_volume: string;
+  total_profit: string;
+  active_loans: number;
+  success_rate: number;
+}> {
+  const result = await apiClient.get('/api/flashloan/dashboard');
+  return result || { total_volume: '0', total_profit: '0', active_loans: 0, success_rate: 0 };
+}
+
+export async function getMempoolStatus(): Promise<{
   total_transactions: number;
   pending_transactions: number;
   avg_gas_price: string;
-  min_gas_price: string;
-  max_gas_price: string;
-  transactions_per_second: number;
-  dex_transactions: number;
-  mev_opportunities: number;
-};
-
-export type MempoolStatus = {
-  is_monitoring: boolean;
-  connected: boolean;
-  last_block: number;
-  stats: MempoolStats;
-  recent_transactions: MempoolTransaction[];
-};
-
-export async function getMempoolStatus(): Promise<MempoolStatus | null> {
-  try {
-    const res = await fetch(`${BASE}/api/mempool/status`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+  network_congestion: number;
+}> {
+  const result = await apiClient.get('/api/mempool/status');
+  return result || { total_transactions: 0, pending_transactions: 0, avg_gas_price: '0', network_congestion: 0 };
 }
 
-export async function getMempoolTransactions(limit = 20): Promise<MempoolTransaction[]> {
-  try {
-    const res = await fetch(`${BASE}/api/mempool/transactions?limit=${limit}`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.transactions || [];
-  } catch {
-    return [];
-  }
-}
-
-// ---- Detailed Performance API ----
-export type TimeSeriesPoint = {
-  timestamp: string;
-  value: number;
-};
-
-export type StrategyPerformance = {
-  strategy: string;
-  total_opportunities: number;
-  successful_trades: number;
+export async function getMicroArbitrageV2Dashboard(): Promise<{
+  total_trades: number;
+  total_profit: string;
   success_rate: number;
-  total_profit_eth: string;
   avg_profit_per_trade: string;
-  avg_analysis_time_ms: number;
-  avg_execution_time_ms: number;
-  gas_efficiency: number;
-  hourly_profit: TimeSeriesPoint[];
-  daily_success_rate: TimeSeriesPoint[];
-};
-
-export type GasAnalytics = {
-  avg_gas_price_gwei: number;
-  avg_gas_used: number;
-  total_gas_spent_eth: string;
-  gas_efficiency_score: number;
-  gas_price_history: TimeSeriesPoint[];
-  gas_usage_by_strategy: { strategy: string; gas_used: number; percentage: number }[];
-};
-
-export type ProfitabilityMetrics = {
-  total_profit_eth: string;
-  profit_trend: 'up' | 'down' | 'stable';
-  profit_per_hour: TimeSeriesPoint[];
-  profit_by_strategy: { strategy: string; profit: string; percentage: number }[];
-  roi_percentage: number;
-  break_even_point: string;
-};
-
-export type DetailedPerformanceData = {
-  strategy_performance: StrategyPerformance[];
-  gas_analytics: GasAnalytics;
-  profitability_metrics: ProfitabilityMetrics;
-  system_health: {
-    uptime_percentage: number;
-    avg_response_time_ms: number;
-    error_rate: number;
-    memory_usage_mb: number;
-    cpu_usage_percentage: number;
-  };
-  competitive_analysis: {
-    market_share_percentage: number;
-    competitor_count: number;
-    our_success_rate: number;
-    market_avg_success_rate: number;
-  };
-};
-
-export async function getDetailedPerformance(): Promise<DetailedPerformanceData | null> {
-  try {
-    const res = await fetch(`${BASE}/api/performance/detailed`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+}> {
+  const result = await apiClient.get('/api/micro-v2/dashboard');
+  return result || { total_trades: 0, total_profit: '0', success_rate: 0, avg_profit_per_trade: '0' };
 }
 
-export async function getPerformanceChart(metric: string, timeRange = '24h'): Promise<TimeSeriesPoint[]> {
-  try {
-    const res = await fetch(`${BASE}/api/performance/chart?metric=${metric}&range=${timeRange}`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.data || [];
-  } catch {
-    return [];
-  }
+export async function getSchedulerMetrics(): Promise<{
+  active_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  avg_execution_time: number;
+}> {
+  const result = await apiClient.get('/api/scheduler/metrics');
+  return result || { active_jobs: 0, completed_jobs: 0, failed_jobs: 0, avg_execution_time: 0 };
 }
 
-// ---- Alerts API ----
-export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low' | 'info';
-export type AlertCategory = 'system' | 'performance' | 'security' | 'strategy' | 'network' | 'gas' | 'profit';
+export async function getFundingModeMetrics(): Promise<{
+  total_funding: string;
+  active_positions: number;
+  funding_rate: number;
+  utilization_rate: number;
+}> {
+  const result = await apiClient.get('/api/funding/metrics');
+  return result || { total_funding: '0', active_positions: 0, funding_rate: 0, utilization_rate: 0 };
+}
 
-export type Alert = {
+export async function getMicroOpportunities(): Promise<Array<{
   id: string;
-  title: string;
-  message: string;
-  severity: AlertSeverity;
-  category: AlertCategory;
+  pair: string;
+  profit: string;
   timestamp: string;
-  acknowledged: boolean;
-  source: string;
-  metadata?: Record<string, any>;
-  action_required?: boolean;
-  auto_resolve?: boolean;
-  resolved_at?: string | null;
-};
-
-export type AlertStats = {
-  total_alerts: number;
-  unacknowledged_count: number;
-  critical_count: number;
-  alerts_last_24h: number;
-  most_frequent_category: AlertCategory;
-  avg_resolution_time_minutes: number;
-};
-
-export async function getAlerts(unacknowledged_only = false): Promise<Alert[]> {
-  try {
-    const res = await fetch(`${BASE}/api/alerts?unacknowledged_only=${unacknowledged_only}`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.alerts || [];
-  } catch {
-    return [];
-  }
+  status: string;
+}>> {
+  const result = await apiClient.get('/api/micro/opportunities');
+  return result || [];
 }
 
-export async function getAlertStats(): Promise<AlertStats | null> {
-  try {
-    const res = await fetch(`${BASE}/api/alerts/stats`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function acknowledgeAlert(alertId: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/api/alerts/${alertId}/acknowledge`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function acknowledgeAllAlerts(): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/api/alerts/acknowledge-all`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function dismissAlert(alertId: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/api/alerts/${alertId}/dismiss`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-// ---- Micro Arbitrage Specific API ----
-export type TradingPairInfo = {
-  pair: string;
-  base_token: string;
-  quote_token: string;
-  exchanges: string[];
-  spread_percentage: number;
-  volume_24h: string;
-  last_trade_time: string;
-  is_active: boolean;
-};
-
-export type ExchangeInfo = {
-  name: string;
-  type: 'CEX' | 'DEX';
-  connected: boolean;
-  last_ping_ms: number;
-  trading_fee_percentage: number;
-  supported_pairs: string[];
-  volume_24h: string;
-  reliability_score: number;
-};
-
-export type ArbitrageOpportunity = {
+export async function getMicroTradeHistory(): Promise<Array<{
   id: string;
   pair: string;
-  buy_exchange: string;
-  sell_exchange: string;
-  buy_price: string;
-  sell_price: string;
-  spread_percentage: number;
-  potential_profit_usd: string;
-  required_capital: string;
-  estimated_gas_cost: string;
-  confidence_score: number;
-  expires_at: string;
-  risk_level: 'low' | 'medium' | 'high';
-  execution_time_estimate_ms: number;
-};
-
-export type MicroTradeHistory = {
-  id: string;
-  pair: string;
-  buy_exchange: string;
-  sell_exchange: string;
-  buy_amount: string;
-  sell_amount: string;
-  profit_usd: string;
-  execution_time_ms: number;
-  gas_cost: string;
-  status: 'success' | 'failed' | 'partial';
+  amount: string;
+  profit: string;
   timestamp: string;
-  failure_reason?: string;
-};
+}>> {
+  const result = await apiClient.get('/api/micro/trades');
+  return result || [];
+}
 
-export type MicroArbitrageMetrics = {
-  total_trades_today: number;
-  successful_trades_today: number;
-  total_profit_today_usd: string;
-  avg_profit_per_trade: string;
-  avg_execution_time_ms: number;
-  success_rate_percentage: number;
+export async function getMicroArbitrageDashboard(): Promise<{
+  total_trades: number;
+  total_profit: string;
+  success_rate: number;
   active_opportunities: number;
-  monitored_pairs: number;
-  connected_exchanges: number;
-  position_size_utilization: number;
-  daily_volume_limit_used: number;
-  risk_limit_used: number;
-  best_performing_pair: string;
-  worst_performing_pair: string;
-};
-
-export type PriceAnalytics = {
-  pair: string;
-  current_spread: number;
-  avg_spread_1h: number;
-  avg_spread_24h: number;
-  max_spread_24h: number;
-  min_spread_24h: number;
-  spread_volatility: number;
-  price_history: TimeSeriesPoint[];
-  volume_history: TimeSeriesPoint[];
-};
-
-export type MicroArbitrageDashboard = {
-  metrics: MicroArbitrageMetrics;
-  active_opportunities: ArbitrageOpportunity[];
-  recent_trades: MicroTradeHistory[];
-  trading_pairs: TradingPairInfo[];
-  exchanges: ExchangeInfo[];
-  price_analytics: PriceAnalytics[];
-  risk_analysis: {
-    current_exposure_usd: string;
-    max_exposure_usd: string;
-    diversification_score: number;
-    correlation_risk: number;
-    liquidity_risk: number;
-  };
-};
-
-export async function getMicroArbitrageDashboard(): Promise<MicroArbitrageDashboard | null> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/micro/dashboard`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+}> {
+  const result = await apiClient.get('/api/micro/dashboard');
+  return result || { total_trades: 0, total_profit: '0', success_rate: 0, active_opportunities: 0 };
 }
 
-export async function getMicroOpportunities(): Promise<ArbitrageOpportunity[]> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/micro/opportunities`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.opportunities || [];
-  } catch {
-    return [];
-  }
+export async function getNetworkHealth(): Promise<{
+  status: string;
+  latency: number;
+  uptime: number;
+  last_check: string;
+}> {
+  const result = await apiClient.get('/api/network/health');
+  return result || { status: 'unknown', latency: 0, uptime: 0, last_check: new Date().toISOString() };
 }
 
-export async function getMicroTradeHistory(limit = 50): Promise<MicroTradeHistory[]> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/micro/trades?limit=${limit}`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.trades || [];
-  } catch {
-    return [];
-  }
+export async function runLatencyTest(): Promise<{
+  avg_latency: number;
+  min_latency: number;
+  max_latency: number;
+  test_duration: number;
+}> {
+  const result = await apiClient.post('/api/network/latency-test');
+  return result || { avg_latency: 0, min_latency: 0, max_latency: 0, test_duration: 0 };
 }
 
-export async function getMicroPairAnalytics(pair: string): Promise<PriceAnalytics | null> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/micro/analytics/${pair}`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+export async function acknowledgeNetworkIncident(incidentId: string): Promise<{ success: boolean }> {
+  const result = await apiClient.post(`/api/network/incidents/${incidentId}/acknowledge`);
+  return result || { success: false };
 }
 
-// ---- On-Chain Data Analysis API ----
-export type BlockInfo = {
-  number: number;
-  hash: string;
-  timestamp: string;
-  gas_used: string;
-  gas_limit: string;
-  base_fee: string;
-  miner: string;
+export async function getOnChainAnalytics(): Promise<{
+  total_volume: string;
+  total_fees: string;
+  active_addresses: number;
   transaction_count: number;
-  mev_transactions: number;
-  total_mev_value: string;
-};
+}> {
+  const result = await apiClient.get('/api/onchain/analytics');
+  return result || { total_volume: '0', total_fees: '0', active_addresses: 0, transaction_count: 0 };
+}
 
-export type TokenInfo = {
-  address: string;
-  name: string;
-  symbol: string;
-  decimals: number;
-  total_supply: string;
-  market_cap?: string;
-  price_usd?: string;
-  volume_24h?: string;
-  liquidity?: string;
-  verified: boolean;
-};
-
-export type DexPool = {
-  address: string;
-  dex_name: string;
-  token0: TokenInfo;
-  token1: TokenInfo;
-  reserve0: string;
-  reserve1: string;
-  total_liquidity_usd: string;
-  volume_24h_usd: string;
-  fee_tier: string;
-  apy?: number;
-  last_trade_time: string;
-};
-
-export type OnChainTransaction = {
+export async function getMevTransactions(): Promise<Array<{
   hash: string;
-  block_number: number;
-  from: string;
-  to?: string;
-  value: string;
-  gas_used: string;
-  gas_price: string;
+  type: string;
+  profit: string;
   timestamp: string;
-  function_name?: string;
-  token_transfers: TokenTransfer[];
-  mev_type?: 'sandwich' | 'arbitrage' | 'liquidation' | 'frontrun' | 'backrun';
-  mev_profit?: string;
-  dex_trades?: DexTrade[];
-};
+}>> {
+  const result = await apiClient.get('/api/onchain/mev-transactions');
+  return result || [];
+}
 
-export type TokenTransfer = {
-  token_address: string;
-  token_symbol: string;
+export async function getWhaleTransactions(): Promise<Array<{
+  hash: string;
   from: string;
   to: string;
   amount: string;
-  amount_usd?: string;
-};
-
-export type DexTrade = {
-  dex_name: string;
-  pool_address: string;
-  token_in: string;
-  token_out: string;
-  amount_in: string;
-  amount_out: string;
-  price_impact: number;
-};
-
-export type GasTracking = {
-  current_base_fee: string;
-  recommended_gas_prices: {
-    slow: string;
-    standard: string;
-    fast: string;
-    instant: string;
-  };
-  gas_price_history: TimeSeriesPoint[];
-  block_utilization: number;
-  next_base_fee_estimate: string;
-};
-
-export type MevMetrics = {
-  total_mev_volume_eth: string;
-  mev_transactions_count: number;
-  sandwich_attacks: number;
-  arbitrage_opportunities: number;
-  liquidations: number;
-  average_mev_per_block: string;
-  top_mev_bots: {
-    address: string;
-    profit_eth: string;
-    transaction_count: number;
-    success_rate: number;
-  }[];
-};
-
-export type LiquidityAnalysis = {
-  total_tvl_usd: string;
-  top_pools: DexPool[];
-  new_pools_24h: number;
-  removed_liquidity_24h: string;
-  added_liquidity_24h: string;
-  impermanent_loss_risk: 'low' | 'medium' | 'high';
-};
-
-export type OnChainAnalytics = {
-  latest_block: BlockInfo;
-  gas_tracking: GasTracking;
-  mev_metrics: MevMetrics;
-  liquidity_analysis: LiquidityAnalysis;
-  trending_tokens: TokenInfo[];
-  whale_transactions: OnChainTransaction[];
-  flash_loan_activities: OnChainTransaction[];
-  protocol_stats: {
-    uniswap_v3_volume: string;
-    uniswap_v2_volume: string;
-    sushiswap_volume: string;
-    aave_tvl: string;
-    compound_tvl: string;
-  };
-};
-
-export async function getOnChainAnalytics(): Promise<OnChainAnalytics | null> {
-  try {
-    const res = await fetch(`${BASE}/api/onchain/analytics`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-// ---- Cross-Chain Dashboard API ----
-export type CrossDashboard = {
-  summary: {
-    total_opportunities: number;
-    trades_executed: number;
-    success_rate: number;
-    total_profit: number;
-    avg_execution_time: number;
-    failed_trades: number;
-  };
-  recent_routes: { protocol: string; from: string; to: string; avg_time: number; success_rate: number }[];
-};
-
-export async function getCrossDashboard(): Promise<CrossDashboard | null> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/cross/dashboard`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function getTokenAnalysis(tokenAddress: string): Promise<TokenInfo | null> {
-  try {
-    const res = await fetch(`${BASE}/api/onchain/token/${tokenAddress}`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function getPoolAnalysis(poolAddress: string): Promise<DexPool | null> {
-  try {
-    const res = await fetch(`${BASE}/api/onchain/pool/${poolAddress}`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function getMevTransactions(limit = 20): Promise<OnChainTransaction[]> {
-  try {
-    const res = await fetch(`${BASE}/api/onchain/mev-transactions?limit=${limit}`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.transactions || [];
-  } catch {
-    return [];
-  }
-}
-
-export async function getWhaleTransactions(minValueUsd = 100000, limit = 20): Promise<OnChainTransaction[]> {
-  try {
-    const res = await fetch(`${BASE}/api/onchain/whale-transactions?min_value=${minValueUsd}&limit=${limit}`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.transactions || [];
-  } catch {
-    return [];
-  }
-}
-
-export async function getFlashLoanActivities(limit = 20): Promise<OnChainTransaction[]> {
-  try {
-    const res = await fetch(`${BASE}/api/onchain/flashloans?limit=${limit}`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.transactions || [];
-  } catch {
-    return [];
-  }
-}
-
-// ---- Network Health Monitor API ----
-export type NodeInfo = {
-  name: string;
-  url: string;
-  type: 'RPC' | 'WebSocket' | 'GraphQL';
-  status: 'healthy' | 'degraded' | 'down' | 'unknown';
-  last_check: string;
-  response_time_ms: number;
-  uptime_percentage: number;
-  block_height: number;
-  syncing: boolean;
-  peer_count: number;
-  version?: string;
-  error_message?: string;
-};
-
-export type NetworkMetrics = {
-  current_block: number;
-  blocks_behind: number;
-  avg_block_time_seconds: number;
-  network_hash_rate: string;
-  difficulty: string;
-  pending_transactions: number;
-  gas_price_gwei: number;
-  total_nodes_monitored: number;
-  healthy_nodes: number;
-  degraded_nodes: number;
-  down_nodes: number;
-};
-
-export type FlashbotsStatus = {
-  relay_status: 'online' | 'offline' | 'degraded';
-  last_bundle_submitted: string;
-  bundle_inclusion_rate: number;
-  avg_bundle_response_time_ms: number;
-  total_bundles_submitted_today: number;
-  successful_bundles_today: number;
-  relay_uptime_percentage: number;
-  estimated_relay_load: number;
-};
-
-export type ExternalServiceStatus = {
-  service_name: string;
-  category: 'price_feed' | 'data_provider' | 'infrastructure' | 'dex' | 'analytics';
-  status: 'operational' | 'degraded' | 'outage' | 'unknown';
-  response_time_ms: number;
-  last_successful_call: string;
-  error_rate_percentage: number;
-  rate_limit_remaining?: number;
-  rate_limit_reset?: string;
-  uptime_percentage: number;
-  incidents_24h: number;
-};
-
-export type SystemResourceMetrics = {
-  cpu_usage_percentage: number;
-  memory_usage_percentage: number;
-  memory_used_mb: number;
-  memory_total_mb: number;
-  disk_usage_percentage: number;
-  disk_free_gb: number;
-  network_in_mbps: number;
-  network_out_mbps: number;
-  active_connections: number;
-  load_average: number[];
-  goroutines_count?: number;
-  heap_size_mb?: number;
-};
-
-export type NetworkLatencyTest = {
-  target: string;
-  latency_ms: number;
-  packet_loss_percentage: number;
-  jitter_ms: number;
   timestamp: string;
-  status: 'good' | 'fair' | 'poor';
-};
-
-export type NetworkHealthDashboard = {
-  network_metrics: NetworkMetrics;
-  nodes: NodeInfo[];
-  flashbots_status: FlashbotsStatus;
-  external_services: ExternalServiceStatus[];
-  system_resources: SystemResourceMetrics;
-  latency_tests: NetworkLatencyTest[];
-  network_incidents: {
-    id: string;
-    title: string;
-    severity: 'critical' | 'high' | 'medium' | 'low';
-    status: 'open' | 'investigating' | 'resolved';
-    started_at: string;
-    resolved_at?: string;
-    affected_services: string[];
-    description: string;
-  }[];
-  performance_trends: {
-    block_time_trend: TimeSeriesPoint[];
-    gas_price_trend: TimeSeriesPoint[];
-    node_uptime_trend: TimeSeriesPoint[];
-    system_load_trend: TimeSeriesPoint[];
-  };
-};
-
-export async function getNetworkHealth(): Promise<NetworkHealthDashboard | null> {
-  try {
-    const res = await fetch(`${BASE}/api/network/health`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+}>> {
+  const result = await apiClient.get('/api/onchain/whale-transactions');
+  return result || [];
 }
 
-export async function getNodeStatus(nodeUrl: string): Promise<NodeInfo | null> {
-  try {
-    const res = await fetch(`${BASE}/api/network/node-status?url=${encodeURIComponent(nodeUrl)}`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function getServiceStatus(serviceName: string): Promise<ExternalServiceStatus | null> {
-  try {
-    const res = await fetch(`${BASE}/api/network/service-status/${serviceName}`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function runLatencyTest(target: string): Promise<NetworkLatencyTest | null> {
-  try {
-    const res = await fetch(`${BASE}/api/network/latency-test`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target }),
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function acknowledgeNetworkIncident(incidentId: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/api/network/incidents/${incidentId}/acknowledge`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-// ---- Risk Management API ----
-export type PositionRisk = {
-  strategy: string;
-  token_symbol: string;
-  position_size_usd: string;
-  max_position_size_usd: string;
-  utilization_percentage: number;
-  unrealized_pnl_usd: string;
-  risk_level: 'low' | 'medium' | 'high' | 'critical';
-  liquidation_price?: string;
-  margin_ratio?: number;
-  time_to_liquidation_hours?: number;
-};
-
-export type VolatilityMetrics = {
-  token_symbol: string;
-  price_usd: string;
-  volatility_24h: number;
-  volatility_7d: number;
-  volatility_30d: number;
-  beta_to_eth: number;
-  correlation_to_btc: number;
-  risk_rating: 'low' | 'medium' | 'high' | 'extreme';
-  var_95_1d: string; // Value at Risk 95% 1-day
-  expected_shortfall: string;
-};
-
-export type LiquidityRisk = {
-  token_symbol: string;
-  total_liquidity_usd: string;
-  depth_1_percent: string;
-  depth_5_percent: string;
-  bid_ask_spread_bps: number;
-  liquidity_score: number;
-  slippage_impact_1k: number;
-  slippage_impact_10k: number;
-  slippage_impact_100k: number;
-  market_impact_score: number;
-};
-
-export type CounterpartyRisk = {
-  counterparty_name: string;
-  counterparty_type: 'dex' | 'cex' | 'protocol' | 'bridge';
-  exposure_usd: string;
-  risk_score: number;
-  credit_rating?: string;
-  tvl_usd?: string;
-  security_audit_score?: number;
-  insurance_coverage?: boolean;
-  last_incident?: string;
-  incident_count_6m: number;
-};
-
-export type GasRisk = {
-  current_gas_price_gwei: number;
-  gas_price_volatility: number;
-  max_acceptable_gas_gwei: number;
-  gas_limit_buffer_percentage: number;
-  estimated_daily_gas_cost_eth: string;
-  gas_cost_vs_profit_ratio: number;
-  gas_spike_probability: number;
-  optimal_gas_threshold_gwei: number;
-};
-
-export type PortfolioRisk = {
-  total_exposure_usd: string;
-  max_daily_loss_usd: string;
-  current_drawdown_percentage: number;
-  max_drawdown_percentage: number;
-  sharpe_ratio: number;
-  sortino_ratio: number;
-  calmar_ratio: number;
-  win_rate_percentage: number;
-  avg_win_loss_ratio: number;
-  correlation_matrix: Record<string, Record<string, number>>;
-};
-
-export type RiskLimit = {
-  id: string;
-  name: string;
-  type: 'position_size' | 'daily_loss' | 'gas_cost' | 'concentration' | 'leverage';
-  current_value: string;
-  limit_value: string;
-  utilization_percentage: number;
-  status: 'safe' | 'warning' | 'breached' | 'critical';
-  last_updated: string;
-  auto_action?: 'pause' | 'reduce' | 'liquidate';
-};
-
-export type StressTestScenario = {
-  id: string;
-  name: string;
-  description: string;
-  parameters: {
-    eth_price_change: number;
-    gas_price_multiplier: number;
-    liquidity_reduction: number;
-    volatility_multiplier: number;
-  };
-  results: {
-    estimated_loss_usd: string;
-    positions_at_risk: number;
-    liquidation_probability: number;
-    recovery_time_hours: number;
-  };
-  last_run: string;
-};
-
-export type RiskEvent = {
-  id: string;
-  timestamp: string;
-  event_type: 'limit_breach' | 'position_liquidated' | 'high_volatility' | 'gas_spike' | 'counterparty_issue';
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  title: string;
-  description: string;
-  affected_strategies: string[];
-  impact_usd: string;
-  auto_action_taken?: string;
-  manual_action_required: boolean;
-  resolved: boolean;
-  resolution_time_minutes?: number;
-};
-
-export type RiskDashboard = {
-  portfolio_risk: PortfolioRisk;
-  position_risks: PositionRisk[];
-  volatility_metrics: VolatilityMetrics[];
-  liquidity_risks: LiquidityRisk[];
-  counterparty_risks: CounterpartyRisk[];
-  gas_risk: GasRisk;
-  risk_limits: RiskLimit[];
-  stress_test_scenarios: StressTestScenario[];
-  recent_risk_events: RiskEvent[];
-  risk_summary: {
-    overall_risk_score: number;
-    risk_adjusted_return: number;
-    risk_capacity_utilization: number;
-    days_since_last_incident: number;
-    active_alerts_count: number;
-  };
-};
-
-export async function getRiskDashboard(): Promise<RiskDashboard | null> {
-  try {
-    const res = await fetch(`${BASE}/api/risk/dashboard`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function runStressTest(scenarioId: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/api/risk/stress-test/${scenarioId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function updateRiskLimit(limitId: string, newLimit: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/api/risk/limits/${limitId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limit_value: newLimit }),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function acknowledgeRiskEvent(eventId: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/api/risk/events/${eventId}/acknowledge`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function emergencyPauseStrategy(strategy: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE}/api/risk/emergency-pause`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ strategy }),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-// ---- Liquidation v2.0 API ----
-export type LiquidationOpportunity = {
-  id: string;
-  protocol: 'aave' | 'compound';
-  user_address: string;
-  collateral_token: string;
-  debt_token: string;
-  health_factor: number;
-  liquidation_amount: string;
-  collateral_amount: string;
-  expected_profit: string;
-  gas_estimate: string;
-  confidence_score: number;
-  expires_at: string;
-  funding_mode: 'flashloan' | 'wallet';
-  dex_route: string;
-};
-
-export type ProtocolStatus = {
-  protocol: 'aave' | 'compound';
-  connected: boolean;
-  last_scan_time: string;
-  total_users: number;
-  liquidatable_positions: number;
-  total_collateral_usd: string;
-  total_debt_usd: string;
-  avg_health_factor: number;
-  scan_latency_ms: number;
-};
-
-export type LiquidationMetrics = {
-  total_opportunities: number;
-  successful_liquidations: number;
-  failed_liquidations: number;
-  success_rate: number;
-  total_profit_usd: string;
-  avg_profit_per_liquidation: string;
-  avg_execution_time_ms: number;
-  flashloan_usage_rate: number;
-  wallet_mode_usage_rate: number;
-  auto_mode_decisions: {
-    flashloan_selected: number;
-    wallet_selected: number;
-    total_decisions: number;
-  };
-};
-
-export type LiquidationDashboard = {
-  metrics: LiquidationMetrics;
-  protocol_status: ProtocolStatus[];
-  active_opportunities: LiquidationOpportunity[];
-  recent_liquidations: {
-    id: string;
-    protocol: string;
-    user_address: string;
-    profit_usd: string;
-    execution_time_ms: number;
-    funding_mode: string;
-    timestamp: string;
-    status: 'success' | 'failed';
-  }[];
-  profitability_analysis: {
-    flashloan_vs_wallet: {
-      flashloan_avg_profit: string;
-      wallet_avg_profit: string;
-      flashloan_success_rate: number;
-      wallet_success_rate: number;
-    };
-  };
-};
-
-export async function getLiquidationDashboard(): Promise<LiquidationDashboard | null> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/liquidation/dashboard`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function getLiquidationOpportunities(): Promise<LiquidationOpportunity[]> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/liquidation/opportunities`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.opportunities || [];
-  } catch {
-    return [];
-  }
-}
-
-export async function getProtocolStatus(): Promise<ProtocolStatus[]> {
-  try {
-    const res = await fetch(`${BASE}/api/protocols/status`, { cache: 'no-cache' });
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.protocols || [];
-  } catch {
-    return [];
-  }
-}
-
-// ---- Micro Arbitrage v2.0 Scheduler API ----
-export type SchedulerMetrics = {
-  price_update_frequency: number; // 실제 주기 (ms)
-  orderbook_refresh_frequency: number;
-  opportunity_scan_frequency: number;
-  price_updates_per_second: number;
-  orderbook_updates_per_second: number;
-  opportunities_scanned_per_second: number;
-  scheduler_efficiency: number; // 0-1
-  missed_cycles_count: number;
-  avg_cycle_latency_ms: number;
-};
-
-export type FundingModeMetrics = {
-  auto_mode_decisions: {
-    flashloan_selected: number;
-    wallet_selected: number;
-    skipped_unprofitable: number;
-    total_decisions: number;
-  };
-  profitability_comparison: {
-    flashloan_avg_net_profit: string;
-    wallet_avg_net_profit: string;
-    flashloan_success_rate: number;
-    wallet_success_rate: number;
-  };
-  cost_analysis: {
-    flashloan_avg_cost: string;
-    wallet_avg_cost: string;
-    gas_savings_percentage: number;
-  };
-};
-
-export type MicroArbitrageV2Dashboard = {
-  scheduler_metrics: SchedulerMetrics;
-  funding_mode_metrics: FundingModeMetrics;
-  traditional_metrics: MicroArbitrageMetrics;
-  real_time_status: {
-    price_monitor_active: boolean;
-    orderbook_monitor_active: boolean;
-    opportunity_scanner_active: boolean;
-    current_funding_mode: 'auto' | 'flashloan' | 'wallet';
-    next_scan_in_ms: number;
-  };
-};
-
-export async function getMicroArbitrageV2Dashboard(): Promise<MicroArbitrageV2Dashboard | null> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/micro/v2/dashboard`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function getSchedulerMetrics(): Promise<SchedulerMetrics | null> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/micro/scheduler/metrics`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function getFundingModeMetrics(): Promise<FundingModeMetrics | null> {
-  try {
-    const res = await fetch(`${BASE}/api/strategies/micro/funding/metrics`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-// ---- Flashloan API ----
-export type FlashloanProvider = {
-  available: boolean;
-  max_amount: string;
-  fee_rate: string;
-  gas_cost: string;
-  last_update: number;
-};
-
-export type FlashloanTransaction = {
-  tx_hash: string;
-  timestamp: number;
-  provider: string;
-  token: string;
+export async function getFlashLoanActivities(): Promise<Array<{
+  hash: string;
+  protocol: string;
   amount: string;
-  fee_paid: string;
-  strategy: string;
   profit: string;
-  gas_used: string;
-  status: 'success' | 'failed' | 'pending';
-};
+  timestamp: string;
+}>> {
+  const result = await apiClient.get('/api/onchain/flashloan-activities');
+  return result || [];
+}
 
-export type FlashloanContract = {
-  address: string;
+export async function getRiskDashboard(): Promise<{
+  risk_score: number;
+  exposure: string;
+  max_drawdown: string;
+  var_95: string;
+  stress_test_results: any;
+}> {
+  const result = await apiClient.get('/api/risk/dashboard');
+  return result || { risk_score: 0, exposure: '0', max_drawdown: '0', var_95: '0', stress_test_results: null };
+}
+
+export async function runStressTest(): Promise<{
+  test_id: string;
+  status: string;
+  results: any;
+  timestamp: string;
+}> {
+  const result = await apiClient.post('/api/risk/stress-test');
+  return result || { test_id: '', status: 'failed', results: null, timestamp: new Date().toISOString() };
+}
+
+export async function emergencyPauseStrategy(strategyId: string): Promise<{ success: boolean }> {
+  const result = await apiClient.post(`/api/strategies/${strategyId}/emergency-pause`);
+  return result || { success: false };
+}
+
+export async function acknowledgeRiskEvent(eventId: string): Promise<{ success: boolean }> {
+  const result = await apiClient.post(`/api/risk/events/${eventId}/acknowledge`);
+  return result || { success: false };
+}
+
+export async function getStrategyParams(): Promise<Record<string, any>> {
+  const result = await apiClient.get('/api/strategies/params');
+  return result || {};
+}
+
+export async function updateStrategyParams(params: Record<string, any>): Promise<{ success: boolean }> {
+  const result = await apiClient.put('/api/strategies/params', params);
+  return result || { success: false };
+}
+
+export async function getStrategyStats(): Promise<{
+  total_strategies: number;
+  active_strategies: number;
+  total_profit: string;
+  success_rate: number;
+}> {
+  const result = await apiClient.get('/api/strategies/stats');
+  return result || { total_strategies: 0, active_strategies: 0, total_profit: '0', success_rate: 0 };
+}
+
+export async function toggleStrategy(strategyId: string, enabled: boolean): Promise<{ success: boolean }> {
+  const result = await apiClient.post(`/api/strategies/${strategyId}/toggle`, { enabled });
+  return result || { success: false };
+}
+
+export async function getBundle(bundleId: string): Promise<{
+  id: string;
+  strategy: string;
+  transactions: any[];
+  expected_profit: string;
+  gas_estimate: number;
+  status: string;
+  timestamp: string;
+}> {
+  const result = await apiClient.get(`/api/bundles/${bundleId}`);
+  return result || {
+    id: bundleId,
+    strategy: 'unknown',
+    transactions: [],
+    expected_profit: '0',
+    gas_estimate: 0,
+    status: 'unknown',
+    timestamp: new Date().toISOString()
+  };
+}
+
+export async function getLiquidationDashboard(): Promise<{
+  total_liquidations: number;
+  total_profit: string;
+  active_positions: number;
+  success_rate: number;
+}> {
+  const result = await apiClient.get('/api/liquidation/dashboard');
+  return result || { total_liquidations: 0, total_profit: '0', active_positions: 0, success_rate: 0 };
+}
+
+export async function getProtocolStatus(): Promise<Array<{
   name: string;
-  verified: boolean;
-  proxy: boolean;
-  implementation: string | null;
-};
+  status: string;
+  tvl: string;
+  last_updated: string;
+}>> {
+  const result = await apiClient.get('/api/protocols/status');
+  return result || [];
+}
 
-export type SmartContract = {
-  solidity_version: string;
-  source_code: string;
-};
+export async function getLiquidationOpportunities(): Promise<Array<{
+  id: string;
+  protocol: string;
+  position: string;
+  health_factor: number;
+  liquidation_threshold: number;
+  estimated_profit: string;
+  timestamp: string;
+}>> {
+  const result = await apiClient.get('/api/liquidation/opportunities');
+  return result || [];
+}
 
-export type FlashloanDashboard = {
-  flashloan_providers: Record<string, FlashloanProvider>;
-  recent_flashloans: FlashloanTransaction[];
-  performance_metrics: {
-    total_flashloans: number;
-    total_volume: string;
-    total_fees_paid: string;
-    total_profit: string;
-    success_rate: number;
-    avg_profit_per_loan: string;
-    most_used_provider: string;
-  };
-  flashloan_contracts: Record<string, FlashloanContract>;
-  smart_contracts: Record<string, SmartContract>;
-  gas_analytics: {
-    avg_gas_per_flashloan: string;
-    most_expensive_flashloan: string;
-    cheapest_flashloan: string;
-    gas_optimization_savings: string;
-  };
-};
-
-export async function getFlashloanDashboard(): Promise<FlashloanDashboard | null> {
-  try {
-    const res = await fetch(`${BASE}/api/flashloan/dashboard`, { cache: 'no-cache' });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
+// 에러 핸들링 유틸리티
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status?: number,
+    public code?: string
+  ) {
+    super(message);
+    this.name = 'ApiError';
   }
+}
+
+// 재시도 로직이 포함된 API 호출
+export async function withRetry<T>(
+  apiCall: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 1000
+): Promise<T> {
+  let lastError: Error;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await apiCall();
+    } catch (error) {
+      lastError = error as Error;
+      
+      if (attempt === maxRetries) {
+        throw lastError;
+      }
+
+      // 지수 백오프
+      const waitTime = delay * Math.pow(2, attempt - 1);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+  }
+
+  throw lastError!;
+}
+
+// 캐시된 API 호출
+const cache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_DURATION = 30000; // 30초
+
+export async function getCached<T>(
+  key: string,
+  apiCall: () => Promise<T>,
+  ttl: number = CACHE_DURATION
+): Promise<T> {
+  const cached = cache.get(key);
+  const now = Date.now();
+
+  if (cached && (now - cached.timestamp) < ttl) {
+    return cached.data;
+  }
+
+  try {
+    const data = await apiCall();
+    cache.set(key, { data, timestamp: now });
+    return data;
+  } catch (error) {
+    // 캐시된 데이터가 있으면 반환
+    if (cached) {
+      return cached.data;
+    }
+    throw error;
+  }
+}
+
+// 캐시 클리어
+export function clearCache(): void {
+  cache.clear();
+}
+
+// 특정 키 캐시 클리어
+export function clearCacheKey(key: string): void {
+  cache.delete(key);
 }

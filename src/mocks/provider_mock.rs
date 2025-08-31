@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use anyhow::Result;
-use ethers::providers::{Provider, Middleware};
-use ethers::types::{Block, TxHash, U64, U256, H256, H160, Transaction as EthersTransaction};
+use ethers::providers::Provider;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};

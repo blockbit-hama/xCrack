@@ -1,0 +1,229 @@
+import { getStatus, defaultStatus, getBundlesSummary, getBundlesRecent, getReport } from "../lib/api";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
+import { Progress } from "../components/ui/progress";
+
+export const dynamic = 'force-dynamic';
+
+export default async function Page() {
+  const [status, bundles, recent, report] = await Promise.all([
+    getStatus().catch(() => defaultStatus()),
+    getBundlesSummary().catch(() => ({ stats: { total_created: 0, total_submitted: 0, total_included: 0, total_failed: 0, total_profit: 0, total_gas_spent: 0, avg_submission_time_ms: 0, success_rate: 0 }, submitted_count: 0, pending_count: 0 })),
+    getBundlesRecent(5).catch(() => []),
+    getReport().catch(() => ({ summary: { transactions_processed: 0, opportunities_found: 0, bundles_submitted: 0, bundles_included: 0, total_profit_eth: '0', success_rate: 0, avg_analysis_time_ms: 0, avg_submission_time_ms: 0 }, recommendations: [] })),
+  ]);
+
+  const successRate = status.success_rate * 100;
+  const uptimeHours = Math.floor(status.uptime_seconds / 3600);
+  const uptimeMinutes = Math.floor((status.uptime_seconds % 3600) / 60);
+
+  return (
+    <div className="space-y-6">
+      {/* 헤더 */}
+      <div className="border-b pb-4">
+        <h1 className="text-3xl font-bold">xCrack MEV Dashboard</h1>
+        <p className="text-gray-600 mt-1">실시간 MEV 기회 탐지 및 실행 시스템</p>
+      </div>
+
+      {/* 주요 지표 카드 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">시스템 상태</CardTitle>
+            <div className={`w-3 h-3 rounded-full ${status.is_running ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`}></div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {status.is_running ? '실행 중' : '중지됨'}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              활성 기회: {status.active_opportunities}개
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">총 수익</CardTitle>
+            <span className="text-green-600">💰</span>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {parseFloat(status.total_profit_eth).toFixed(4)} ETH
+            </div>
+            <p className="text-xs text-muted-foreground">
+              번들 제출: {status.submitted_bundles}개
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">성공률</CardTitle>
+            <span className="text-blue-600">📊</span>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {successRate.toFixed(1)}%
+            </div>
+            <Progress value={successRate} className="mt-2" />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">가동 시간</CardTitle>
+            <span className="text-purple-600">⏱️</span>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {uptimeHours}h {uptimeMinutes}m
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {status.uptime_seconds}초
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 번들 통계 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">번들 생성</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{bundles.stats.total_created}</div>
+            <p className="text-xs text-muted-foreground">총 생성된 번들</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">번들 제출</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">{bundles.stats.total_submitted}</div>
+            <p className="text-xs text-muted-foreground">제출된 번들</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">번들 포함</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{bundles.stats.total_included}</div>
+            <p className="text-xs text-muted-foreground">블록에 포함된 번들</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">번들 실패</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{bundles.stats.total_failed}</div>
+            <p className="text-xs text-muted-foreground">실패한 번들</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 최근 번들 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>최근 번들 활동</CardTitle>
+          <CardDescription>최근 5개의 번들 실행 내역</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {recent.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              최근 번들 활동이 없습니다.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {recent.map((bundle) => (
+                <div key={bundle.id} className="flex items-center justify-between p-4 border rounded-lg">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                      <span className="text-white font-bold text-sm">
+                        {bundle.strategy.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div>
+                      <div className="font-medium">#{bundle.id.slice(0, 8)}...</div>
+                      <div className="text-sm text-gray-500">{bundle.strategy}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-4">
+                    <div className="text-right">
+                      <div className="font-medium text-green-600">{bundle.expected_profit} ETH</div>
+                      <div className="text-sm text-gray-500">{bundle.gas_estimate} gas</div>
+                    </div>
+                    <Badge variant={bundle.state === 'submitted' ? 'info' : 'warning'}>
+                      {bundle.state}
+                    </Badge>
+                    <div className="text-sm text-gray-500">
+                      {new Date(bundle.timestamp).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 성능 지표 및 권장사항 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>성능 지표</CardTitle>
+            <CardDescription>시스템 성능 및 응답 시간</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium">평균 분석 시간</span>
+              <span className="text-sm text-gray-600">{report.summary.avg_analysis_time_ms.toFixed(2)} ms</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium">평균 제출 시간</span>
+              <span className="text-sm text-gray-600">{report.summary.avg_submission_time_ms.toFixed(2)} ms</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium">처리된 트랜잭션</span>
+              <span className="text-sm text-gray-600">{report.summary.transactions_processed.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium">발견된 기회</span>
+              <span className="text-sm text-gray-600">{report.summary.opportunities_found.toLocaleString()}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>시스템 권장사항</CardTitle>
+            <CardDescription>성능 최적화를 위한 권장사항</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {report.recommendations.length === 0 ? (
+              <div className="text-center py-4 text-gray-500">
+                현재 권장사항이 없습니다.
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {report.recommendations.slice(0, 5).map((recommendation, index) => (
+                  <li key={index} className="flex items-start space-x-2">
+                    <span className="text-blue-500 mt-1">•</span>
+                    <span className="text-sm">{recommendation}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

@@ -2,21 +2,20 @@ use anyhow::Result;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime},
 };
 use uuid::Uuid;
 
 use crate::{
     strategies::{
-        execution_engine::{ExecutionStrategy, ExecutionTask, QuantExecutionEngine},
-        traits::Strategy,
+        execution_engine::{ExecutionStrategy, ExecutionTask},
     },
     types::{OrderSide, Position, StrategyType},
 };
 use alloy::primitives::U256;
 
 use super::{
-    data_provider::{DataProvider, HistoricalDataPoint, MockDataProvider},
+    data_provider::{HistoricalDataPoint, MockDataProvider},
     performance::PerformanceAnalyzer,
     scenarios::BacktestScenario,
 };

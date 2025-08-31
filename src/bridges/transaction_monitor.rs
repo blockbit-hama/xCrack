@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use tokio::sync::{RwLock, mpsc};
-use tokio::time::{interval, sleep, Duration, Instant};
+use tokio::time::{interval, Duration};
 use chrono::{DateTime, Utc};
 use tracing::{info, debug, warn, error};
 use serde::{Serialize, Deserialize};
 use alloy::primitives::{B256, Address, U256};
-use futures::StreamExt;
 
 use crate::types::{ChainId, BridgeProtocol};
 use super::performance_tracker::{BridgePerformanceTracker, ExecutionStatus};
@@ -731,7 +730,7 @@ impl BridgeTransactionMonitor {
                 
                 // 완료된 트랜잭션들을 히스토리로 이동
                 for execution_id in completed_ids {
-                    if let Some(completed_tx) = active.remove(&execution_id) {
+                    if let Some(_completed_tx) = active.remove(&execution_id) {
                         // 성능 추적기에 완료 상태 기록
                         // 이는 이미 완료 처리된 경우 중복 호출될 수 있으므로 체크 필요
                         // (별도 로직에서 처리되므로 여기서는 생략)
@@ -895,8 +894,8 @@ impl BridgeTransactionMonitor {
     /// 실제 트랜잭션 상태 확인 (RPC 호출)
     async fn check_transaction_status(
         transaction: &mut MonitoredTransaction,
-        rpc_endpoints: &HashMap<ChainId, String>,
-        confirmation_requirements: &HashMap<ChainId, u64>,
+        _rpc_endpoints: &HashMap<ChainId, String>,
+        _confirmation_requirements: &HashMap<ChainId, u64>,
     ) -> Result<()> {
         // 실제 구현에서는 각 체인의 RPC를 호출하여 트랜잭션 상태 확인
         // 여기서는 기본 구조만 제공

@@ -1,5 +1,10 @@
 // xCrack MEV Searcher Library
 
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+#![allow(non_snake_case)]
+
 pub mod config;
 pub mod strategies;
 pub mod protocols;
@@ -23,6 +28,6 @@ pub mod constants;
 
 // Re-exports for convenience
 pub use config::Config;
-pub use strategies::{IntegratedLiquidationManager, LiquidationStrategyV2};
+pub use strategies::{integrated_liquidation_manager::IntegratedLiquidationManager, LiquidationStrategyV2};
 pub use protocols::MultiProtocolScanner;
 pub use mev::MEVBundleExecutor;

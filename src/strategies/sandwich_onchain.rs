@@ -2,20 +2,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
 use tokio::sync::Mutex;
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, warn};
 use alloy::primitives::{Address, B256, U256};
-use ethers::providers::{Provider, Ws, Middleware};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::time::Instant;
-use tokio::time::{sleep, Duration};
 
 use crate::config::Config;
 use crate::types::{Transaction, Opportunity, StrategyType, Bundle};
 use crate::strategies::Strategy;
 use crate::blockchain::{
-    BlockchainClient, ContractFactory, DexRouterContract, AmmPoolContract, 
-    TransactionDecoder, EventListener, LogParser
+    BlockchainClient, ContractFactory, 
+    TransactionDecoder
 };
 use crate::oracle::{PriceOracle, PriceAggregator, ChainlinkOracle, UniswapTwapOracle};
 use crate::utils::abi::{ABICodec, contracts};
@@ -58,7 +56,8 @@ pub struct OnChainSandwichStrategy {
 }
 
 #[derive(Debug, Clone)]
-struct PoolInfo {
+#[allow(dead_code)]
+pub struct PoolInfo {
     /// 풀 주소
     address: Address,
     /// 토큰 0
@@ -76,6 +75,7 @@ struct PoolInfo {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct PriceInfo {
     /// 현재 가격 (토큰1/토큰0)
     price: f64,
@@ -86,6 +86,7 @@ struct PriceInfo {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct OnChainSandwichStats {
     pools_monitored: u64,
     transactions_analyzed: u64,
@@ -590,7 +591,7 @@ impl OnChainSandwichStrategy {
     async fn calculate_sandwich_profit_onchain(
         &self,
         sandwich_size: &U256,
-        pool: &PoolInfo,
+        _pool: &PoolInfo,
         price_impact: f64
     ) -> Result<(U256, U256, U256)> {
         // 현재 가스 가격 가져오기
@@ -650,7 +651,7 @@ impl OnChainSandwichStrategy {
         score *= liquidity_factor;
         
         // 네트워크 혼잡도 (현재 블록의 가스 사용률 기반)
-        let current_block = self.blockchain_client.get_current_block().await?;
+        let _current_block = self.blockchain_client.get_current_block().await?;
         let network_factor = 0.8; // 실제로는 블록 가스 사용률로 계산
         score *= network_factor;
         
@@ -662,8 +663,8 @@ impl OnChainSandwichStrategy {
         &self,
         amount: &U256,
         pool: &PoolInfo,
-        target_gas_price: U256,
-        min_out_multiplier: f64,
+        _target_gas_price: U256,
+        _min_out_multiplier: f64,
         to_recipient: Address
     ) -> Result<Transaction> {
         let competitive_gas = self.blockchain_client.calculate_competitive_gas_price(0.8).await?;
@@ -710,8 +711,8 @@ impl OnChainSandwichStrategy {
         &self,
         amount: &U256,
         pool: &PoolInfo,
-        target_gas_price: U256,
-        min_out_multiplier: f64,
+        _target_gas_price: U256,
+        _min_out_multiplier: f64,
         to_recipient: Address
     ) -> Result<Transaction> {
         let competitive_gas = self.blockchain_client.calculate_competitive_gas_price(0.7).await?;
@@ -967,7 +968,7 @@ impl Strategy for OnChainSandwichStrategy {
         };
 
         // Flashloan 경로 제거: 정책상 샌드위치는 플래시론을 사용하지 않음
-        let mut txs = vec![approve_tx, frontrun.clone(), backrun.clone()];
+        let txs = vec![approve_tx, frontrun.clone(), backrun.clone()];
         if self.config.strategies.sandwich.use_flashloan {
             warn!("⚠️ Sandwich: flashloan 비활성 정책. use_flashloan=true 무시합니다.");
         }

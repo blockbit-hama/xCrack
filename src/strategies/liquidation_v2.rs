@@ -222,7 +222,7 @@ impl LiquidationStrategyV2 {
                     .unwrap_or(debt_position.amount);
                 
                 // 청산 보너스를 고려한 예상 담보 획득량 계산
-                let liquidation_bonus = user.liquidation_bonus.get(&debt_asset).copied().unwrap_or(0.05);
+                let _liquidation_bonus = user.liquidation_bonus.get(&debt_asset).copied().unwrap_or(0.05);
                 let expected_collateral_amount = max_liquidatable * U256::from((1.05 * 1e18) as u128) / U256::from(1e18 as u128);
                 
                 // 각 DEX에서 견적 수집
@@ -272,7 +272,7 @@ impl LiquidationStrategyV2 {
         &self,
         user: &LiquidatableUser,
         strategy: &ProfitabilityStrategy,
-        analysis: &LiquidationProfitabilityAnalysis,
+        _analysis: &LiquidationProfitabilityAnalysis,
     ) -> Result<Bytes> {
         debug!("🔨 Building execution transaction for user {}", user.address);
         

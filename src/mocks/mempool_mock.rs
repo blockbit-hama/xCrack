@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{info, debug, warn};
-use ethers::types::{Transaction as EthersTransaction, H256 as EthersH256, Address as EthersAddress, U256 as EthersU256, U64};
 use alloy::primitives::{Address, B256 as H256, U256};
 use rand::Rng;
 
@@ -58,7 +57,7 @@ impl MockMempoolMonitor {
         self.is_running.store(true, Ordering::SeqCst);
         
         let mock_config = self.mock_config.clone();
-        let config = Arc::clone(&self.config);
+        let _config = Arc::clone(&self.config);
         
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(200));
@@ -106,7 +105,7 @@ impl MockMempoolMonitor {
         Self::generate_mock_transaction_static(index, &self.mock_config).await
     }
     
-    async fn generate_mock_transaction_static(index: u64, mock_config: &MockConfig) -> Transaction {
+    async fn generate_mock_transaction_static(_index: u64, mock_config: &MockConfig) -> Transaction {
         use rand::Rng;
         let mut rng = rand::thread_rng();
         let timestamp = chrono::Utc::now();

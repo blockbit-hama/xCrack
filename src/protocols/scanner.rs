@@ -88,9 +88,9 @@ impl MultiProtocolScanner {
         info!("🚀 Starting background protocol scanning...");
         
         // Start scanning task
-        let cached_users = Arc::clone(&self.cached_users);
-        let cached_stats = Arc::clone(&self.cached_stats);
-        let scanners_clone = &self.scanners; // Reference, not clone
+        let _cached_users = Arc::clone(&self.cached_users);
+        let _cached_stats = Arc::clone(&self.cached_stats);
+        let _scanners_clone = &self.scanners; // Reference, not clone
         let scan_interval = self.scan_interval_sec;
         let is_running_clone = Arc::clone(&self.is_running);
         

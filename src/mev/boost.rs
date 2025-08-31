@@ -1,19 +1,18 @@
 use std::sync::Arc;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use ethers::{
-    providers::{Provider, Http, Middleware},
-    types::{Transaction, H256, U256, Address, Bytes, Block, Signature},
+    types::{Transaction, H256, U256, Address, Signature},
     signers::{LocalWallet, Signer},
     utils::hex,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tracing::{info, debug, warn, error};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::collections::{HashMap, BTreeMap};
+use std::collections::HashMap;
 use reqwest::Client as HttpClient;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::mev::{Bundle, FlashbotsClient};
+use crate::mev::Bundle;
 use crate::blockchain::BlockchainClient;
 
 /// MEV-Boost 클라이언트
@@ -652,7 +651,7 @@ impl BlockBuilder {
         };
 
         // 번들 큐에서 트랜잭션 추가
-        let mut queue = self.bundle_queue.lock().await;
+        let queue = self.bundle_queue.lock().await;
         let mut remaining_gas = template.gas_limit;
 
         for bundle in queue.iter() {

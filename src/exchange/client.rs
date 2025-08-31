@@ -3,15 +3,14 @@ use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use reqwest::{Client, header::HeaderMap};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error, debug};
+use tracing::info;
 use alloy::primitives::U256;
 use rust_decimal::Decimal;
-use chrono::{DateTime, Utc};
 use std::time::{Duration, Instant};
 
-use crate::types::{OrderSide, OrderStatus};
+use crate::types::OrderStatus;
 
 /// Exchange client trait for unified trading interface
 #[async_trait]

@@ -156,7 +156,7 @@ export default async function ProtocolsPage() {
           <h2 className="text-lg font-semibold mb-4">건강도 분포 분석</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-red-50 p-4 rounded-lg">
-              <h3 className="font-medium text-red-700">위험 (HF < 1.1)</h3>
+              <h3 className="font-medium text-red-700">위험 (HF &lt; 1.1)</h3>
               <p className="text-2xl font-bold text-red-800">
                 {protocolStatus.reduce((sum, p) => sum + p.liquidatable_positions, 0)}
               </p>
@@ -168,7 +168,7 @@ export default async function ProtocolsPage() {
               <div className="text-sm text-yellow-600">모니터링 필요</div>
             </div>
             <div className="bg-green-50 p-4 rounded-lg">
-              <h3 className="font-medium text-green-700">안전 (HF > 1.5)</h3>
+              <h3 className="font-medium text-green-700">안전 (HF &gt; 1.5)</h3>
               <p className="text-2xl font-bold text-green-800">-</p>
               <div className="text-sm text-green-600">정상 상태</div>
             </div>

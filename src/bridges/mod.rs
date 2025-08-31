@@ -15,7 +15,6 @@ pub mod dynamic_scorer;
 pub mod target_execution;
 
 // Re-exports
-pub use traits::{Bridge, BridgeQuote, BridgeError, BridgeResult};
 pub use stargate::StargateBridge;
 pub use hop::HopBridge;
 pub use rubic::RubicBridge;
@@ -24,9 +23,3 @@ pub use lifi::LiFiBridge;
 pub use across::AcrossBridge;
 pub use multichain::MultichainBridge;
 pub use manager::{BridgeManager, RouteStrategy};
-pub use performance_tracker::{BridgePerformanceTracker, BridgePerformanceData};
-pub use transaction_monitor::{BridgeTransactionMonitor, TransactionStatus as BridgeTransactionStatus};
-pub use profit_verifier::{CrossChainProfitVerifier, ProfitAnalysis as ProfitVerificationResult};
-pub use hedging_strategy::{CrossChainHedgingStrategy, HedgeStrategyType as HedgeType};
-pub use dynamic_scorer::{DynamicBridgeScorer, BridgeScore, RouteScore};
-pub use target_execution::{TargetChainExecutionManager, ExecutionWorkflow, ExecutionWorkflowBuilder};

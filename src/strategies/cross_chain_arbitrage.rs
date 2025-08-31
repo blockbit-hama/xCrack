@@ -10,14 +10,14 @@ use uuid::Uuid;
 use tracing::{info, debug, warn};
 use chrono::{DateTime, Utc, Duration as ChronoDuration};
 use async_trait::async_trait;
-use alloy::primitives::{Address as AlloyAddress, U256 as AlloyU256, Bytes as AlloyBytes};
+// Alloy primitives not used in this file
 
 use crate::{
     config::Config,
     types::{
         StrategyType, ChainId, BridgeProtocol, CrossChainToken, 
         CrossChainArbitrageOpportunity, CrossChainTrade, Transaction,
-        Opportunity, Bundle
+        Opportunity
     },
     strategies::traits::Strategy,
     mocks::{get_mock_config, MockConfig},
@@ -477,7 +477,7 @@ impl CrossChainArbitrageStrategy {
         // 2) 1차 거래 실행 (quote의 라우트 기반 프로토콜 우선)
         // 실행 타임아웃(보수적으로 quote.estimated_time + 60초)
         let exec_timeout_secs = quote.estimated_time.saturating_add(60).max(60);
-        let mut execution = match tokio_timeout(
+        let execution = match tokio_timeout(
             Duration::from_secs(exec_timeout_secs as u64),
             self.bridge_manager.execute_bridge(primary_protocol.clone(), &quote),
         ).await {
@@ -671,7 +671,7 @@ impl Strategy for CrossChainArbitrageStrategy {
     }
     
     /// 거래 분석 및 기회 발견
-    async fn analyze(&self, transaction: &Transaction) -> Result<Vec<Opportunity>> {
+    async fn analyze(&self, _transaction: &Transaction) -> Result<Vec<Opportunity>> {
         // 크로스체인 기회 스캔
         let cross_chain_opportunities = self.scan_opportunities().await?;
         
@@ -733,7 +733,7 @@ impl Strategy for CrossChainArbitrageStrategy {
     /// 번들 생성
     async fn create_bundle(&self, opportunity: &Opportunity) -> Result<crate::types::Bundle> {
         // Mock 번들 생성
-        let bundle_id = format!("crosschain_{}", uuid::Uuid::new_v4().to_string()[..8].to_string());
+        let _bundle_id = format!("crosschain_{}", uuid::Uuid::new_v4().to_string()[..8].to_string());
         
         Ok(crate::types::Bundle::new(
             vec![], // Cross-chain은 복잡한 트랜잭션 조합

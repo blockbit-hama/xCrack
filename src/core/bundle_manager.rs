@@ -163,7 +163,7 @@ impl BundleManager {
         }
         
         // 번들 ID 생성
-        let bundle_id = format!("bundle_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
+        let _bundle_id = format!("bundle_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
         
         let bundle = Bundle::new(
             all_transactions,

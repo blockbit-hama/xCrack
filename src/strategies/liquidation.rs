@@ -22,6 +22,7 @@ use crate::strategies::Strategy;
 /// Aave, Compound 등의 대출 프로토콜에서 청산 가능한 포지션을 감지하고,
 /// 다른 청산자들보다 먼저 청산을 실행하여 보상을 획득합니다.
 pub struct CompetitiveLiquidationStrategy {
+    #[allow(dead_code)]
     config: Arc<Config>,
     provider: Arc<Provider<Ws>>,
     enabled: Arc<AtomicBool>,
@@ -34,6 +35,7 @@ pub struct CompetitiveLiquidationStrategy {
     min_liquidation_amount: U256,
     
     // 가스 가격 전략
+    #[allow(dead_code)]
     gas_multiplier: f64,
     max_gas_price: U256,
     
@@ -46,6 +48,7 @@ pub struct CompetitiveLiquidationStrategy {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct LendingProtocolInfo {
     name: String,
     lending_pool_address: H160,
@@ -66,6 +69,7 @@ struct LiquidationStats {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct LiquidationOpportunity {
     target_user: H160,
     collateral_token: H160,
@@ -81,6 +85,7 @@ struct LiquidationOpportunity {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct UserPosition {
     user: H160,
     collateral_token: H160,
@@ -297,7 +302,7 @@ impl CompetitiveLiquidationStrategy {
     }
     
     /// 청산 가능한 포지션 조회
-    async fn get_liquidatable_positions(&self, protocol_info: &LendingProtocolInfo) -> Result<Vec<UserPosition>> {
+    async fn get_liquidatable_positions(&self, _protocol_info: &LendingProtocolInfo) -> Result<Vec<UserPosition>> {
         // 실제 구현에서는 프로토콜의 상태를 조회하여 청산 가능한 포지션을 찾아야 함
         // 여기서는 샘플 데이터로 구현
         
@@ -423,6 +428,7 @@ impl CompetitiveLiquidationStrategy {
     }
     
     /// 청산 트랜잭션 생성
+    #[allow(dead_code)]
     async fn create_liquidation_transaction(
         &self,
         opportunity: &LiquidationOpportunity,

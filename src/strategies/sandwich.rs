@@ -26,6 +26,7 @@ fn format_eth_amount(wei: U256) -> String {
 /// 멤풀에서 대형 스왑 트랜잭션을 감지하고, 해당 트랜잭션 앞뒤로
 /// 우리의 트랜잭션을 삽입하여 가격 변동으로부터 수익을 추출합니다.
 pub struct RealTimeSandwichStrategy {
+    #[allow(dead_code)]
     config: Arc<Config>,
     provider: Arc<Provider<Ws>>,
     enabled: Arc<AtomicBool>,
@@ -47,10 +48,13 @@ pub struct RealTimeSandwichStrategy {
 
 #[derive(Debug, Clone)]
 struct DexInfo {
+    #[allow(dead_code)]
     name: String,
     router_address: Address,
+    #[allow(dead_code)]
     factory_address: Address,
     swap_function: Vec<u8>,
+    #[allow(dead_code)]
     fee: u32, // basis points (e.g., 30 = 0.3%)
 }
 
@@ -69,7 +73,9 @@ struct SandwichOpportunity {
     target_tx: Transaction,
     front_run_tx: Transaction,
     back_run_tx: Transaction,
+    #[allow(dead_code)]
     expected_profit: U256,
+    #[allow(dead_code)]
     gas_cost: U256,
     net_profit: U256,
     success_probability: f64,
@@ -278,7 +284,7 @@ impl RealTimeSandwichStrategy {
     }
     
     /// 스왑 트랜잭션 파싱
-    async fn parse_swap_transaction(&self, tx: &Transaction, dex_info: &DexInfo) -> Result<SwapDetails> {
+    async fn parse_swap_transaction(&self, tx: &Transaction, _dex_info: &DexInfo) -> Result<SwapDetails> {
         // 실제 구현에서는 ABI를 사용하여 스왑 파라미터를 파싱
         // 여기서는 간단한 예시로 구현
         
@@ -297,7 +303,7 @@ impl RealTimeSandwichStrategy {
     }
     
     /// 가격 영향 계산
-    async fn calculate_price_impact(&self, swap_details: &SwapDetails, dex_info: &DexInfo) -> Result<PriceImpact> {
+    async fn calculate_price_impact(&self, swap_details: &SwapDetails, _dex_info: &DexInfo) -> Result<PriceImpact> {
         // 실제 구현에서는 DEX의 풀 상태를 조회하여 계산
         // 여기서는 간단한 추정치 사용
         
@@ -409,8 +415,8 @@ impl RealTimeSandwichStrategy {
     async fn calculate_sandwich_profit(
         &self,
         front_run_tx: &Transaction,
-        back_run_tx: &Transaction,
-        swap_details: &SwapDetails,
+        _back_run_tx: &Transaction,
+        _swap_details: &SwapDetails,
         optimal_size: &OptimalSize,
     ) -> Result<(U256, U256, U256)> {
         // 가스 비용 계산
@@ -483,7 +489,9 @@ impl RealTimeSandwichStrategy {
 
 #[derive(Debug, Clone)]
 struct SwapDetails {
+    #[allow(dead_code)]
     token_in: Address,
+    #[allow(dead_code)]
     token_out: Address,
     amount_in: U256,
     amount_out_min: U256,
@@ -494,12 +502,14 @@ struct SwapDetails {
 #[derive(Debug, Clone)]
 struct PriceImpact {
     percentage: f64,
+    #[allow(dead_code)]
     absolute: U256,
 }
 
 #[derive(Debug, Clone)]
 struct OptimalSize {
     amount: U256,
+    #[allow(dead_code)]
     confidence: f64,
 }
 

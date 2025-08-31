@@ -1,10 +1,10 @@
 use anyhow::Result;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     sync::{Arc, RwLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::{mpsc, Mutex};
+// tokio::sync imports removed as unused
 use uuid::Uuid;
 
 use crate::{

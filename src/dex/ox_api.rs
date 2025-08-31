@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info};
+use serde::Deserialize;
+use tracing::debug;
 use alloy::primitives::{Address, U256};
 use async_trait::async_trait;
 
@@ -17,6 +17,7 @@ pub struct ZeroXAggregator {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ZeroXQuoteResponse {
     #[serde(rename = "sellTokenAddress")]
     sell_token_address: String,
@@ -50,6 +51,7 @@ struct ZeroXSource {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ZeroXPriceResponse {
     price: String,
     #[serde(rename = "estimatedPriceImpact")]

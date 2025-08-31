@@ -244,7 +244,7 @@ impl MEVBundleExecutor {
         debug!("📡 Submitting to builder: {}", builder_url);
         
         // BundleOptions 생성
-        let bundle_options = crate::mev::flashbots::BundleOptions {
+        let _bundle_options = crate::mev::flashbots::BundleOptions {
             min_timestamp: bundle.metadata.min_timestamp,
             max_timestamp: bundle.metadata.max_timestamp,
             reverting_tx_hashes: None,
@@ -255,7 +255,7 @@ impl MEVBundleExecutor {
         // 제출 타임아웃 설정 (3초)
         // Note: Mock mode에서는 types::Bundle 타입 사용
         let types_bundle = crate::types::Bundle::new(
-            bundle.transactions.iter().map(|tx| {
+            bundle.transactions.iter().map(|_tx| {
                 crate::types::Transaction {
                     hash: alloy::primitives::B256::ZERO, // TODO: 실제 해시
                     from: alloy::primitives::Address::ZERO, // TODO: 실제 발신자
@@ -279,7 +279,7 @@ impl MEVBundleExecutor {
             300_000u64, // gas_estimate
             crate::types::StrategyType::Liquidation, // strategy type
         );
-        let mut flashbots_client = self.flashbots_client.lock().await;
+        let flashbots_client = self.flashbots_client.lock().await;
         let submission_future = flashbots_client.submit_bundle(&types_bundle);
         
         match timeout(Duration::from_secs(3), submission_future).await {
@@ -362,7 +362,7 @@ impl MEVBundleExecutor {
         });
         
         // Bundle 상태 업데이트
-        if let Some(mut pending_bundle) = self.pending_bundles.write().await.get_mut(&bundle.bundle_id) {
+        if let Some(pending_bundle) = self.pending_bundles.write().await.get_mut(&bundle.bundle_id) {
             pending_bundle.status = BundleStatus::Included;
         }
         

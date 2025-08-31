@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use anyhow::Result;
 use ethers::prelude::*;
-use rand::Rng;
 use tracing::{info, debug, warn};
 
 use crate::config::Config;

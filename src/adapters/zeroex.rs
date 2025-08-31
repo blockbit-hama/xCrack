@@ -4,7 +4,7 @@ use alloy::primitives::{Address, U256};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::HashMap;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// 0x API 응답 구조체
 #[derive(Debug, Clone, Deserialize)]

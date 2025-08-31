@@ -2,16 +2,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use tokio::sync::{RwLock, mpsc};
-use tokio::time::{interval, Duration, Instant};
-use chrono::{DateTime, Utc, Duration as ChronoDuration};
+use tokio::time::{interval, Duration};
+use chrono::{DateTime, Utc};
 use tracing::{info, debug, warn, error};
 use serde::{Serialize, Deserialize};
-use alloy::primitives::U256;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 
-use crate::types::{ChainId, BridgeProtocol, CrossChainToken};
-use super::transaction_monitor::{MonitoredTransaction, TransactionStatus};
+use crate::types::{ChainId, CrossChainToken};
+use super::transaction_monitor::MonitoredTransaction;
 
 /// 크로스체인 가격 변동 헤징 전략 시스템
 /// 
@@ -726,7 +725,7 @@ impl CrossChainHedgingStrategy {
     }
     
     /// 헤징 전략 선택
-    async fn select_hedge_strategy(&self, target: &HedgeTarget, risk: &RiskAssessment) -> Result<HedgeStrategyType> {
+    async fn select_hedge_strategy(&self, _target: &HedgeTarget, risk: &RiskAssessment) -> Result<HedgeStrategyType> {
         // 리스크 수준에 따른 전략 선택
         if risk.risk_score >= 80 {
             // 고위험: 복합 헤징
@@ -1111,7 +1110,7 @@ impl CrossChainHedgingStrategy {
         }
     }
     
-    async fn calculate_delta_hedge_ratio(&self, target: &HedgeTarget) -> Result<Decimal> {
+    async fn calculate_delta_hedge_ratio(&self, _target: &HedgeTarget) -> Result<Decimal> {
         // Mock 델타 헤징 비율 계산
         // 실제로는 옵션 그릭스를 사용하여 계산
         Ok(Decimal::from_str_exact("0.75").unwrap())
@@ -1123,7 +1122,7 @@ impl CrossChainHedgingStrategy {
         Ok(pnl)
     }
     
-    async fn calculate_hedge_effectiveness(&self, position: &HedgePosition) -> Result<HedgeEffectiveness> {
+    async fn calculate_hedge_effectiveness(&self, _position: &HedgePosition) -> Result<HedgeEffectiveness> {
         // Mock 헤징 효과성 계산
         Ok(HedgeEffectiveness {
             hedge_ratio: Decimal::from_str_exact("0.85").unwrap(),
@@ -1195,7 +1194,7 @@ impl RiskCalculator {
         Ok(var)
     }
     
-    async fn calculate_position_risk(&self, target: &HedgeTarget, position_size: Decimal, entry_price: Decimal) -> Result<RiskMetrics> {
+    async fn calculate_position_risk(&self, _target: &HedgeTarget, position_size: Decimal, entry_price: Decimal) -> Result<RiskMetrics> {
         // Mock 리스크 메트릭 계산
         let exposure = position_size * entry_price;
         let daily_volatility = Decimal::from_str_exact("2.5").unwrap(); // 2.5%

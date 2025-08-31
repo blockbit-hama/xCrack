@@ -10,7 +10,6 @@ use ethers::providers::{Provider, Ws};
 use crate::config::Config;
 use crate::types::{PerformanceMetrics, Transaction, Opportunity, Bundle};
 use crate::strategies::StrategyManager;
-use crate::mocks::{is_mock_mode, MockFlashbotsClient, MockRpcProvider, MockMempoolMonitor};
 use super::{
     BundleManager, 
     CoreMempoolMonitor, 
@@ -148,9 +147,9 @@ impl SearcherCore {
         self.strategy_manager.start_all_strategies().await?;
         
         // 2. 채널 생성
-        let (tx_sender, mut tx_receiver) = mpsc::unbounded_channel::<Transaction>();
-        let (opportunity_sender, mut opportunity_receiver) = mpsc::unbounded_channel::<Opportunity>();
-        let (bundle_sender, mut bundle_receiver) = mpsc::unbounded_channel::<Bundle>();
+        let (tx_sender, tx_receiver) = mpsc::unbounded_channel::<Transaction>();
+        let (opportunity_sender, opportunity_receiver) = mpsc::unbounded_channel::<Opportunity>();
+        let (bundle_sender, bundle_receiver) = mpsc::unbounded_channel::<Bundle>();
         
         // 채널 저장 (run_main_loop에서 사용하기 위해)
         // Note: 실제로는 Arc<RwLock<>> 패턴이 더 안전하지만, 현재 구조상 mut self가 필요
@@ -341,7 +340,7 @@ impl SearcherCore {
         
         // 성능 모니터링 태스크
         let performance_tracker = Arc::clone(&self.performance_tracker);
-        let mempool_monitor = Arc::clone(&self.mempool_monitor);
+        let _mempool_monitor = Arc::clone(&self.mempool_monitor);
         let bundle_manager = Arc::clone(&self.bundle_manager);
         
         tokio::spawn(async move {

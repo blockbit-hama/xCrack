@@ -32,7 +32,7 @@ impl UniswapV3Adapter {
     }
     
     /// Uniswap V3 풀 주소 계산
-    async fn get_pool_address(&self, token_a: Address, token_b: Address, fee: u32) -> Result<Address> {
+    async fn get_pool_address(&self, token_a: Address, _token_b: Address, fee: u32) -> Result<Address> {
         // 실제 구현에서는 팩토리에서 풀 주소 조회
         // 여기서는 Mock 구현
         let mut pool_bytes = [0u8; 20];
@@ -43,7 +43,7 @@ impl UniswapV3Adapter {
     }
     
     /// Uniswap V3 견적 계산 (Quoter 시뮬레이션)
-    async fn quote_exact_input_single(&self, token_in: Address, token_out: Address, amount_in: U256, fee: u32) -> Result<U256> {
+    async fn quote_exact_input_single(&self, _token_in: Address, _token_out: Address, amount_in: U256, _fee: u32) -> Result<U256> {
         // Mock 계산: 실제로는 Quoter 컨트랙트 호출 필요
         let output_amount = amount_in * U256::from(995) / U256::from(1000); // 0.5% 수수료
         Ok(output_amount)

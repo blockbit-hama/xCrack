@@ -7,5 +7,5 @@ pub mod real_time_scheduler;
 pub use monitor::ExchangeMonitor;
 pub use price_feed_manager::PriceFeedManager;
 pub use order_executor::OrderExecutor;
-pub use client::{ExchangeClient, BinanceClient, CoinbaseClient, ExchangeClientFactory};
+pub use client::{ExchangeClient, ExchangeClientFactory};
 pub use real_time_scheduler::RealTimeScheduler;

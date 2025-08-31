@@ -9,7 +9,7 @@ use ethers::{
 };
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-use tracing::{info, warn, debug};
+use tracing::{warn, debug};
 
 use super::price_oracle::{PriceOracle, PriceSource, PriceData};
 
@@ -80,7 +80,7 @@ impl UniswapTwapOracle {
     }
     
     /// 풀에서 TWAP 가격 가져오기
-    async fn get_twap_from_pool(&self, pool_address: Address, period: u32) -> Result<Decimal> {
+    async fn get_twap_from_pool(&self, pool_address: Address, _period: u32) -> Result<Decimal> {
         let abi_json = r#"[
             {
                 "inputs": [{"internalType": "uint32[]", "name": "secondsAgos", "type": "uint32[]"}],
@@ -252,7 +252,7 @@ impl PriceOracle for UniswapTwapOracle {
         Ok(prices)
     }
     
-    async fn get_twap(&self, token: Address, period_seconds: u64) -> Result<PriceData> {
+    async fn get_twap(&self, token: Address, _period_seconds: u64) -> Result<PriceData> {
         // 실제 TWAP 구현
         // 현재는 간단하게 현재 가격 반환
         let mut price_data = self.get_price_usd(token).await?;

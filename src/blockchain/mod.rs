@@ -4,12 +4,9 @@ pub mod events;
 pub mod abi;
 pub mod decoder;
 
-pub use rpc::{BlockchainClient, MultiChainRpcManager};
+pub use rpc::BlockchainClient;
 pub use contracts::{
-    ContractInterface, ContractFactory,
-    DexRouterContract, AmmPoolContract, LendingPoolContract, ERC20Contract,
-    UserAccountData, ReserveData
+    ContractFactory, LendingPoolContract,
+    UserAccountData
 };
-pub use events::{EventListener, LogParser};
-pub use abi::AbiManager;
 pub use decoder::TransactionDecoder;

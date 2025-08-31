@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc, Duration as ChronoDuration, Timelike};
-use tracing::{info, debug, warn, error};
+use chrono::{DateTime, Utc, Timelike};
+use tracing::info;
 use serde::{Serialize, Deserialize};
 use alloy::primitives::U256;
 
@@ -560,7 +560,7 @@ impl DynamicBridgeScorer {
         };
         
         // 모든 브리지 성능 데이터 가져오기
-        let all_performance = self.performance_tracker.get_all_bridge_performance().await;
+        let _all_performance = self.performance_tracker.get_all_bridge_performance().await;
         
         let mut bridge_scores = HashMap::new();
         let mut valid_bridges = Vec::new();
@@ -932,7 +932,6 @@ impl DynamicBridgeScorer {
             ChainId::Optimism => RiskLevel::Low,
             ChainId::BSC => RiskLevel::Medium,
             ChainId::Avalanche => RiskLevel::Medium,
-            _ => RiskLevel::High,
         }
     }
     

@@ -1,11 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use tokio::sync::Mutex;
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, warn};
 use alloy::primitives::{Address, U256};
 use ethers::{
-    providers::{Provider, Ws, Middleware},
     types::{H160, U256 as EthersU256},
 };
 use async_trait::async_trait;
@@ -22,8 +21,8 @@ use serde::Deserialize;
 use crate::storage::{Storage, UserPositionRecord, PriceHistoryRecord, LiquidationEvent};
 use crate::strategies::Strategy;
 use crate::blockchain::{
-    BlockchainClient, ContractFactory, LendingPoolContract, ERC20Contract,
-    UserAccountData, ReserveData, TransactionDecoder
+    BlockchainClient, ContractFactory, LendingPoolContract,
+    UserAccountData, TransactionDecoder
 };
 
 /// 온체인 데이터 기반 경쟁적 청산 전략
@@ -64,7 +63,7 @@ pub struct OnChainLiquidationStrategy {
 }
 
 #[derive(Debug, Clone)]
-struct LendingProtocolInfo {
+pub struct LendingProtocolInfo {
     name: String,
     protocol_type: ProtocolType,
     lending_pool_address: Address,
@@ -82,7 +81,8 @@ enum ProtocolType {
 }
 
 #[derive(Debug, Clone)]
-struct UserPosition {
+#[allow(dead_code)]
+pub struct UserPosition {
     user: Address,
     protocol: Address,
     collateral_assets: Vec<CollateralPosition>,
@@ -95,6 +95,7 @@ struct UserPosition {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CollateralPosition {
     asset: Address,
     amount: U256,
@@ -103,6 +104,7 @@ struct CollateralPosition {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct DebtPosition {
     asset: Address,
     amount: U256,
@@ -111,6 +113,7 @@ struct DebtPosition {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct AssetPrice {
     asset: Address,
     price_usd: f64,
@@ -120,6 +123,7 @@ struct AssetPrice {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum PriceSource {
     Chainlink,
     Uniswap,
@@ -128,6 +132,7 @@ enum PriceSource {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct OnChainLiquidationStats {
     protocols_monitored: u64,
     users_monitored: u64,
@@ -316,6 +321,7 @@ impl OnChainLiquidationStrategy {
         Ok(result.success)
     }
     
+    #[allow(dead_code)]
     fn convert_to_ethers_transaction(&self, tx: &Transaction) -> Result<ethers::types::Transaction> {
         Ok(ethers::types::Transaction {
             hash: ethers::types::H256::from_slice(tx.hash.as_slice()),
@@ -617,7 +623,7 @@ impl OnChainLiquidationStrategy {
             if art.is_zero() { continue; }
 
             // ilks(ilk): (..., rate, spot, ...)
-            let (_Art_e, rate_e, spot_e, _line_e, _dust_e) = vat.ilks(ilk_bytes).await.unwrap_or((EthersU256::zero(), ethers::types::U256::from(1u64), EthersU256::zero(), EthersU256::zero(), EthersU256::zero()));
+            let (_art_e, rate_e, spot_e, _line_e, _dust_e) = vat.ilks(ilk_bytes).await.unwrap_or((EthersU256::zero(), ethers::types::U256::from(1u64), EthersU256::zero(), EthersU256::zero(), EthersU256::zero()));
             let rate = U256::from_str_radix(&rate_e.to_string(), 10).unwrap_or(U256::from(1u64));
             let spot = U256::from_str_radix(&spot_e.to_string(), 10).unwrap_or(U256::ZERO);
 
@@ -640,7 +646,7 @@ impl OnChainLiquidationStrategy {
             }
         }
 
-        let (selected_ilk, collateral_token, debt_wad, _collateral_value_wad, _health_factor_scaled) = match selected {
+        let (_selected_ilk, collateral_token, debt_wad, _collateral_value_wad, _health_factor_scaled) = match selected {
             Some(v) => v,
             None => return Ok(None),
         };
@@ -703,7 +709,7 @@ impl OnChainLiquidationStrategy {
     }
     
     /// 고위험 사용자 목록 가져오기
-    async fn get_high_risk_users(&self, protocol: &LendingProtocolInfo) -> Result<Vec<Address>> {
+    async fn get_high_risk_users(&self, _protocol: &LendingProtocolInfo) -> Result<Vec<Address>> {
         // 실제로는 다음 방법으로 가져와야 함:
         // 1. 이벤트 로그에서 최근 거래한 사용자들
         // 2. 서브그래프 API
@@ -831,9 +837,9 @@ impl OnChainLiquidationStrategy {
     /// 최적 청산 자산 쌍 찾기
     async fn find_best_liquidation_pair(
         &self,
-        user: Address,
+        _user: Address,
         account_data: &UserAccountData,
-        protocol: &LendingProtocolInfo
+        _protocol: &LendingProtocolInfo
     ) -> Result<Option<(Address, Address, U256)>> {
         // 간단한 구현 - 실제로는 모든 담보/부채 자산을 분석해야 함
         
@@ -908,7 +914,7 @@ impl OnChainLiquidationStrategy {
     /// 온체인 청산 성공 확률 계산
     async fn calculate_liquidation_success_probability_onchain(
         &self,
-        user: Address,
+        _user: Address,
         health_factor: f64,
         net_profit: U256
     ) -> Result<f64> {
@@ -971,6 +977,7 @@ impl OnChainLiquidationStrategy {
     }
     
     /// 통계 업데이트
+    #[allow(dead_code)]
     async fn update_stats_onchain(&self, opportunities_found: usize, profit: Option<U256>) {
         let mut stats = self.stats.lock().await;
         stats.transactions_analyzed += 1;
@@ -984,6 +991,7 @@ impl OnChainLiquidationStrategy {
     }
 
     /// 결과 기록 및 라우팅: 이벤트 저장, 실패 사유 기록, 자산 처리 등
+    #[allow(dead_code)]
     async fn record_liquidation_outcome(
         &self,
         protocol_name: &str,
@@ -1161,7 +1169,7 @@ impl OnChainLiquidationStrategy {
     }
 
     /// 개별 프라이빗 릴레이 시도
-    async fn try_private_relay(&self, relay_name: &str, tx: &crate::types::Transaction, tip: U256) -> Result<PrivateSubmissionResult> {
+    async fn try_private_relay(&self, relay_name: &str, _tx: &crate::types::Transaction, _tip: U256) -> Result<PrivateSubmissionResult> {
         // TODO: 실제 릴레이 API 호출 구현
         // 현재는 시뮬레이션
         
@@ -1192,23 +1200,25 @@ impl OnChainLiquidationStrategy {
     /// 퍼블릭 폴백 브로드캐스트
 
     /// ETH 금액 포맷팅 헬퍼
+    #[allow(dead_code)]
     fn format_eth_amount(amount: U256) -> String {
         let eth_amount = amount.to::<u128>() as f64 / 1e18;
         format!("{:.4}", eth_amount)
     }
-    async fn broadcast_public_liquidation(&self, tx: crate::types::Transaction) -> Result<bool> {
+    async fn broadcast_public_liquidation(&self, _tx: crate::types::Transaction) -> Result<bool> {
         info!("📡 퍼블릭 멤풀로 폴백 브로드캐스트");
         // TODO: 실제 퍼블릭 브로드캐스트 구현
         Ok(true)
     }
-    async fn create_liquidation_transaction(&self, opportunity: &Opportunity) -> Result<crate::types::Transaction> {
+    async fn create_liquidation_transaction(&self, _opportunity: &Opportunity) -> Result<crate::types::Transaction> {
         // 기존 create_bundle 로직을 단일 트랜잭션으로 변환
         // TODO: 실제 청산 트랜잭션 생성 로직 구현
         Ok(crate::types::Transaction::default())
     }
 
     /// 청산 트랜잭션 브로드캐스트
-    async fn broadcast_liquidation_transaction(&self, tx: crate::types::Transaction) -> Result<bool> {
+    #[allow(dead_code)]
+    async fn broadcast_liquidation_transaction(&self, _tx: crate::types::Transaction) -> Result<bool> {
         // 직접 트랜잭션 브로드캐스트
         // TODO: 실제 브로드캐스트 로직 구현
         info!("📡 청산 트랜잭션 브로드캐스트");
@@ -1236,7 +1246,7 @@ impl Strategy for OnChainLiquidationStrategy {
         Ok(())
     }
     
-    async fn analyze(&self, transaction: &Transaction) -> Result<Vec<Opportunity>> {
+    async fn analyze(&self, _transaction: &Transaction) -> Result<Vec<Opportunity>> {
         if !self.is_enabled() {
             return Ok(vec![]);
         }
@@ -1558,6 +1568,7 @@ struct ZeroExQuoteWire {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ZeroExQuote {
     to: Address,
     data: alloy::primitives::Bytes,
@@ -1568,6 +1579,7 @@ struct ZeroExQuote {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct PrivateSubmissionResult {
     success: bool,
     relay_used: String,

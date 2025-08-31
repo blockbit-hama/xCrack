@@ -5,7 +5,7 @@ use anyhow::Result;
 use axum::{routing::{get, post}, Json, Router};
 use tower_http::cors::{Any, CorsLayer};
 use axum::response::sse::{Sse, Event};
-use futures_util::stream::{Stream, StreamExt};
+use futures_util::stream::Stream;
 use serde::Serialize;
 use serde_json::json;
 
@@ -633,7 +633,7 @@ async fn get_performance_dashboard(core: SearcherCore) -> Json<serde_json::Value
 }
 
 async fn get_alerts_list(core: SearcherCore) -> Json<serde_json::Value> {
-    let alerts = core.get_alerts(false).await;
+    let _alerts = core.get_alerts(false).await;
     
     Json(json!({
         "alerts": [

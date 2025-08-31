@@ -1,8 +1,5 @@
-use std::sync::Arc;
 use anyhow::{Result, anyhow};
-use tracing::{info, debug, warn, error};
 use alloy::primitives::{Address, U256};
-use serde::{Deserialize, Serialize};
 use async_trait::async_trait;
 
 use super::{DexAggregator, SwapQuote, SwapParams, DexType};
@@ -49,13 +46,13 @@ impl BaseAggregator {
         })
     }
     
-    async fn get_price_async(&self, sell_token: Address, buy_token: Address) -> Result<f64> {
+    async fn get_price_async(&self, _sell_token: Address, _buy_token: Address) -> Result<f64> {
         // TODO: 실제 가격 조회 구현
         // 현재는 더미 가격 반환
         Ok(1.0)
     }
     
-    async fn get_liquidity_async(&self, token: Address) -> Result<U256> {
+    async fn get_liquidity_async(&self, _token: Address) -> Result<U256> {
         // TODO: 실제 유동성 조회 구현
         // 현재는 더미 유동성 반환
         Ok(U256::from(1_000_000_000_000_000_000u64)) // 1000 토큰

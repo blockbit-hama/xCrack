@@ -685,7 +685,7 @@ impl MicroArbitrageStrategy {
     }
     
     /// Mock 모드 아비트래지 실행
-    async fn execute_mock_arbitrage(&self, opportunity: &MicroArbitrageOpportunity, trade_id: &str) -> Result<bool> {
+    async fn execute_mock_arbitrage(&self, _opportunity: &MicroArbitrageOpportunity, trade_id: &str) -> Result<bool> {
         // 시뮬레이션: 90% 성공률
         sleep(Duration::from_millis(10 + fastrand::u64(20..50))).await; // 10-60ms 지연 시뮬레이션
         
@@ -702,7 +702,6 @@ impl MicroArbitrageStrategy {
     
     /// 실제 아비트래지 실행 (실제 거래소 API 호출)
     async fn execute_real_arbitrage(&self, opportunity: &MicroArbitrageOpportunity, trade_id: &str) -> Result<bool> {
-        use crate::exchange::ExchangeClient;
         
         info!("🚀 실제 아비트래지 실행: {}", trade_id);
         info!("  매수: {} @ {}", opportunity.buy_exchange, opportunity.buy_price);
@@ -916,7 +915,7 @@ impl MicroArbitrageStrategy {
         // 향후 off-chain quote에서 allowanceTarget을 얻으면 해당 주소를 채워 넣을 수 있음.
         // 경로 선택: 0x 두 레그가 모두 준비되고, V2 대비 유리하면 집계기 경로 채택
         let (final_dex_a, final_data_a, final_spender_a,
-             final_dex_b, final_data_b, final_spender_b) = if let (Some((to_a, data_a, sp_a, out_b)), Some((to_b, data_b, sp_b, out_a))) = (agg_buy, agg_sell) {
+             final_dex_b, final_data_b, final_spender_b) = if let (Some((to_a, data_a, sp_a, _out_b)), Some((to_b, data_b, sp_b, out_a))) = (agg_buy, agg_sell) {
             // 단순 비교: 집계기 최종 tokenA 수령량 vs V2 예상 최소 수령량
             let v2_min_back_a = amount_out_min_sell; // 보수적 가드 기준
             if out_a > v2_min_back_a {

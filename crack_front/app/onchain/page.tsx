@@ -385,7 +385,7 @@ export default function OnChainPage() {
 
       {/* 고래 거래 */}
       <div className="bg-white p-6 rounded-lg border">
-        <h2 className="text-lg font-semibold mb-4">고래 거래 (>$100K)</h2>
+        <h2 className="text-lg font-semibold mb-4">고래 거래 (&gt;$100K)</h2>
         {whaleTxs.length === 0 ? (
           <div className="text-gray-500">최근 고래 거래가 없습니다.</div>
         ) : (

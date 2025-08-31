@@ -9,7 +9,7 @@ use ethers::{
 };
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-use tracing::{info, warn, debug};
+use tracing::{warn, debug};
 
 use super::price_oracle::{PriceOracle, PriceSource, PriceData};
 
@@ -102,11 +102,11 @@ impl ChainlinkOracle {
         let decimals: u8 = contract.method("decimals", ())?.call().await?;
         
         // 최신 라운드 데이터 가져오기
-        let (_, answer, _, updated_at, _): (u128, i256, U256, U256, u128) = 
+        let (_, answer, _, updated_at, _): (u128, I256Internal, U256, U256, u128) = 
             contract.method("latestRoundData", ())?.call().await?;
         
-        // i256을 Decimal로 변환
-        let price = if answer >= i256::zero() {
+        // I256Internal을 Decimal로 변환
+        let price = if answer >= I256Internal::zero() {
             let answer_u256 = U256::from(answer.unsigned_abs());
             let divisor = U256::from(10u64).pow(U256::from(decimals));
             let price_raw = answer_u256.as_u128() as f64 / divisor.as_u128() as f64;
@@ -125,8 +125,8 @@ impl ChainlinkOracle {
     }
 }
 
-/// i256 타입 정의 (ethers에 없는 경우)
-type i256 = ethers::types::I256;
+/// I256 타입 정의 (ethers에 없는 경우)
+type I256Internal = ethers::types::I256;
 
 #[async_trait]
 impl PriceOracle for ChainlinkOracle {

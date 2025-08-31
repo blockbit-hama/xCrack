@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{Mutex, Semaphore};
 use tracing::{info, debug, warn, error};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration, Instant, timeout};
@@ -13,8 +13,7 @@ use std::str::FromStr;
 
 use crate::config::{Config, ExchangeConfig, ExchangeType};
 use crate::types::{
-    MicroArbitrageOpportunity, OrderExecutionResult, OrderSide, OrderStatus,
-    ExchangeInfo, PriceData, ArbitrageError,
+    MicroArbitrageOpportunity, OrderExecutionResult, OrderSide, OrderStatus, PriceData,
 };
 use alloy::primitives::U256;
 // ethers 트레이트 메서드 사용을 위한 import
@@ -148,7 +147,7 @@ enum RiskLevel {
 
 /// 실행 통계
 #[derive(Debug, Clone)]
-struct ExecutionStats {
+pub struct ExecutionStats {
     total_executions: u64,
     successful_executions: u64,
     failed_executions: u64,
@@ -953,7 +952,7 @@ impl OrderExecutor {
         
         // 주문 존재 여부를 미리 저장
         let has_buy_order = buy_order.is_some();
-        let has_sell_order = sell_order.is_some();
+        let _has_sell_order = sell_order.is_some();
         
         // 2. 체결된 주문 취소 시도 (베스트 에포트)
         if let Some((order_id, client, exchange, amount)) = buy_order {
@@ -1316,6 +1315,7 @@ impl ExchangeClient for DexClient {
         url.query_pairs_mut().extend_pairs(params.iter().map(|(k, v)| (&**k, &**v)));
 
         #[derive(Deserialize)]
+        #[allow(non_snake_case)]
         struct OxQuote { to: String, data: String, value: String, gas: Option<String>, gasPrice: Option<String>, #[allow(dead_code)] allowanceTarget: Option<String> }
         let quote: OxQuote = client.get(url).send().await?.json().await?;
 
@@ -1444,7 +1444,7 @@ impl ExchangeClient for DexClient {
         })
     }
     
-    async fn place_buy_order(&self, symbol: &str, amount: U256, price: Decimal) -> Result<String> {
+    async fn place_buy_order(&self, _symbol: &str, _amount: U256, _price: Decimal) -> Result<String> {
         // Mock 모드에서는 시뮬레이션
         if crate::mocks::is_mock_mode() {
             sleep(Duration::from_millis(10 + fastrand::u64(10..30))).await; // 10-40ms 지연
@@ -1455,7 +1455,7 @@ impl ExchangeClient for DexClient {
         Err(anyhow!("Real DEX ordering not implemented"))
     }
     
-    async fn place_sell_order(&self, symbol: &str, amount: U256, price: Decimal) -> Result<String> {
+    async fn place_sell_order(&self, _symbol: &str, _amount: U256, _price: Decimal) -> Result<String> {
         // Mock 모드에서는 시뮬레이션
         if crate::mocks::is_mock_mode() {
             sleep(Duration::from_millis(10 + fastrand::u64(10..30))).await; // 10-40ms 지연
@@ -1466,7 +1466,7 @@ impl ExchangeClient for DexClient {
         Err(anyhow!("Real DEX ordering not implemented"))
     }
     
-    async fn cancel_order(&self, order_id: &str) -> Result<bool> {
+    async fn cancel_order(&self, _order_id: &str) -> Result<bool> {
         if crate::mocks::is_mock_mode() {
             sleep(Duration::from_millis(5 + fastrand::u64(5..15))).await; // 5-20ms 지연
             return Ok(true);
@@ -1492,7 +1492,7 @@ impl ExchangeClient for DexClient {
         }
     }
     
-    async fn get_order_fills(&self, order_id: &str) -> Result<Vec<OrderFill>> {
+    async fn get_order_fills(&self, _order_id: &str) -> Result<Vec<OrderFill>> {
         if crate::mocks::is_mock_mode() {
             return Ok(vec![]); // Mock에서는 빈 배열
         }
@@ -1759,7 +1759,7 @@ impl ExchangeClient for CexClient {
         }
     }
     
-    async fn get_order_fills(&self, order_id: &str) -> Result<Vec<OrderFill>> {
+    async fn get_order_fills(&self, _order_id: &str) -> Result<Vec<OrderFill>> {
         if crate::mocks::is_mock_mode() {
             return Ok(vec![]);
         }

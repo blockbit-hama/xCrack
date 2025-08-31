@@ -3,7 +3,6 @@ pub mod filters;
 
 // Re-exports
 pub use monitor::MempoolMonitor;
-pub use filters::*;
 
 #[cfg(test)]
 mod tests {

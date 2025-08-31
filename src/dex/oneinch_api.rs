@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info};
+use serde::Deserialize;
+use tracing::debug;
 use alloy::primitives::{Address, U256};
 use async_trait::async_trait;
 
@@ -17,6 +17,7 @@ pub struct OneInchAggregator {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OneInchQuoteResponse {
     #[serde(rename = "fromToken")]
     from_token: OneInchToken,
@@ -32,6 +33,7 @@ struct OneInchQuoteResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OneInchSwapResponse {
     #[serde(rename = "fromToken")]
     from_token: OneInchToken,
@@ -46,6 +48,7 @@ struct OneInchSwapResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OneInchToken {
     symbol: String,
     name: String,
@@ -54,6 +57,7 @@ struct OneInchToken {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OneInchProtocol {
     name: String,
     part: f64,
@@ -64,6 +68,7 @@ struct OneInchProtocol {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OneInchTransaction {
     from: String,
     to: String,

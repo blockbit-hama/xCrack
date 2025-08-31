@@ -6,7 +6,3 @@ pub mod data_provider;
 pub mod performance;
 pub mod scenarios;
 
-pub use engine::BacktestEngine;
-pub use data_provider::{DataProvider, HistoricalDataSource};
-pub use performance::PerformanceAnalyzer;
-pub use scenarios::{BacktestScenario, ScenarioBuilder};

@@ -389,7 +389,7 @@ impl MultiAssetArbitrageStrategy {
     /// Mock 모드 다중자산 아비트래지 실행
     async fn execute_mock_multi_arbitrage(
         &self,
-        opportunity: &MultiAssetArbitrageOpportunity,
+        _opportunity: &MultiAssetArbitrageOpportunity,
         trade_id: &str,
     ) -> Result<bool> {
         // 시뮬레이션: 85% 성공률
@@ -833,7 +833,6 @@ impl MultiAssetArbitrageStrategy {
         amount_in: U256,
     ) -> Result<(U256, String, crate::adapters::Quote)> {
         use futures::future::join_all;
-use std::collections::HashMap;        
         // 1. 네이티브 DEX들 병렬 쿼리
         let native_dexes = vec!["uniswap_v2", "uniswap_v3", "sushiswap"];
         let native_quotes = join_all(

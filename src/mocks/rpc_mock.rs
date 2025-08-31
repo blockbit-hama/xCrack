@@ -2,7 +2,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use ethers::prelude::*;
 use ethers::types::{Block, Transaction as EthersTransaction, BlockNumber, TxHash};
-use rand::Rng;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use tracing::{info, debug};

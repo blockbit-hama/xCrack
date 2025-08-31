@@ -11,7 +11,7 @@ use serde::Deserialize;
 use std::str::FromStr;
 
 use crate::config::{Config, ExchangeConfig, ExchangeType};
-use crate::types::{PriceData, OrderBookSnapshot, OrderBookLevel, ExchangeInfo};
+use crate::types::{PriceData, OrderBookSnapshot, OrderBookLevel};
 use alloy::primitives::U256;
 
 #[derive(Debug, Deserialize)]
@@ -59,7 +59,7 @@ pub struct ExchangeMonitor {
 }
 
 #[derive(Debug, Clone)]
-struct ConnectionStatus {
+pub struct ConnectionStatus {
     is_connected: bool,
     last_update: chrono::DateTime<Utc>,
     latency_ms: u64,
@@ -216,7 +216,7 @@ impl ExchangeMonitor {
         // DEX 모니터링 태스크 스폰
         tokio::spawn(async move {
             let mut sequence = 0u64;
-            let mut reconnect_attempts = 0u32;
+            let mut _reconnect_attempts = 0u32;
             
             while is_running.load(Ordering::SeqCst) {
                 // Mock 모드에서는 시뮬레이션된 데이터 생성
@@ -242,12 +242,12 @@ impl ExchangeMonitor {
                             Self::update_monitoring_stats(&stats, trading_pairs.len() as u64, trading_pairs.len() as u64).await;
                             
                             sequence += 1;
-                            reconnect_attempts = 0;
+                            _reconnect_attempts = 0;
                         }
                         Err(e) => {
                             error!("DEX 데이터 생성 실패: {}", e);
                             Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
-                            reconnect_attempts += 1;
+                            _reconnect_attempts += 1;
                         }
                     }
                 } else {
@@ -300,7 +300,7 @@ impl ExchangeMonitor {
                     } else {
                         warn!("{} 실제 DEX 데이터 수집 실패 (모든 페어)", exchange_name);
                         Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
-                        reconnect_attempts += 1;
+                        _reconnect_attempts += 1;
                     }
                 }
                 
@@ -335,7 +335,7 @@ impl ExchangeMonitor {
         // CEX 모니터링 태스크 스폰
         tokio::spawn(async move {
             let mut sequence = 0u64;
-            let mut reconnect_attempts = 0u32;
+            let mut _reconnect_attempts = 0u32;
             let http = reqwest::Client::builder()
                 .timeout(Duration::from_millis(1500))
                 .build()
@@ -365,12 +365,12 @@ impl ExchangeMonitor {
                             Self::update_monitoring_stats(&stats, trading_pairs.len() as u64, trading_pairs.len() as u64).await;
                             
                             sequence += 1;
-                            reconnect_attempts = 0;
+                            _reconnect_attempts = 0;
                         }
                         Err(e) => {
                             error!("CEX 데이터 생성 실패: {}", e);
                             Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
-                            reconnect_attempts += 1;
+                            _reconnect_attempts += 1;
                         }
                     }
                 } else {
@@ -424,7 +424,7 @@ impl ExchangeMonitor {
                     } else {
                         warn!("{} 실제 CEX 데이터 수집 실패 (모든 페어)", exchange_name);
                         Self::update_connection_status(&connection_status, &exchange_name, false, 0).await;
-                        reconnect_attempts += 1;
+                        _reconnect_attempts += 1;
                     }
                 }
                 

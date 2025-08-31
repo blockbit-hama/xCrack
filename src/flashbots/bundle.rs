@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use alloy::primitives::{Address, U256, B256, TxHash};
-use ethers::types::H256;
-use tracing::{debug, warn};
+use alloy::primitives::{Address, U256, TxHash};
 
 use crate::types::Transaction;
-use crate::utils::abi::ABICodec;
 
 /// Flashbots 번들 - 여러 트랜잭션을 하나의 블록에 순차적으로 포함
 #[derive(Debug, Clone, Serialize, Deserialize)]

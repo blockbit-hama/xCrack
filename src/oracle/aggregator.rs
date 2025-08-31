@@ -180,7 +180,7 @@ impl PriceAggregator {
         let mut weighted_sum_eth = Decimal::ZERO;
         let mut total_weight = 0.0;
         
-        for (i, price) in prices.iter().enumerate() {
+        for (_i, price) in prices.iter().enumerate() {
             // 해당 소스의 가중치 찾기
             let weight = self.price_feeds.iter()
                 .find(|f| f.oracle.source_type() == price.source)

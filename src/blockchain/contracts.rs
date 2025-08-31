@@ -2,15 +2,11 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
     abi::{Abi, Token},
-    contract::{Contract, ContractFactory as EthersContractFactory},
-    providers::{Provider, Http, Middleware},
-    types::{Address, U256, H256, Bytes, TransactionRequest},
-    signers::{LocalWallet, Signer},
-    middleware::SignerMiddleware,
+    contract::Contract,
+    providers::{Provider, Http},
+    types::{Address, U256, H256},
 };
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, warn};
 
 /// 스마트 컨트랙트 인터페이스
 pub trait ContractInterface: Send + Sync {

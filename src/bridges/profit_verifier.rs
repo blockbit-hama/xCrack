@@ -3,9 +3,9 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use tokio::sync::RwLock;
 use chrono::{DateTime, Utc, Duration as ChronoDuration};
-use tracing::{info, debug, warn, error};
+use tracing::{info, error};
 use serde::{Serialize, Deserialize};
-use alloy::primitives::{U256, Address};
+use alloy::primitives::U256;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 
@@ -626,7 +626,7 @@ impl CrossChainProfitVerifier {
     
     /// 실제 검증 수행
     async fn perform_verification(&self, execution_id: String) -> Result<()> {
-        let mut verified_trade = {
+        let verified_trade = {
             let mut pending = self.pending_verifications.write().await;
             let verification = pending.get_mut(&execution_id)
                 .ok_or_else(|| anyhow!("검증 작업을 찾을 수 없음: {}", execution_id))?;
@@ -740,7 +740,7 @@ impl CrossChainProfitVerifier {
     }
     
     /// 실제 비용 분석
-    async fn analyze_actual_costs(&self, transaction: &MonitoredTransaction, trade_info: &TradeInfo) -> Result<CostBreakdown> {
+    async fn analyze_actual_costs(&self, _transaction: &MonitoredTransaction, trade_info: &TradeInfo) -> Result<CostBreakdown> {
         // Mock 구현 - 실제로는 트랜잭션 영수증에서 추출
         let bridge_fees = Decimal::from_str_exact("5.0").unwrap(); // $5
         

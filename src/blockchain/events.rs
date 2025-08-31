@@ -1,15 +1,13 @@
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
-    providers::{Provider, Ws, Http, Middleware, StreamExt},
+    providers::{Provider, Ws},
     types::{Filter, Log, H256, U256, Address, BlockNumber},
-    abi::{Abi, RawLog, LogParam, Token, FunctionExt},
-    contract::EthLogDecode,
+    abi::{Abi, Token, FunctionExt},
 };
 use tokio::sync::mpsc;
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, warn};
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 
 /// 이벤트 리스너
 pub struct EventListener {
@@ -295,8 +293,8 @@ impl MempoolMonitor {
     pub async fn start_monitoring(&self) -> Result<()> {
         info!("🔍 멤풀 모니터링 시작");
         
-        let provider = self.provider.clone();
-        let tx_sender = self.tx_sender.clone();
+        let _provider = self.provider.clone();
+        let _tx_sender = self.tx_sender.clone();
         
         tokio::spawn(async move {
             // 실제 구현에서는 멤풀 모니터링 로직 필요

@@ -2,14 +2,14 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use tokio::time::{sleep, Duration};
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, warn};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use chrono::Utc;
 
 use crate::exchange::order_executor::{ExchangeClient, OrderRequest, OrderResponse, OrderType};
-use crate::types::{OrderStatus, PriceData, OrderBookSnapshot, OrderBookLevel};
+use crate::types::{OrderStatus, PriceData};
 use alloy::primitives::U256;
 use crate::mocks::{MockConfig, get_mock_config};
 

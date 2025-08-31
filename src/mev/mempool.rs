@@ -1,17 +1,15 @@
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
-    providers::{Provider, Http, Ws, Middleware, StreamExt},
-    types::{Transaction, H256, U256, Address, TxHash},
+    types::{Transaction, H256, U256, Address},
     utils::hex,
 };
-use serde::{Deserialize, Serialize};
 use tracing::{info, debug, warn, error};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use std::collections::{HashMap, HashSet, VecDeque};
 use reqwest::Client as HttpClient;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::connect_async;
 use futures_util::{SinkExt, StreamExt as FuturesStreamExt};
 
 use crate::blockchain::BlockchainClient;
@@ -43,7 +41,7 @@ struct PoolConnection {
 
 /// 연결 타입
 #[derive(Debug, Clone)]
-enum ConnectionType {
+pub enum ConnectionType {
     Websocket(String),      // WebSocket URL
     Http(String),           // HTTP API URL
     P2P(String),           // P2P 노드 주소
@@ -52,7 +50,7 @@ enum ConnectionType {
 
 /// 연결 상태
 #[derive(Debug, Clone, PartialEq)]
-enum ConnectionStatus {
+pub enum ConnectionStatus {
     Connected,
     Connecting,
     Disconnected,
@@ -155,7 +153,7 @@ pub enum MempoolEvent {
 
 /// 멤풀 통계
 #[derive(Debug, Default)]
-struct MempoolStats {
+pub struct MempoolStats {
     total_transactions: u64,
     filtered_transactions: u64,
     mev_opportunities: u64,

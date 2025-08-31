@@ -1,16 +1,14 @@
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
-    providers::{Provider, Http},
     types::{Transaction, H256, U256, Address, Bytes, TransactionRequest, NameOrAddress},
     signers::{LocalWallet, Signer},
 };
-use serde::{Deserialize, Serialize};
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::collections::{HashMap, BTreeMap};
+use std::collections::HashMap;
 
-use crate::mev::simulation::{BundleSimulator, DetailedSimulationResult, SimulationOptions, SimulationMode};
+use crate::mev::simulation::{BundleSimulator, SimulationOptions, SimulationMode};
 use crate::blockchain::BlockchainClient;
 use crate::types::OpportunityType;
 
@@ -125,6 +123,7 @@ struct NonceManager {
 
 /// 가스 추정기
 #[derive(Debug)]
+#[allow(dead_code)]
 struct GasEstimator {
     base_fee_cache: Option<U256>,
     cache_timestamp: Option<SystemTime>,
@@ -133,6 +132,7 @@ struct GasEstimator {
 
 /// 최적화 엔진
 #[derive(Debug)]
+#[allow(dead_code)]
 struct OptimizationEngine {
     optimization_strategies: Vec<OptimizationStrategy>,
     performance_metrics: PerformanceMetrics,
@@ -140,6 +140,7 @@ struct OptimizationEngine {
 
 /// 최적화 전략
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct OptimizationStrategy {
     name: String,
     strategy_type: OptimizationType,
@@ -149,6 +150,7 @@ struct OptimizationStrategy {
 
 /// 성능 메트릭
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 struct PerformanceMetrics {
     total_optimizations: u64,
     successful_optimizations: u64,
@@ -488,7 +490,7 @@ impl BundleBuilder {
         &mut self,
         victim_tx: &Transaction,
         params: FrontRunParams,
-        target_block: u64,
+        _target_block: u64,
     ) -> Result<Transaction> {
         // 피해자 트랜잭션보다 높은 가스 가격 설정
         let gas_price = victim_tx.gas_price
@@ -935,7 +937,7 @@ impl BundleOptimizer {
         }
 
         // 초기 시뮬레이션
-        let mut best_simulation = self.simulator.simulate_bundle(
+        let best_simulation = self.simulator.simulate_bundle(
             &current_bundle.transactions,
             SimulationOptions {
                 simulation_mode: SimulationMode::Fast,

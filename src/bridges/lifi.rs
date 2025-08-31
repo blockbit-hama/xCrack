@@ -2,13 +2,12 @@ use super::traits::{Bridge, BridgeQuote, BridgeError, BridgeResult, BridgeExecut
 use crate::types::{ChainId, CrossChainToken};
 use alloy::primitives::{U256, Address};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use reqwest::{Client, header};
 use std::collections::HashMap;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 use anyhow::Result;
 
 /// LI.FI API base URL
@@ -23,7 +22,6 @@ fn map_chain_id(chain: ChainId) -> u64 {
         ChainId::Arbitrum => 42161,
         ChainId::Optimism => 10,
         ChainId::Avalanche => 43114,
-        _ => 1, // Default to Ethereum
     }
 }
 
@@ -485,7 +483,7 @@ impl Bridge for LiFiBridge {
         "LI.FI"
     }
     
-    async fn supports_route(&self, from: ChainId, to: ChainId, token: &CrossChainToken) -> BridgeResult<bool> {
+    async fn supports_route(&self, from: ChainId, to: ChainId, _token: &CrossChainToken) -> BridgeResult<bool> {
         // LI.FI supports most major chains
         let supported_chains = [
             ChainId::Ethereum,
@@ -501,7 +499,7 @@ impl Bridge for LiFiBridge {
            from != to)
     }
     
-    async fn get_routes(&self, token: &CrossChainToken) -> BridgeResult<Vec<(ChainId, ChainId)>> {
+    async fn get_routes(&self, _token: &CrossChainToken) -> BridgeResult<Vec<(ChainId, ChainId)>> {
         let supported_chains = [
             ChainId::Ethereum,
             ChainId::Polygon,
@@ -559,7 +557,7 @@ impl Bridge for LiFiBridge {
             .unwrap_or(U256::ZERO);
         
         let fee_amount = amount.saturating_sub(output_amount);
-        let fee_percentage = if amount > U256::ZERO {
+        let _fee_percentage = if amount > U256::ZERO {
             (fee_amount.to::<u128>() as f64 / amount.to::<u128>() as f64) * 100.0
         } else {
             0.0
@@ -666,8 +664,8 @@ impl Bridge for LiFiBridge {
     
     async fn get_liquidity(
         &self,
-        from: ChainId,
-        to: ChainId,
+        _from: ChainId,
+        _to: ChainId,
         token: &CrossChainToken,
     ) -> BridgeResult<U256> {
         // LI.FI aggregates multiple bridges, so liquidity is typically high

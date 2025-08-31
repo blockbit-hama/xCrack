@@ -28,7 +28,7 @@ impl SushiswapAdapter {
     }
     
     /// SushiSwap 팩토리에서 페어 주소 조회
-    async fn get_pair_address(&self, token_a: Address, token_b: Address) -> Result<Address> {
+    async fn get_pair_address(&self, token_a: Address, _token_b: Address) -> Result<Address> {
         // 실제 구현에서는 컨트랙트 호출 필요
         // 여기서는 Mock 구현
         let mut pair_bytes = [0u8; 20];

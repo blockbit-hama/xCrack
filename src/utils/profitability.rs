@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use anyhow::{Result, anyhow};
-use tracing::{debug, warn, error, info};
+use anyhow::Result;
+use tracing::{debug, info};
 use alloy::primitives::{Address, U256};
 use serde::{Deserialize, Serialize};
 
@@ -298,7 +298,7 @@ impl ProfitabilityCalculator {
     /// 비용 분석
     async fn calculate_costs(
         &self,
-        liquidation_amount: U256,
+        _liquidation_amount: U256,
         liquidation_amount_usd: f64,
         flashloan_provider: FlashLoanProvider,
         swap_route: &SwapRoute,
@@ -349,7 +349,7 @@ impl ProfitabilityCalculator {
         
         let total_gas = flashloan_initiation + liquidation_call + dex_swap + flashloan_repayment;
         
-        let gas_cost_eth = (total_gas as f64 * self.gas_price_gwei * 1e-9);
+        let gas_cost_eth = total_gas as f64 * self.gas_price_gwei * 1e-9;
         let gas_cost_usd = gas_cost_eth * eth_price_usd;
         
         debug!("⛽ Gas estimation: {} gas units, {:.6} ETH, ${:.2}", 

@@ -47,8 +47,8 @@ impl PerformanceAnalyzer {
     pub async fn calculate_metrics(
         &self,
         trades: &[crate::backtest::engine::BacktestTrade],
-        portfolio_timeline: &[(u64, f64)],
-        initial_capital: f64,
+        _portfolio_timeline: &[(u64, f64)],
+        _initial_capital: f64,
     ) -> anyhow::Result<crate::types::PerformanceMetrics> {
         use crate::types::PerformanceMetrics;
         use alloy::primitives::U256;

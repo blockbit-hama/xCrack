@@ -1,8 +1,5 @@
-use anyhow::Result;
 use alloy::primitives::U256;
-use rust_decimal::Decimal;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::types::{Opportunity, OpportunityType, StrategyType};
 use super::priority_queue::{OpportunityPriority, ScoringWeights};

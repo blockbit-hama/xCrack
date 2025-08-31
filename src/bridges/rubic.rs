@@ -2,7 +2,7 @@ use super::traits::{Bridge, BridgeQuote, BridgeError, BridgeResult, BridgeExecut
 use crate::types::{ChainId, CrossChainToken};
 use alloy::primitives::U256;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc, Duration};
+use chrono::{Utc, Duration};
 use uuid::Uuid;
 use serde_json::json;
 

@@ -5,7 +5,7 @@ use tracing::{info, debug, error};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
 use ethers::providers::{Provider, Ws, Middleware};
-use ethers::types::{Transaction as EthersTransaction, H256};
+use ethers::types::H256;
 use alloy::primitives::Address;
 
 use crate::config::Config;

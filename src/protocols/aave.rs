@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, error};
 use alloy::primitives::{Address, U256};
 use ethers::{
     providers::{Provider, Ws, Middleware},

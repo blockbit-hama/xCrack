@@ -1,13 +1,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{mpsc, RwLock};
 use tracing::{info, debug, warn, error};
 use tokio::time::{sleep, Duration, interval, Instant};
 use rust_decimal::Decimal;
 use chrono::Utc;
-use futures::stream::StreamExt;
-use serde_json::Value;
 
 use crate::config::Config;
 use crate::types::{PriceData, OrderBookSnapshot, OrderBookLevel};

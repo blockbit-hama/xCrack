@@ -3,12 +3,12 @@
 use std::sync::Arc;
 use std::collections::{HashMap, VecDeque};
 use std::time::{Instant, Duration};
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{info, debug, error, warn};
 use ethers::providers::{Provider, Ws, Middleware, StreamExt};
-use ethers::types::{Transaction as EthersTransaction, BlockNumber, TxHash, H256, Filter, Address as EthersAddress, U256 as EthersU256};
-use serde::{Deserialize, Serialize};
+use ethers::types::{Transaction as EthersTransaction, BlockNumber, H256, Address as EthersAddress};
+use serde::Serialize;
 
 use crate::config::Config;
 use crate::types::Transaction;
@@ -333,7 +333,7 @@ impl MempoolMonitor {
             return TransactionCategory::Other;
         }
         
-        let function_selector = &tx.input[0..4];
+        let _function_selector = &tx.input[0..4];
         
         // Uniswap 스왑 감지
         if abi_codec.matches_function(&tx.input, "swapExactTokensForTokens") ||

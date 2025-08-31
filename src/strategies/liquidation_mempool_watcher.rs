@@ -1,14 +1,13 @@
 use std::sync::Arc;
-use std::collections::HashMap;
-use anyhow::{Result, anyhow};
-use tracing::{info, debug, warn, error};
+use anyhow::Result;
+use tracing::{info, debug, warn};
 use alloy::primitives::{Address, U256};
 use ethers::providers::{Provider, Ws};
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep, Duration};
 
 use crate::config::Config;
-use crate::protocols::{LiquidatableUser, ProtocolType};
+use crate::protocols::ProtocolType;
 
 /// 청산 멤풀 워처 - 멤풀에서 청산 관련 신호 감지
 pub struct LiquidationMempoolWatcher {

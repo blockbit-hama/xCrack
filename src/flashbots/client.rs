@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use ethers::prelude::*;
-use ethers::types::{H256, U256 as EthersU256};
+use ethers::types::H256;
 use alloy::primitives::U256 as AlloyU256;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use tracing::{info, error, debug, warn};
 
 use crate::config::Config;
 use crate::types::{Bundle, BundleStatus, SimulationResult};
-use super::bundle::{FlashbotsBundle, FlashbotsBundleRequest};
+use super::bundle::FlashbotsBundle;
 
 /// Flashbots 클라이언트 - MEV 번들 제출 및 시뮬레이션
 pub struct FlashbotsClient {

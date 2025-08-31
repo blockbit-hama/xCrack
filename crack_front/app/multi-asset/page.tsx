@@ -35,7 +35,7 @@ export default function MultiAssetPage() {
   const [opportunities, setOpportunities] = useState<MultiAssetOpportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'opportunities' | 'triangular' | 'migration' | 'contracts'>('overview');
-  const [selectedStrategy, setSelectedStrategy] = useState<'triangular' | 'position_migration' | 'complex'>('triangular');
+  const [selectedStrategy, setSelectedStrategy] = useState<'all' | 'triangular' | 'position_migration' | 'complex'>('all');
 
   useEffect(() => {
     let mounted = true;

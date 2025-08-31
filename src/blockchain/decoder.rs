@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use ethers::{
-    abi::{Abi, Token, ParamType},
+    abi::Token,
     types::{Transaction, H256, U256, Address, Bytes},
 };
-use tracing::{debug, warn};
+use tracing::debug;
 use crate::blockchain::abi::AbiManager;
-use super::events::SwapData;
 
 /// 트랜잭션 디코더
 pub struct TransactionDecoder {

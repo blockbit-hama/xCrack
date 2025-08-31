@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
-use anyhow::{Result, anyhow};
-use tracing::{info, debug, warn, error};
+use anyhow::Result;
+use tracing::info;
 use alloy::primitives::{Address, U256};
 use ethers::providers::{Provider, Ws};
 use serde::{Deserialize, Serialize};
@@ -185,7 +185,7 @@ impl LiquidationStateIndexer {
         let mut liquidatable_count = 0;
         
         // 각 프로토콜의 사용자 포지션 인덱싱
-        for (protocol_type, users) in liquidatable_users {
+        for (_protocol_type, users) in liquidatable_users {
             for user in users {
                 let position = self.build_user_position(user).await?;
                 
@@ -254,7 +254,7 @@ impl LiquidationStateIndexer {
         let positions = self.indexed_positions.read().await;
         let mut candidates = Vec::new();
         
-        for (user, position) in positions.iter() {
+        for (_user, position) in positions.iter() {
             if position.is_liquidatable {
                 let candidate = self.build_liquidation_candidate(position).await?;
                 candidates.push(candidate);
@@ -328,7 +328,7 @@ impl LiquidationStateIndexer {
     }
     
     /// 예상 수익 계산
-    async fn calculate_estimated_profit(&self, position: &UserPosition, liquidation_amount: U256) -> Result<U256> {
+    async fn calculate_estimated_profit(&self, _position: &UserPosition, liquidation_amount: U256) -> Result<U256> {
         // TODO: 실제 수익성 계산 로직 구현
         // 현재는 간단한 휴리스틱 사용
         

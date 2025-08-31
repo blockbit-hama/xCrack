@@ -1,18 +1,16 @@
 use std::sync::Arc;
-use anyhow::{Result, anyhow};
-use tracing::{info, debug, warn, error};
-use alloy::primitives::{Address as AlloyAddress, U256 as AlloyU256, Bytes as AlloyBytes};
-use ethers::types::{Address, U256, Bytes, H160};
+use anyhow::Result;
+use tracing::{info, debug};
+use ethers::types::{Address, U256, Bytes};
 use ethers::providers::{Provider, Ws};
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
-use crate::dex::{DexAggregator, SwapQuote, SwapParams, DexType};
-use crate::protocols::{LiquidatableUser, ProtocolType};
-use crate::mev::{Bundle, BundleBuilder, BundleType, PriorityLevel, LiquidationParams};
+use crate::dex::{DexAggregator, SwapQuote, DexType};
+use crate::protocols::LiquidatableUser;
+use crate::mev::{Bundle, BundleBuilder, PriorityLevel, LiquidationParams};
 use crate::blockchain::BlockchainClient;
-use ethers::signers::{LocalWallet, Signer};
+use ethers::signers::LocalWallet;
 use crate::utils::profitability::LiquidationProfitabilityAnalysis;
 
 /// 청산 번들 빌더 - MEV 번들 생성 및 최적화
@@ -171,7 +169,7 @@ impl LiquidationBundleBuilder {
     /// MEV 번들 생성
     async fn create_mev_bundle(&mut self, scenario: &LiquidationScenario) -> Result<Bundle> {
         // 청산 트랜잭션 생성
-        let liquidation_tx = self.create_liquidation_transaction(scenario).await?;
+        let _liquidation_tx = self.create_liquidation_transaction(scenario).await?;
         
         // 청산 파라미터 생성 (mock implementation)
         let liquidation_params = LiquidationParams {
@@ -199,7 +197,7 @@ impl LiquidationBundleBuilder {
     }
     
     /// 청산 트랜잭션 생성
-    async fn create_liquidation_transaction(&self, scenario: &LiquidationScenario) -> Result<Bytes> {
+    async fn create_liquidation_transaction(&self, _scenario: &LiquidationScenario) -> Result<Bytes> {
         // TODO: 실제 청산 컨트랙트 호출 트랜잭션 생성
         // 현재는 더미 데이터 반환
         

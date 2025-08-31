@@ -2,15 +2,13 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
     providers::{Provider, Http, Middleware},
-    types::{Transaction, H256, U256, Address, Bytes},
+    types::{Transaction, H256, U256},
     signers::{LocalWallet, Signer},
-    utils::rlp,
 };
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use tracing::{info, debug, warn, error};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::time::sleep;
 use uuid::Uuid;
 
 /// Flashbots 릴레이 클라이언트
@@ -38,7 +36,8 @@ pub struct FlashbotsRelay {
 
 /// Flashbots 통계
 #[derive(Debug, Clone, Default)]
-struct FlashbotsStats {
+#[allow(dead_code)]
+pub struct FlashbotsStats {
     bundles_submitted: u64,
     bundles_included: u64,
     bundles_rejected: u64,
@@ -75,6 +74,7 @@ struct BundleParams {
 
 /// 번들 제출 응답
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct BundleSubmissionResponse {
     #[serde(rename = "jsonrpc")]
     jsonrpc: String,
@@ -92,6 +92,7 @@ struct BundleResult {
 
 /// JSON-RPC 에러
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct JsonRpcError {
     code: i32,
     message: String,
@@ -449,7 +450,7 @@ impl FlashbotsClient {
     }
 
     /// 번들 수익 계산
-    fn calculate_bundle_profit(&self, results: &[CallResult]) -> U256 {
+    fn calculate_bundle_profit(&self, _results: &[CallResult]) -> U256 {
         // 코인베이스 차이와 가스 비용을 고려한 수익 계산
         // 실제 구현에서는 더 정교한 계산이 필요
         U256::from(0)
@@ -503,6 +504,7 @@ struct SimulationRequest {
 
 /// 시뮬레이션 응답
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct SimulationResponse {
     #[serde(rename = "jsonrpc")]
     jsonrpc: String,
@@ -513,6 +515,7 @@ struct SimulationResponse {
 
 /// 시뮬레이션 번들 결과
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct SimulationBundleResult {
     #[serde(rename = "bundleGasPrice")]
     bundle_gas_price: String,
@@ -533,6 +536,7 @@ struct SimulationBundleResult {
 
 /// 호출 결과
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CallResult {
     #[serde(rename = "gasUsed")]
     gas_used: u64,

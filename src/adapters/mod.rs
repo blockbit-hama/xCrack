@@ -7,8 +7,8 @@ pub mod oneinch;
 pub mod factory;
 
 // Re-exports
-pub use traits::{DexAdapter, Quote, CalldataBundle, AdapterError, AdapterConfig};
-pub use factory::{DexAdapterFactory, AdapterSelector, AdapterSelectionStrategy};
+pub use traits::{Quote, AdapterConfig};
+pub use factory::DexAdapterFactory;
 pub use uniswap_v2::UniswapV2Adapter;
 pub use uniswap_v3::UniswapV3Adapter;
 pub use sushiswap::SushiswapAdapter;

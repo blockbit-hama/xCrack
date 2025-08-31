@@ -1,13 +1,13 @@
 use std::sync::Arc;
-use anyhow::{Result, anyhow};
-use tracing::{info, debug, warn, error};
-use alloy::primitives::{Address, U256};
+use anyhow::Result;
+use tracing::{info, debug, warn};
+use alloy::primitives::U256;
 use ethers::providers::{Provider, Ws};
 use ethers::types::H256;
 use tokio::time::{sleep, Duration};
 
 use crate::config::Config;
-use crate::mev::{FlashbotsClient, BundleStatus, Bundle};
+use crate::mev::{FlashbotsClient, BundleStatus};
 use super::liquidation_bundle_builder::LiquidationBundle;
 
 /// 청산 실행 엔진 - MEV 번들 제출 및 실행 관리
@@ -182,7 +182,7 @@ impl LiquidationExecutionEngine {
     }
     
     /// 실행 통계 업데이트
-    async fn update_execution_stats(&self, result: &SubmissionResult, execution_time: Duration) {
+    async fn update_execution_stats(&self, result: &SubmissionResult, _execution_time: Duration) {
         let mut stats = self.execution_stats.write().await;
         
         stats.total_submissions += 1;

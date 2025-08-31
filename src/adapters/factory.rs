@@ -256,7 +256,7 @@ impl DexAdapterFactory {
     pub fn get_all_metrics(&self) -> HashMap<String, AdapterMetrics> {
         let mut metrics = HashMap::new();
         
-        for (name, adapter) in &self.adapters {
+        for (name, _adapter) in &self.adapters {
             // 각 어댑터의 메트릭을 조회 (실제 구현에서는 어댑터별 메트릭 접근 필요)
             metrics.insert(name.clone(), AdapterMetrics::default());
         }

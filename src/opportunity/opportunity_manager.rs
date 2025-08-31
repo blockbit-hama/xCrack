@@ -1,14 +1,14 @@
 use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::RwLock;
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug};
 use alloy::primitives::U256;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::types::{Opportunity, OpportunityType, StrategyType};
 use crate::config::Config;
-use super::priority_queue::{OpportunityQueue, OpportunityPriority, ScoringWeights};
+use super::priority_queue::{OpportunityQueue, OpportunityPriority};
 use super::scoring::OpportunityScorer;
 
 /// 기회 관리자
@@ -132,7 +132,7 @@ impl OpportunityManager {
         // 점수 계산
         let scorer = self.scorer.read().await;
         let ttl = self.get_ttl_for_strategy(&opportunity.strategy);
-        let mut priority = scorer.score_opportunity(&opportunity, ttl);
+        let priority = scorer.score_opportunity(&opportunity, ttl);
         
         // ID 생성
         let opportunity_id = self.generate_opportunity_id(&opportunity);

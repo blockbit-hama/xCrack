@@ -3,11 +3,10 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use anyhow::Result;
-use alloy::primitives::U256;
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
-use tracing::{info, debug, warn};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::debug;
 
-use crate::types::{Opportunity, OpportunityType, StrategyType};
+use crate::types::{Opportunity, StrategyType};
 
 /// 기회의 우선순위 정보
 #[derive(Debug, Clone)]

@@ -1,13 +1,13 @@
 use std::sync::Arc;
 use std::collections::HashMap;
-use anyhow::{Result, anyhow};
-use tracing::{info, debug, warn, error};
+use anyhow::Result;
+use tracing::{info, debug};
 use alloy::primitives::{Address, U256};
 use ethers::{
     providers::{Provider, Ws, Middleware},
     contract::Contract,
     abi::Abi,
-    types::{H160, H256, U256 as EthersU256, Filter, Log, BlockNumber},
+    types::{H160, H256, Filter, Log, BlockNumber},
 };
 use async_trait::async_trait;
 
@@ -64,7 +64,7 @@ impl MakerScanner {
         })
     }
     
-    async fn get_supported_ilks(vat: &Contract<Provider<Ws>>) -> Result<Vec<String>> {
+    async fn get_supported_ilks(_vat: &Contract<Provider<Ws>>) -> Result<Vec<String>> {
         // TODO: 실제 ilk 목록 조회 구현
         // 현재는 하드코딩된 목록 사용
         let ilks = vec![
@@ -103,7 +103,7 @@ impl MakerScanner {
         Ok(cdps.into_iter().collect())
     }
     
-    fn parse_cdp_id_from_log(&self, log: &Log) -> Option<u32> {
+    fn parse_cdp_id_from_log(&self, _log: &Log) -> Option<u32> {
         // TODO: 실제 로그 파싱 구현
         // 현재는 더미 데이터 반환
         Some(rand::random::<u32>() % 10000)
@@ -150,7 +150,7 @@ impl ProtocolScanner for MakerScanner {
         Ok(liquidatable_users)
     }
     
-    async fn get_user_data(&self, user: Address) -> anyhow::Result<Option<LiquidatableUser>> {
+    async fn get_user_data(&self, _user: Address) -> anyhow::Result<Option<LiquidatableUser>> {
         // TODO: 특정 사용자의 CDP 데이터 조회 구현
         Ok(None)
     }
