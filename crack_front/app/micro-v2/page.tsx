@@ -260,6 +260,7 @@ export default function MicroArbitrageV2Page() {
                         width: `${((fundingMetrics.auto_mode_decisions?.wallet_selected || 0) / (fundingMetrics.auto_mode_decisions?.total_decisions || 1)) * 100}%` 
                       }}
                     ></div>
+                  </div>
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <div className="flex justify-between">
                     <span className="text-sm">수익성 없어 건너뜀:</span>
