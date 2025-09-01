@@ -28,7 +28,9 @@ export default function AlertsPage() {
         getAlertStats()
       ]);
       
-      setAlerts(alertsData);
+      // alertsData가 배열인지 확인하고 안전하게 설정
+      const safeAlerts = Array.isArray(alertsData) ? alertsData : [];
+      setAlerts(safeAlerts);
       setStats(statsData);
       setError(null);
     } catch (err) {
@@ -96,7 +98,10 @@ export default function AlertsPage() {
     return new Date(timestamp).toLocaleString('ko-KR');
   };
 
-  const filteredAlerts = alerts.filter(alert => {
+  // alerts가 배열인지 확인하고 안전하게 필터링
+  const safeAlerts = Array.isArray(alerts) ? alerts : [];
+  
+  const filteredAlerts = safeAlerts.filter(alert => {
     if (filter === 'all') return true;
     if (filter === 'unacknowledged') return !alert.acknowledged;
     if (['critical', 'high', 'medium', 'low', 'info'].includes(filter as string)) {
@@ -146,7 +151,7 @@ export default function AlertsPage() {
           <button
             onClick={handleAcknowledgeAll}
             className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-            disabled={alerts.filter(a => !a.acknowledged).length === 0}
+            disabled={safeAlerts.filter(a => !a.acknowledged).length === 0}
           >
             모두 확인
           </button>
@@ -177,21 +182,21 @@ export default function AlertsPage() {
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">긴급</h3>
-            <p className="text-2xl font-bold text-red-600">{stats.critical_count.toLocaleString()}</p>
+            <p className="text-2xl font-bold text-red-600">{(stats?.critical_count || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">24시간</h3>
-            <p className="text-2xl font-bold text-blue-600">{stats.alerts_last_24h.toLocaleString()}</p>
+            <p className="text-2xl font-bold text-blue-600">{(stats?.alerts_last_24h || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">주요 범주</h3>
             <p className="text-lg font-bold">
-              {getCategoryIcon(stats.most_frequent_category)} {stats.most_frequent_category}
+              {getCategoryIcon(stats?.most_frequent_category || 'system')} {stats?.most_frequent_category || 'system'}
             </p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">평균 해결시간</h3>
-            <p className="text-2xl font-bold text-purple-600">{Math.round(stats.avg_resolution_time_minutes)}분</p>
+            <p className="text-2xl font-bold text-purple-600">{Math.round(stats?.avg_resolution_time_minutes || 0)}분</p>
           </div>
         </div>
       )}
@@ -203,13 +208,13 @@ export default function AlertsPage() {
             onClick={() => setFilter('all')}
             className={`px-3 py-1 rounded ${filter === 'all' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
           >
-            전체 ({alerts.length})
+            전체 ({safeAlerts.length})
           </button>
           <button
             onClick={() => setFilter('unacknowledged')}
             className={`px-3 py-1 rounded ${filter === 'unacknowledged' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
           >
-            미확인 ({alerts.filter(a => !a.acknowledged).length})
+            미확인 ({safeAlerts.filter(a => !a.acknowledged).length})
           </button>
           
           {/* 심각도 필터 */}
@@ -219,7 +224,7 @@ export default function AlertsPage() {
               onClick={() => setFilter(severity)}
               className={`px-3 py-1 rounded ${filter === severity ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
             >
-              {severity} ({alerts.filter(a => a.severity === severity).length})
+              {severity} ({safeAlerts.filter(a => a.severity === severity).length})
             </button>
           ))}
           
@@ -230,7 +235,7 @@ export default function AlertsPage() {
               onClick={() => setFilter(category)}
               className={`px-3 py-1 rounded ${filter === category ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
             >
-              {getCategoryIcon(category)} {category} ({alerts.filter(a => a.category === category).length})
+              {getCategoryIcon(category)} {category} ({safeAlerts.filter(a => a.category === category).length})
             </button>
           ))}
         </div>
