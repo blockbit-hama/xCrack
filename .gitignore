@@ -135,3 +135,26 @@ Cargo.lock
 # macOS
 .DS_Store
 **/.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.test
+
+# API Keys and Secrets
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Logs
+logs/
+*.log
+
+# Runtime files
+*.pid
+.backend.pid
+.frontend.pid
