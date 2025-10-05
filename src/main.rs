@@ -26,7 +26,6 @@ mod constants;
 mod mocks;
 mod exchange;
 mod backtest;
-mod bridges;
 mod blockchain;
 mod oracle;      // 🆕 가격 오라클 시스템
 mod opportunity; // 🆕 기회 관리 시스템
@@ -35,7 +34,7 @@ mod api;         // 🆕 Public HTTP API (Axum)
 
 use config::Config;
 use core::SearcherCore;
-use monitoring::manager::MonitoringManager;
+use core::MonitoringManager;
 
 /// ETH 금액을 포맷팅하는 헬퍼 함수
 fn format_eth_amount(wei: alloy::primitives::U256) -> String {
@@ -87,7 +86,7 @@ async fn main() -> Result<()> {
                 .short('s')
                 .long("strategies")
                 .value_name("STRATEGIES")
-                .help("활성화할 전략들 (sandwich,liquidation,micro_arbitrage,cross_chain)")
+                .help("활성화할 전략들 (sandwich,liquidation,micro_arbitrage)")
                 .default_value("sandwich,liquidation,micro_arbitrage")
         )
         .get_matches();
@@ -151,12 +150,6 @@ async fn main() -> Result<()> {
     // config를 Arc로 감싸기
     let config = Arc::new(config);
     
-    // 크로스체인 아비트러지 전략만 실행하는 경우 Mock 실행
-    if strategies == "cross_chain" {
-        info!("🌉 크로스체인 아비트래지 전략 단독 실행 모드");
-        strategies::run_cross_chain_arbitrage_mock(Arc::clone(&config)).await?;
-        return Ok(());
-    }
     
     // WebSocket 프로바이더 초기화
     let ws_url = config.network.ws_url.as_ref()
@@ -295,9 +288,6 @@ fn apply_strategy_selection(config: &mut Config, strategies: &str) {
             }
             "micro_arbitrage" => {
                 info!("마이크로 아비트러지 전략 활성화");
-            }
-            "cross_chain" => {
-                info!("크로스체인 아비트러지 전략 활성화 (Mock 모드)");
             }
             _ => {
                 warn!("알 수 없는 전략: {}", strategy);

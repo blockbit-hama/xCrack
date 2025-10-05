@@ -65,9 +65,6 @@ pub struct StrategyConfig {
     pub sandwich: SandwichConfig,
     pub liquidation: LiquidationConfig,
     pub micro_arbitrage: MicroArbitrageConfig,
-    /// Cross-chain arbitrage strategy configuration
-    #[serde(default)]
-    pub cross_chain_arbitrage: CrossChainArbitrageConfig,
 }
 
 
@@ -143,20 +140,6 @@ pub struct MicroArbitrageConfig {
     pub gas_buffer_pct: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CrossChainArbitrageConfig {
-    pub enabled: bool,
-    /// Use flashloan to source origin-side funds for bridging+settlement
-    pub use_flashloan: bool,
-    /// Desired flash loan amount (token units as string, e.g., "10000" for 10k USDC)
-    pub flash_loan_amount: Option<String>,
-}
-
-impl Default for CrossChainArbitrageConfig {
-    fn default() -> Self {
-        Self { enabled: true, use_flashloan: false, flash_loan_amount: None }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExchangeConfig {

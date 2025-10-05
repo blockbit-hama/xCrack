@@ -112,66 +112,20 @@ export default function FlashloanPage() {
             <h2 className="text-lg font-semibold mb-4">성과 지표</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <div className="text-sm text-gray-500">총 플래시론 수</div>
-                <div className="text-2xl font-bold">{dashboard.performance_metrics.total_flashloans}</div>
+                <div className="text-sm text-gray-500">활성 플래시론</div>
+                <div className="text-2xl font-bold">{dashboard.active_loans}</div>
               </div>
               <div>
                 <div className="text-sm text-gray-500">총 거래량</div>
-                <div className="text-2xl font-bold">{formatAmount(dashboard.performance_metrics.total_volume.replace(' USD', ''))}</div>
+                <div className="text-2xl font-bold">{formatAmount(dashboard.total_volume)}</div>
               </div>
               <div>
                 <div className="text-sm text-gray-500">총 수익</div>
-                <div className="text-2xl font-bold text-green-600">{formatAmount(dashboard.performance_metrics.total_profit.replace(' USD', ''))}</div>
+                <div className="text-2xl font-bold text-green-600">{formatAmount(dashboard.total_profit)}</div>
               </div>
               <div>
                 <div className="text-sm text-gray-500">성공률</div>
-                <div className="text-2xl font-bold">{(dashboard.performance_metrics.success_rate * 100).toFixed(1)}%</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Flashloan Providers */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">플래시론 제공업체</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {Object.entries(dashboard.flashloan_providers).map(([name, provider]) => (
-                <div key={name} className="border rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-medium capitalize">{name.replace('_', ' ')}</h3>
-                    <span className={`text-sm font-medium ${getProviderColor(provider.available)}`}>
-                      {provider.available ? '사용 가능' : '사용 불가'}
-                    </span>
-                  </div>
-                  <div className="text-sm text-gray-600 space-y-1">
-                    <div>최대 금액: {provider.max_amount}</div>
-                    <div>수수료: {provider.fee_rate}</div>
-                    <div>가스 비용: {provider.gas_cost}</div>
-                    <div>마지막 업데이트: {formatTime(provider.last_update)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Gas Analytics */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">가스 분석</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <div className="text-sm text-gray-500">평균 가스 사용량</div>
-                <div className="text-lg font-bold">{dashboard.gas_analytics.avg_gas_per_flashloan}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500">최대 가스 사용량</div>
-                <div className="text-lg font-bold">{dashboard.gas_analytics.most_expensive_flashloan}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500">최소 가스 사용량</div>
-                <div className="text-lg font-bold">{dashboard.gas_analytics.cheapest_flashloan}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500">최적화 절약률</div>
-                <div className="text-lg font-bold text-green-600">{dashboard.gas_analytics.gas_optimization_savings}</div>
+                <div className="text-2xl font-bold">{(dashboard.success_rate * 100).toFixed(1)}%</div>
               </div>
             </div>
           </div>
@@ -196,100 +150,22 @@ export default function FlashloanPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {dashboard.recent_flashloans.map((tx, index) => (
-                  <tr key={index}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
-                      {tx.tx_hash}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {formatTime(tx.timestamp)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
-                      {tx.provider.replace('_', ' ')}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {formatAmount(tx.amount)} {tx.token}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
-                      {tx.strategy}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <span className={parseFloat(tx.profit) >= 0 ? 'text-green-600' : 'text-red-600'}>
-                        {parseFloat(tx.profit) >= 0 ? '+' : ''}{tx.profit} USD
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        tx.status === 'success' ? 'bg-green-100 text-green-800' :
-                        tx.status === 'failed' ? 'bg-red-100 text-red-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {tx.status === 'success' ? '성공' : tx.status === 'failed' ? '실패' : '대기중'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                <tr>
+                  <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
+                    플래시론 기록이 없습니다
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* Contracts Tab */}
-      {activeTab === 'contracts' && (
+      {/* Other tabs */}
+      {(activeTab === 'contracts' || activeTab === 'code') && (
         <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">플래시론 컨트랙트</h2>
-          <div className="space-y-4">
-            {Object.entries(dashboard.flashloan_contracts).map(([name, contract]) => (
-              <div key={name} className="border rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-medium">{contract.name}</h3>
-                  <div className="flex items-center space-x-2">
-                    {contract.verified && (
-                      <span className="text-green-600 text-sm">✓ 검증됨</span>
-                    )}
-                    {contract.proxy && (
-                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">Proxy</span>
-                    )}
-                  </div>
-                </div>
-                <div className="text-sm text-gray-600 space-y-1">
-                  <div className="font-mono">{contract.address}</div>
-                  {contract.implementation && (
-                    <div>
-                      <span className="text-gray-500">구현체:</span>
-                      <span className="font-mono ml-2">{contract.implementation}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Smart Contract Code Tab */}
-      {activeTab === 'code' && (
-        <div className="bg-white rounded-lg shadow">
-          <div className="p-6 border-b">
-            <h2 className="text-lg font-semibold mb-4">스마트 컨트랙트 소스 코드</h2>
-            <select
-              value={selectedContract}
-              onChange={(e) => setSelectedContract(e.target.value)}
-              className="border rounded px-3 py-2 text-sm"
-            >
-              {Object.entries(dashboard.smart_contracts).map(([name, contract]) => (
-                <option key={name} value={name}>
-                  {name.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())} (Solidity {contract.solidity_version})
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          <div className="p-6">
-            <pre className="bg-gray-50 p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap">
-              {dashboard.smart_contracts[selectedContract]?.source_code.replace(/\\n/g, '\n')}
-            </pre>
+          <div className="text-center text-gray-500">
+            {activeTab === 'contracts' ? '컨트랙트 정보' : '코드 예시'} 준비 중입니다
           </div>
         </div>
       )}

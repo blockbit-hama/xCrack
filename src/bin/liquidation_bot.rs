@@ -4,7 +4,6 @@ use std::env;
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use tracing::{info, error, warn};
-use tracing_subscriber;
 use tokio::signal;
 use ethers::providers::{Provider, Ws, Middleware};
 
@@ -162,14 +161,14 @@ async fn run_scan_mode(manager: IntegratedLiquidationManager) -> Result<()> {
     println!("=====================================");
     println!("Active Opportunities: {}", summary.active_opportunities);
     println!("Total Potential Profit: ${:.2}", summary.total_potential_profit);
-    println!("");
+    println!();
     
     if !summary.protocol_breakdown.is_empty() {
         println!("📊 Protocol Breakdown:");
         for (protocol, count) in &summary.protocol_breakdown {
             println!("  {}: {} opportunities", protocol, count);
         }
-        println!("");
+        println!();
     }
     
     if !summary.top_opportunities.is_empty() {
@@ -181,7 +180,7 @@ async fn run_scan_mode(manager: IntegratedLiquidationManager) -> Result<()> {
                      opp.strategy.net_profit_usd,
                      opp.user.account_data.health_factor);
         }
-        println!("");
+        println!();
     }
     
     let protocol_summary = manager.get_protocol_summary().await?;
@@ -277,17 +276,17 @@ async fn run_test_mode(manager: IntegratedLiquidationManager) -> Result<()> {
 /// 사용법 출력
 fn print_usage() {
     println!("Usage: liquidation_bot [OPTIONS]");
-    println!("");
+    println!();
     println!("Environment Variables:");
     println!("  XCRACK_CONFIG     Configuration file path (default: config/liquidation.toml)");
     println!("  LIQUIDATION_MODE  Execution mode (default: auto)");
-    println!("");
+    println!();
     println!("Modes:");
     println!("  auto     - Run automated liquidation bot");
     println!("  scan     - Scan for opportunities and exit");
     println!("  analyze  - Show detailed analysis and exit");
     println!("  test     - Run system tests and exit");
-    println!("");
+    println!();
     println!("Examples:");
     println!("  LIQUIDATION_MODE=scan ./liquidation_bot");
     println!("  XCRACK_CONFIG=custom.toml ./liquidation_bot");

@@ -80,13 +80,35 @@ export type Status = {
 export type StrategyKey = 'sandwich' | 'liquidation' | 'micro' | 'cross';
 export type Strategies = Record<StrategyKey, boolean>;
 
+// Alert 관련 타입
+export type AlertSeverity = 'info' | 'warning' | 'error' | 'critical';
+export type AlertCategory = 'system' | 'strategy' | 'performance' | 'security';
+
+export type Alert = {
+  id: string;
+  severity: AlertSeverity;
+  category: AlertCategory;
+  title: string;
+  message: string;
+  timestamp: string;
+  acknowledged: boolean;
+  resolved: boolean;
+};
+
+export type AlertStats = {
+  total: number;
+  active: number;
+  resolved: number;
+  critical: number;
+};
+
 export type BundleStatsInfo = {
   total_created: number;
   total_submitted: number;
   total_included: number;
   total_failed: number;
-  total_profit: unknown;
-  total_gas_spent: unknown;
+  total_profit: number;
+  total_gas_spent: number;
   avg_submission_time_ms: number;
   success_rate: number;
 };
@@ -261,22 +283,9 @@ export async function getLogs(limit: number = 100): Promise<Array<{
   return result || [];
 }
 
-export async function getAlerts(): Promise<Array<{
-  id: string;
-  type: 'info' | 'warning' | 'error';
-  title: string;
-  message: string;
-  timestamp: string;
-  resolved: boolean;
-}>> {
-  const result = await apiClient.get<Array<{
-    id: string;
-    type: 'info' | 'warning' | 'error';
-    title: string;
-    message: string;
-    timestamp: string;
-    resolved: boolean;
-  }>>('/api/alerts');
+export async function getAlerts(unacknowledgedOnly: boolean = false): Promise<Alert[]> {
+  const endpoint = unacknowledgedOnly ? '/api/alerts?unacknowledged=true' : '/api/alerts';
+  const result = await apiClient.get<Alert[]>(endpoint);
   return result || [];
 }
 
@@ -289,15 +298,17 @@ export async function resolveAlert(alertId: string): Promise<{ success: boolean 
 }
 
 // 추가 API 함수들 - 안전한 방식으로 수정
-export async function getDetailedPerformance(): Promise<{
+export type DetailedPerformance = {
   cpu_usage: number;
   memory_usage: number;
   network_latency: number;
   response_time: number;
   throughput: number;
   error_rate: number;
-}> {
-  const result = await apiClient.get('/api/performance/detailed');
+};
+
+export async function getDetailedPerformance(): Promise<DetailedPerformance> {
+  const result = await apiClient.get<DetailedPerformance>('/api/performance/detailed');
   return result || {
     cpu_usage: 0,
     memory_usage: 0,
@@ -308,237 +319,300 @@ export async function getDetailedPerformance(): Promise<{
   };
 }
 
-export async function getAlertStats(): Promise<{
-  total: number;
-  active: number;
-  resolved: number;
-  critical: number;
-}> {
-  const result = await apiClient.get('/api/alerts/stats');
+export async function getAlertStats(): Promise<AlertStats> {
+  const result = await apiClient.get<AlertStats>('/api/alerts/stats');
   return result || { total: 0, active: 0, resolved: 0, critical: 0 };
 }
 
 export async function acknowledgeAlert(alertId: string): Promise<{ success: boolean }> {
-  const result = await apiClient.post(`/api/alerts/${alertId}/acknowledge`);
+  const result = await apiClient.post<{ success: boolean }>(`/api/alerts/${alertId}/acknowledge`);
   return result || { success: false };
 }
 
 export async function acknowledgeAllAlerts(): Promise<{ success: boolean }> {
-  const result = await apiClient.post('/api/alerts/acknowledge-all');
+  const result = await apiClient.post<{ success: boolean }>('/api/alerts/acknowledge-all');
   return result || { success: false };
 }
 
 export async function dismissAlert(alertId: string): Promise<{ success: boolean }> {
-  const result = await apiClient.post(`/api/alerts/${alertId}/dismiss`);
+  const result = await apiClient.post<{ success: boolean }>(`/api/alerts/${alertId}/dismiss`);
   return result || { success: false };
 }
 
-export async function getFlashloanDashboard(): Promise<{
+export type FlashloanDashboard = {
   total_volume: string;
   total_profit: string;
   active_loans: number;
   success_rate: number;
-}> {
-  const result = await apiClient.get('/api/flashloan/dashboard');
+};
+
+export async function getFlashloanDashboard(): Promise<FlashloanDashboard> {
+  const result = await apiClient.get<FlashloanDashboard>('/api/flashloan/dashboard');
   return result || { total_volume: '0', total_profit: '0', active_loans: 0, success_rate: 0 };
 }
 
-export async function getMempoolStatus(): Promise<{
+export type MempoolStatus = {
   total_transactions: number;
   pending_transactions: number;
   avg_gas_price: string;
   network_congestion: number;
-}> {
-  const result = await apiClient.get('/api/mempool/status');
+};
+
+export async function getMempoolStatus(): Promise<MempoolStatus> {
+  const result = await apiClient.get<MempoolStatus>('/api/mempool/status');
   return result || { total_transactions: 0, pending_transactions: 0, avg_gas_price: '0', network_congestion: 0 };
 }
 
-export async function getMicroArbitrageV2Dashboard(): Promise<{
+export type MicroArbitrageV2Dashboard = {
   total_trades: number;
   total_profit: string;
   success_rate: number;
   avg_profit_per_trade: string;
-}> {
-  const result = await apiClient.get('/api/micro-v2/dashboard');
+};
+
+export async function getMicroArbitrageV2Dashboard(): Promise<MicroArbitrageV2Dashboard> {
+  const result = await apiClient.get<MicroArbitrageV2Dashboard>('/api/micro-v2/dashboard');
   return result || { total_trades: 0, total_profit: '0', success_rate: 0, avg_profit_per_trade: '0' };
 }
 
-export async function getSchedulerMetrics(): Promise<{
+export type SchedulerMetrics = {
   active_jobs: number;
   completed_jobs: number;
   failed_jobs: number;
   avg_execution_time: number;
-}> {
-  const result = await apiClient.get('/api/scheduler/metrics');
+};
+
+export async function getSchedulerMetrics(): Promise<SchedulerMetrics> {
+  const result = await apiClient.get<SchedulerMetrics>('/api/scheduler/metrics');
   return result || { active_jobs: 0, completed_jobs: 0, failed_jobs: 0, avg_execution_time: 0 };
 }
 
-export async function getFundingModeMetrics(): Promise<{
+export type FundingModeMetrics = {
   total_funding: string;
   active_positions: number;
   funding_rate: number;
   utilization_rate: number;
-}> {
-  const result = await apiClient.get('/api/funding/metrics');
+};
+
+export async function getFundingModeMetrics(): Promise<FundingModeMetrics> {
+  const result = await apiClient.get<FundingModeMetrics>('/api/funding/metrics');
   return result || { total_funding: '0', active_positions: 0, funding_rate: 0, utilization_rate: 0 };
 }
 
-export async function getMicroOpportunities(): Promise<Array<{
+export type MicroOpportunity = {
   id: string;
   pair: string;
   profit: string;
   timestamp: string;
   status: string;
-}>> {
-  const result = await apiClient.get('/api/micro/opportunities');
+};
+
+export async function getMicroOpportunities(): Promise<MicroOpportunity[]> {
+  const result = await apiClient.get<MicroOpportunity[]>('/api/micro/opportunities');
   return result || [];
 }
 
-export async function getMicroTradeHistory(): Promise<Array<{
+export type MicroTradeHistory = {
   id: string;
   pair: string;
   amount: string;
   profit: string;
   timestamp: string;
-}>> {
-  const result = await apiClient.get('/api/micro/trades');
+};
+
+export async function getMicroTradeHistory(): Promise<MicroTradeHistory[]> {
+  const result = await apiClient.get<MicroTradeHistory[]>('/api/micro/trades');
   return result || [];
 }
 
-export async function getMicroArbitrageDashboard(): Promise<{
+export type MicroArbitrageDashboard = {
   total_trades: number;
   total_profit: string;
   success_rate: number;
   active_opportunities: number;
-}> {
-  const result = await apiClient.get('/api/micro/dashboard');
+};
+
+export async function getMicroArbitrageDashboard(): Promise<MicroArbitrageDashboard> {
+  const result = await apiClient.get<MicroArbitrageDashboard>('/api/micro/dashboard');
   return result || { total_trades: 0, total_profit: '0', success_rate: 0, active_opportunities: 0 };
 }
 
-export async function getNetworkHealth(): Promise<{
+export type NetworkHealthDashboard = {
   status: string;
   latency: number;
   uptime: number;
   last_check: string;
-}> {
-  const result = await apiClient.get('/api/network/health');
+};
+
+export async function getNetworkHealth(): Promise<NetworkHealthDashboard> {
+  const result = await apiClient.get<NetworkHealthDashboard>('/api/network/health');
   return result || { status: 'unknown', latency: 0, uptime: 0, last_check: new Date().toISOString() };
 }
 
-export async function runLatencyTest(): Promise<{
+export type LatencyTestResult = {
   avg_latency: number;
   min_latency: number;
   max_latency: number;
   test_duration: number;
-}> {
-  const result = await apiClient.post('/api/network/latency-test');
+};
+
+export async function runLatencyTest(): Promise<LatencyTestResult> {
+  const result = await apiClient.post<LatencyTestResult>('/api/network/latency-test');
   return result || { avg_latency: 0, min_latency: 0, max_latency: 0, test_duration: 0 };
 }
 
 export async function acknowledgeNetworkIncident(incidentId: string): Promise<{ success: boolean }> {
-  const result = await apiClient.post(`/api/network/incidents/${incidentId}/acknowledge`);
+  const result = await apiClient.post<{ success: boolean }>(`/api/network/incidents/${incidentId}/acknowledge`);
   return result || { success: false };
 }
 
-export async function getOnChainAnalytics(): Promise<{
+export type OnChainAnalytics = {
   total_volume: string;
   total_fees: string;
   active_addresses: number;
   transaction_count: number;
-}> {
-  const result = await apiClient.get('/api/onchain/analytics');
+};
+
+export async function getOnChainAnalytics(): Promise<OnChainAnalytics> {
+  const result = await apiClient.get<OnChainAnalytics>('/api/onchain/analytics');
   return result || { total_volume: '0', total_fees: '0', active_addresses: 0, transaction_count: 0 };
 }
 
-export async function getMevTransactions(): Promise<Array<{
+export type MevTransaction = {
   hash: string;
   type: string;
   profit: string;
   timestamp: string;
-}>> {
-  const result = await apiClient.get('/api/onchain/mev-transactions');
+};
+
+export async function getMevTransactions(): Promise<MevTransaction[]> {
+  const result = await apiClient.get<MevTransaction[]>('/api/onchain/mev-transactions');
   return result || [];
 }
 
-export async function getWhaleTransactions(): Promise<Array<{
+export type WhaleTransaction = {
   hash: string;
   from: string;
   to: string;
   amount: string;
   timestamp: string;
-}>> {
-  const result = await apiClient.get('/api/onchain/whale-transactions');
+};
+
+export async function getWhaleTransactions(): Promise<WhaleTransaction[]> {
+  const result = await apiClient.get<WhaleTransaction[]>('/api/onchain/whale-transactions');
   return result || [];
 }
 
-export async function getFlashLoanActivities(): Promise<Array<{
+export type FlashLoanActivity = {
   hash: string;
   protocol: string;
   amount: string;
   profit: string;
   timestamp: string;
-}>> {
-  const result = await apiClient.get('/api/onchain/flashloan-activities');
+};
+
+export async function getFlashLoanActivities(): Promise<FlashLoanActivity[]> {
+  const result = await apiClient.get<FlashLoanActivity[]>('/api/onchain/flashloan-activities');
   return result || [];
 }
 
-export async function getRiskDashboard(): Promise<{
+export type RiskDashboard = {
   risk_score: number;
   exposure: string;
   max_drawdown: string;
   var_95: string;
   stress_test_results: any;
-}> {
-  const result = await apiClient.get('/api/risk/dashboard');
+};
+
+export async function getRiskDashboard(): Promise<RiskDashboard> {
+  const result = await apiClient.get<RiskDashboard>('/api/risk/dashboard');
   return result || { risk_score: 0, exposure: '0', max_drawdown: '0', var_95: '0', stress_test_results: null };
 }
 
-export async function runStressTest(): Promise<{
+export type StressTestResult = {
   test_id: string;
   status: string;
   results: any;
   timestamp: string;
-}> {
-  const result = await apiClient.post('/api/risk/stress-test');
+};
+
+export async function runStressTest(): Promise<StressTestResult> {
+  const result = await apiClient.post<StressTestResult>('/api/risk/stress-test');
   return result || { test_id: '', status: 'failed', results: null, timestamp: new Date().toISOString() };
 }
 
 export async function emergencyPauseStrategy(strategyId: string): Promise<{ success: boolean }> {
-  const result = await apiClient.post(`/api/strategies/${strategyId}/emergency-pause`);
+  const result = await apiClient.post<{ success: boolean }>(`/api/strategies/${strategyId}/emergency-pause`);
   return result || { success: false };
 }
 
 export async function acknowledgeRiskEvent(eventId: string): Promise<{ success: boolean }> {
-  const result = await apiClient.post(`/api/risk/events/${eventId}/acknowledge`);
+  const result = await apiClient.post<{ success: boolean }>(`/api/risk/events/${eventId}/acknowledge`);
   return result || { success: false };
 }
 
-export async function getStrategyParams(): Promise<Record<string, any>> {
-  const result = await apiClient.get('/api/strategies/params');
-  return result || {};
+export type StrategyParamsResp = {
+  sandwich: {
+    min_profit_eth: string;
+  };
+  liquidation: {
+    min_profit_eth: string;
+    funding_mode?: string;
+    max_flashloan_fee_bps?: number;
+    gas_buffer_pct?: number;
+    max_concurrent_liquidations?: number;
+    execution_timeout_ms?: number;
+    dex_aggregator_enabled?: boolean;
+    preferred_dex_aggregator?: string;
+  };
+  micro_arbitrage: {
+    min_profit_usd: string;
+    funding_mode?: string;
+    max_flashloan_fee_bps?: number;
+    gas_buffer_pct?: number;
+    price_update_interval?: number;
+    orderbook_refresh_interval?: number;
+    opportunity_scan_interval?: number;
+    allow_aggregator_execution?: boolean;
+    preferred_aggregators?: string[];
+  };
+    use_flashloan?: boolean;
+    flash_loan_amount?: string;
+  };
+};
+
+export async function getStrategyParams(): Promise<StrategyParamsResp> {
+  const result = await apiClient.get<StrategyParamsResp>('/api/strategies/params');
+  return result || {
+    sandwich: { min_profit_eth: '0.01' },
+    liquidation: { min_profit_eth: '0.01' },
+    micro_arbitrage: { min_profit_usd: '10' }
+  };
 }
 
-export async function updateStrategyParams(params: Record<string, any>): Promise<{ success: boolean }> {
-  const result = await apiClient.put('/api/strategies/params', params);
-  return result || { success: false };
+export async function updateStrategyParams(strategy: string, params: Record<string, any>): Promise<{ ok: boolean; error?: string }> {
+  const result = await apiClient.put<{ ok: boolean; error?: string }>(`/api/strategies/${strategy}/params`, params);
+  return result || { ok: false, error: 'Request failed' };
 }
 
-export async function getStrategyStats(): Promise<{
+export type StrategyStats = {
   total_strategies: number;
   active_strategies: number;
   total_profit: string;
   success_rate: number;
-}> {
-  const result = await apiClient.get('/api/strategies/stats');
+};
+
+export async function getStrategyStats(): Promise<StrategyStats> {
+  const result = await apiClient.get<StrategyStats>('/api/strategies/stats');
   return result || { total_strategies: 0, active_strategies: 0, total_profit: '0', success_rate: 0 };
 }
 
 export async function toggleStrategy(strategyId: string, enabled: boolean): Promise<{ success: boolean }> {
-  const result = await apiClient.post(`/api/strategies/${strategyId}/toggle`, { enabled });
+  const result = await apiClient.post<{ success: boolean }>(`/api/strategies/${strategyId}/toggle`, { enabled });
   return result || { success: false };
 }
 
-export async function getBundle(bundleId: string): Promise<{
+export type Bundle = {
   id: string;
   strategy: string;
   transactions: any[];
@@ -546,8 +620,10 @@ export async function getBundle(bundleId: string): Promise<{
   gas_estimate: number;
   status: string;
   timestamp: string;
-}> {
-  const result = await apiClient.get(`/api/bundles/${bundleId}`);
+};
+
+export async function getBundle(bundleId: string): Promise<Bundle> {
+  const result = await apiClient.get<Bundle>(`/api/bundles/${bundleId}`);
   return result || {
     id: bundleId,
     strategy: 'unknown',
@@ -559,37 +635,70 @@ export async function getBundle(bundleId: string): Promise<{
   };
 }
 
-export async function getLiquidationDashboard(): Promise<{
+export type LiquidationDashboard = {
   total_liquidations: number;
   total_profit: string;
   active_positions: number;
   success_rate: number;
-}> {
-  const result = await apiClient.get('/api/liquidation/dashboard');
-  return result || { total_liquidations: 0, total_profit: '0', active_positions: 0, success_rate: 0 };
+  pending_executions?: number;
+  performance_metrics?: {
+    avg_execution_time_ms: number;
+    uptime_seconds: number;
+    execution_success_rate: number;
+  };
+};
+
+export async function getLiquidationDashboard(): Promise<LiquidationDashboard> {
+  const result = await apiClient.get<LiquidationDashboard>('/api/liquidation/dashboard');
+  return result || {
+    total_liquidations: 0,
+    total_profit: '0',
+    active_positions: 0,
+    success_rate: 0,
+    pending_executions: 0,
+    performance_metrics: {
+      avg_execution_time_ms: 0,
+      uptime_seconds: 0,
+      execution_success_rate: 0
+    }
+  };
 }
 
-export async function getProtocolStatus(): Promise<Array<{
-  name: string;
+export type ProtocolStatus = {
+  protocol: string;
   status: string;
-  tvl: string;
-  last_updated: string;
-}>> {
-  const result = await apiClient.get('/api/protocols/status');
+  users_monitored?: number;
+  total_tvl: string;
+  liquidatable_positions?: number;
+  last_update: number;
+};
+
+export async function getProtocolStatus(): Promise<ProtocolStatus[]> {
+  const result = await apiClient.get<ProtocolStatus[]>('/api/protocols/status');
   return result || [];
 }
 
-export async function getLiquidationOpportunities(): Promise<Array<{
+export type LiquidationOpportunity = {
   id: string;
   protocol: string;
   position: string;
+  collateral?: string;
+  debt?: string;
   health_factor: number;
   liquidation_threshold: number;
   estimated_profit: string;
-  timestamp: string;
-}>> {
-  const result = await apiClient.get('/api/liquidation/opportunities');
-  return result || [];
+  execution_cost?: string;
+  timestamp: number;
+};
+
+export type LiquidationOpportunitiesResponse = {
+  opportunities: LiquidationOpportunity[];
+  total: number;
+};
+
+export async function getLiquidationOpportunities(): Promise<LiquidationOpportunitiesResponse> {
+  const result = await apiClient.get<LiquidationOpportunitiesResponse>('/api/liquidation/opportunities');
+  return result || { opportunities: [], total: 0 };
 }
 
 // 에러 핸들링 유틸리티

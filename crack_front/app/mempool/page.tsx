@@ -88,12 +88,6 @@ export default function MempoolPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">실시간 멤풀 모니터</h1>
-        <div className="flex items-center space-x-2">
-          <div className={`w-3 h-3 rounded-full ${status?.is_monitoring && status?.connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-          <span className="text-sm">
-            {status?.is_monitoring && status?.connected ? '연결됨' : '연결 끊김'}
-          </span>
-        </div>
       </div>
 
       {/* 멤풀 통계 */}
@@ -101,62 +95,19 @@ export default function MempoolPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">총 트랜잭션</h3>
-            <p className="text-2xl font-bold">{safeNumber(status.stats?.total_transactions).toLocaleString()}</p>
+            <p className="text-2xl font-bold">{safeNumber(status.total_transactions).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">대기 중</h3>
-            <p className="text-2xl font-bold">{safeNumber(status.stats?.pending_transactions).toLocaleString()}</p>
+            <p className="text-2xl font-bold">{safeNumber(status.pending_transactions).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-            <h3 className="text-sm font-medium text-gray-500">TPS</h3>
-            <p className="text-2xl font-bold">{safeNumber(status.stats?.transactions_per_second, 0).toFixed(1)}</p>
+            <h3 className="text-sm font-medium text-gray-500">네트워크 혼잡도</h3>
+            <p className="text-2xl font-bold">{safeNumber(status.network_congestion, 0).toFixed(1)}%</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">평균 가스</h3>
-            <p className="text-2xl font-bold">{formatGwei(status.stats?.avg_gas_price || '0')} Gwei</p>
-          </div>
-        </div>
-      )}
-
-      {/* 가스 가격 정보 */}
-      {status && (
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">가스 가격 분포</h2>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center">
-              <h4 className="text-sm font-medium text-gray-500">최소</h4>
-              <p className="text-lg font-bold text-green-600">{formatGwei(status.stats.min_gas_price)} Gwei</p>
-            </div>
-            <div className="text-center">
-              <h4 className="text-sm font-medium text-gray-500">평균</h4>
-              <p className="text-lg font-bold text-blue-600">{formatGwei(status.stats.avg_gas_price)} Gwei</p>
-            </div>
-            <div className="text-center">
-              <h4 className="text-sm font-medium text-gray-500">최대</h4>
-              <p className="text-lg font-bold text-red-600">{formatGwei(status.stats.max_gas_price)} Gwei</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DEX 및 MEV 통계 */}
-      {status && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-2">DEX 트랜잭션</h3>
-            <p className="text-3xl font-bold text-blue-500">{safeNumber(status.stats?.dex_transactions).toLocaleString()}</p>
-            <p className="text-sm text-gray-500 mt-1">
-              전체의 {safeNumber(status.stats?.total_transactions) > 0 ? 
-                ((safeNumber(status.stats?.dex_transactions) / safeNumber(status.stats?.total_transactions)) * 100).toFixed(1) : 0}%
-            </p>
-          </div>
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold mb-2">MEV 기회</h3>
-            <p className="text-3xl font-bold text-orange-500">{safeNumber(status.stats?.mev_opportunities).toLocaleString()}</p>
-            <p className="text-sm text-gray-500 mt-1">
-              DEX 트랜잭션의 {safeNumber(status.stats?.dex_transactions) > 0 ? 
-                ((safeNumber(status.stats?.mev_opportunities) / safeNumber(status.stats?.dex_transactions)) * 100).toFixed(1) : 0}%
-            </p>
+            <p className="text-2xl font-bold">{formatGwei(status.avg_gas_price || '0')} Gwei</p>
           </div>
         </div>
       )}
@@ -172,10 +123,10 @@ export default function MempoolPage() {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hash</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">From</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">To</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">가스</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">타입</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MEV</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -192,22 +143,20 @@ export default function MempoolPage() {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
+                    <span className="text-sm font-mono text-gray-600">
+                      {tx.to.slice(0, 6)}...{tx.to.slice(-4)}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
                     <span className="text-sm">{formatEth(tx.value)} ETH</span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className="text-sm">{formatGwei(tx.gas_price)} Gwei</span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {tx.decoded_type && (
+                    {tx.method && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        {tx.decoded_type}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {tx.potential_mev && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                        MEV
+                        {tx.method}
                       </span>
                     )}
                   </td>

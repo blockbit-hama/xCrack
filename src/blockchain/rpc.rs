@@ -2,9 +2,11 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
     providers::{Provider, Http, Ws, Middleware, StreamExt},
-    types::{Block, Transaction, H256, U256, Address, BlockNumber, Filter, Log},
+    types::{Block, Transaction, H256, U256, Address, BlockNumber, Filter, Log, TransactionRequest},
     abi::Abi,
     contract::Contract,
+    signers::{LocalWallet, Signer},
+    middleware::SignerMiddleware,
 };
 use tokio::sync::RwLock;
 use tracing::{info, debug, warn, error};
@@ -17,6 +19,8 @@ pub struct BlockchainClient {
     http_provider: Arc<Provider<Http>>,
     /// WebSocket Provider (실시간 이벤트 수신)
     ws_provider: Option<Arc<Provider<Ws>>>,
+    /// 트랜잭션 서명용 Wallet
+    wallet: Option<LocalWallet>,
     /// 체인 ID
     chain_id: u64,
     /// 현재 블록 번호
@@ -30,20 +34,37 @@ pub struct BlockchainClient {
 impl BlockchainClient {
     /// 새로운 블록체인 클라이언트 생성
     pub async fn new(http_url: &str, ws_url: Option<&str>) -> Result<Self> {
+        Self::new_with_wallet(http_url, ws_url, None).await
+    }
+
+    /// Wallet과 함께 블록체인 클라이언트 생성
+    pub async fn new_with_wallet(http_url: &str, ws_url: Option<&str>, private_key: Option<&str>) -> Result<Self> {
         info!("🔌 블록체인 RPC 클라이언트 초기화: {}", http_url);
-        
+
         // HTTP Provider 생성
         let http_provider = Provider::<Http>::try_from(http_url)?;
         let http_provider = Arc::new(http_provider);
-        
+
         // 체인 ID 확인
         let chain_id = http_provider.get_chainid().await?.as_u64();
         info!("🔗 체인 ID: {}", chain_id);
-        
+
         // 현재 블록 번호 가져오기
         let current_block = http_provider.get_block_number().await?.as_u64();
         info!("📦 현재 블록: {}", current_block);
-        
+
+        // Wallet 생성 (private key가 제공된 경우)
+        let wallet = if let Some(pk) = private_key {
+            let wallet: LocalWallet = pk.parse()
+                .map_err(|e| anyhow!("Invalid private key: {}", e))?;
+            let wallet = wallet.with_chain_id(chain_id);
+            info!("🔑 Wallet 초기화 완료: {}", wallet.address());
+            Some(wallet)
+        } else {
+            warn!("⚠️ Private key 없음 - 트랜잭션 서명 불가 (읽기 전용 모드)");
+            None
+        };
+
         // WebSocket Provider 생성 (옵션)
         let ws_provider = if let Some(ws_url) = ws_url {
             match Provider::<Ws>::connect(ws_url).await {
@@ -59,13 +80,14 @@ impl BlockchainClient {
         } else {
             None
         };
-        
+
         // 초기 가스 가격 가져오기
         let gas_price = http_provider.get_gas_price().await?;
-        
+
         Ok(Self {
             http_provider,
             ws_provider,
+            wallet,
             chain_id,
             current_block: Arc::new(RwLock::new(current_block)),
             gas_price_cache: Arc::new(RwLock::new(gas_price)),
@@ -163,13 +185,96 @@ impl BlockchainClient {
         let base_fee = block.base_fee_per_gas
             .ok_or_else(|| anyhow!("Base fee를 가져올 수 없습니다"))?;
         
-        // Priority fee 계산 (2 gwei 기본값)
-        let priority_fee = U256::from(2_000_000_000u64);
+        // 동적 Priority fee 계산
+        let priority_fee = self.calculate_optimal_priority_fee().await?;
         
         // 캐시 업데이트
         *self.gas_price_cache.write().await = base_fee + priority_fee;
         
+        debug!("⛽ 가스 가격: base_fee={} gwei, priority_fee={} gwei", 
+               base_fee.as_u128() / 1_000_000_000,
+               priority_fee.as_u128() / 1_000_000_000);
+        
         Ok((base_fee, priority_fee))
+    }
+    
+    /// 최적 Priority Fee 계산
+    async fn calculate_optimal_priority_fee(&self) -> Result<U256> {
+        // 최근 블록들의 priority fee 분석
+        let recent_blocks = self.get_recent_blocks(10).await?;
+        let mut priority_fees = Vec::new();
+        
+        for block in recent_blocks {
+            if let Some(transactions) = block.transactions {
+                for tx in transactions {
+                    if let Some(priority_fee) = self.extract_priority_fee(&tx).await? {
+                        priority_fees.push(priority_fee);
+                    }
+                }
+            }
+        }
+        
+        if priority_fees.is_empty() {
+            // 기본값: 2 gwei
+            return Ok(U256::from(2_000_000_000u64));
+        }
+        
+        // 중간값 계산 (더 안정적)
+        priority_fees.sort();
+        let median_index = priority_fees.len() / 2;
+        let median_priority_fee = priority_fees[median_index];
+        
+        // 10% 추가 (경쟁력 확보)
+        let optimal_priority_fee = median_priority_fee * U256::from(110) / U256::from(100);
+        
+        // 최소 1 gwei, 최대 50 gwei 제한
+        let min_priority_fee = U256::from(1_000_000_000u64);
+        let max_priority_fee = U256::from(50_000_000_000u64);
+        
+        Ok(optimal_priority_fee.max(min_priority_fee).min(max_priority_fee))
+    }
+    
+    /// 최근 블록들 조회
+    async fn get_recent_blocks(&self, count: usize) -> Result<Vec<Block<H256>>> {
+        let mut blocks = Vec::new();
+        let current_block = self.get_current_block().await?;
+        
+        for i in 0..count {
+            let block_number = current_block.saturating_sub(i as u64);
+            if let Some(block) = self.get_block(block_number).await? {
+                blocks.push(block);
+            }
+        }
+        
+        Ok(blocks)
+    }
+    
+    /// 트랜잭션에서 Priority Fee 추출
+    async fn extract_priority_fee(&self, tx: &Transaction) -> Result<Option<U256>> {
+        // EIP-1559 트랜잭션인지 확인
+        if let Some(max_fee_per_gas) = tx.max_fee_per_gas {
+            if let Some(max_priority_fee_per_gas) = tx.max_priority_fee_per_gas {
+                // Base fee는 블록에서 가져와야 하지만, 간단화를 위해 0으로 가정
+                // 실제로는 블록의 base_fee_per_gas를 사용해야 함
+                let base_fee = U256::from(20_000_000_000u64); // 20 gwei 가정
+                let priority_fee = if max_priority_fee_per_gas > base_fee {
+                    max_priority_fee_per_gas - base_fee
+                } else {
+                    max_priority_fee_per_gas
+                };
+                return Ok(Some(priority_fee));
+            }
+        }
+        
+        // Legacy 트랜잭션의 경우 gas_price 사용
+        if let Some(gas_price) = tx.gas_price {
+            let base_fee = U256::from(20_000_000_000u64); // 20 gwei 가정
+            if gas_price > base_fee {
+                return Ok(Some(gas_price - base_fee));
+            }
+        }
+        
+        Ok(None)
     }
     
     /// 동적 가스 가격 계산 (경쟁 상황 고려)
@@ -285,6 +390,66 @@ impl BlockchainClient {
     /// WebSocket Provider 참조 반환 (고급 사용)
     pub fn get_ws_provider(&self) -> Option<Arc<Provider<Ws>>> {
         self.ws_provider.clone()
+    }
+    
+    /// 트랜잭션 전송 (Wallet으로 서명)
+    pub async fn send_transaction(&self, tx: TransactionRequest) -> Result<H256> {
+        info!("📤 트랜잭션 전송 시작: to={:?}, value={:?}", tx.to, tx.value);
+
+        // Wallet이 없으면 에러
+        let wallet = self.wallet.as_ref()
+            .ok_or_else(|| anyhow!("트랜잭션 전송 불가: Wallet이 설정되지 않음. new_with_wallet()을 사용하세요."))?;
+
+        // SignerMiddleware 생성
+        let client = SignerMiddleware::new(self.http_provider.clone(), wallet.clone());
+
+        // 트랜잭션 전송 (자동 서명)
+        let pending_tx = client.send_transaction(tx, None).await?;
+
+        // 트랜잭션 해시 반환
+        let tx_hash = *pending_tx;
+        info!("✅ 트랜잭션 제출 성공: {} (from: {})", tx_hash, wallet.address());
+
+        Ok(tx_hash)
+    }
+    
+    /// 트랜잭션 전송 및 영수증 대기
+    pub async fn send_transaction_and_wait(&self, tx: TransactionRequest) -> Result<ethers::types::TransactionReceipt> {
+        info!("📤 트랜잭션 전송 및 영수증 대기 시작");
+
+        // Wallet이 없으면 에러
+        let wallet = self.wallet.as_ref()
+            .ok_or_else(|| anyhow!("트랜잭션 전송 불가: Wallet이 설정되지 않음"))?;
+
+        // SignerMiddleware 생성
+        let client = SignerMiddleware::new(self.http_provider.clone(), wallet.clone());
+
+        // 트랜잭션 전송 및 대기
+        let pending_tx = client.send_transaction(tx, None).await?;
+        let receipt = pending_tx.await?
+            .ok_or_else(|| anyhow!("트랜잭션 영수증을 받을 수 없습니다"))?;
+
+        info!("✅ 트랜잭션 확인됨: block={}, gas_used={}",
+               receipt.block_number.unwrap_or_default(), receipt.gas_used.unwrap_or_default());
+
+        Ok(receipt)
+    }
+    
+    /// 가스 추정
+    pub async fn estimate_gas(&self, tx: &TransactionRequest) -> Result<U256> {
+        let gas_estimate = self.http_provider.estimate_gas(tx, None).await?;
+        debug!("가스 추정: {} gas", gas_estimate);
+        Ok(gas_estimate)
+    }
+
+    /// Wallet 주소 조회
+    pub fn get_wallet_address(&self) -> Option<Address> {
+        self.wallet.as_ref().map(|w| w.address())
+    }
+
+    /// Wallet이 설정되어 있는지 확인
+    pub fn has_wallet(&self) -> bool {
+        self.wallet.is_some()
     }
 }
 

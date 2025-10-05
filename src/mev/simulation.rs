@@ -47,7 +47,7 @@ struct GasOracle {
 }
 
 /// 상세 시뮬레이션 결과
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DetailedSimulationResult {
     pub success: bool,
     pub total_gas_used: u64,

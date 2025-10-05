@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 
 interface UseWebSocketOptions {
   url: string
@@ -20,7 +20,7 @@ export function useWebSocket<T = any>({
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  const connect = () => {
+  const connect = useCallback(() => {
     try {
       wsRef.current = new WebSocket(url)
 
@@ -60,7 +60,7 @@ export function useWebSocket<T = any>({
       setError('WebSocket 연결을 생성할 수 없습니다.')
       console.error('WebSocket connection error:', err)
     }
-  }
+  }, [url, maxReconnectAttempts, reconnectInterval])
 
   const disconnect = () => {
     if (reconnectTimeoutRef.current) {
@@ -83,7 +83,7 @@ export function useWebSocket<T = any>({
     return () => {
       disconnect()
     }
-  }, [url])
+  }, [connect])
 
   return {
     data,

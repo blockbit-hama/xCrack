@@ -7,10 +7,11 @@ use ethers::{
     types::{H256, U256},
 };use crate::config::Config;
 use crate::flashbots::FlashbotsClient;
-use serde::{Serialize, Deserialize};use crate::execution::TransactionBuilder;
+use serde::{Serialize, Deserialize};use crate::core::TransactionBuilder;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn};
-use tokio::time::{timeout, Duration};use crate::strategies::LiquidationOpportunityV2;
+use tokio::time::{timeout, Duration};
+// use crate::strategies::();
 use crate::mev::bundle::{Bundle, BundleMetadata, BundleType, OptimizationInfo, ValidationStatus, PriorityLevel};
 use crate::types::OpportunityType;
 use crate::mev::opportunity::Opportunity;
@@ -28,7 +29,7 @@ pub struct MEVBundleExecutor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionBundle {
     pub bundle_id: String,
-    pub opportunities: Vec<LiquidationOpportunityV2>,
+    // pub opportunities: Vec<()>,
     pub transactions: Vec<Bytes>,
     pub target_block: u64,
     pub estimated_profit_usd: f64,
@@ -105,7 +106,7 @@ impl MEVBundleExecutor {
     /// 청산 기회들을 Bundle로 패키징하고 실행
     pub async fn execute_liquidation_opportunities(
         &self,
-        opportunities: Vec<LiquidationOpportunityV2>,
+        opportunities: Vec<()>,
         target_block: u64,
     ) -> Result<Vec<BundleExecutionResult>> {
         if opportunities.is_empty() {
@@ -135,7 +136,7 @@ impl MEVBundleExecutor {
     /// MEV Bundle 생성
     async fn create_execution_bundle(
         &self,
-        opportunities: Vec<LiquidationOpportunityV2>,
+        opportunities: Vec<()>,
         target_block: u64,
     ) -> Result<ExecutionBundle> {
         let bundle_id = format!("bundle_{}_{}_{}", 
@@ -253,8 +254,8 @@ impl MEVBundleExecutor {
         };
         
         // 제출 타임아웃 설정 (3초)
-        // Note: Mock mode에서는 types::Bundle 타입 사용
-        let types_bundle = crate::types::Bundle::new(
+        // Note: Mock mode에서는 mev::bundle::Bundle 타입 사용
+        let types_bundle = crate::mev::bundle::Bundle::new(
             bundle.transactions.iter().map(|_tx| {
                 crate::types::Transaction {
                     hash: alloy::primitives::B256::ZERO, // TODO: 실제 해시
@@ -406,7 +407,7 @@ impl MEVBundleExecutor {
     /// 단일 기회를 즉시 실행
     pub async fn execute_single_opportunity(
         &self,
-        opportunity: LiquidationOpportunityV2,
+        opportunity: (),
     ) -> Result<BundleExecutionResult> {
         let current_block = self.provider.get_block(ethers::types::BlockNumber::Latest).await?.unwrap().number.unwrap().as_u64();
         let target_block = current_block + 1;

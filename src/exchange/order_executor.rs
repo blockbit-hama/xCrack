@@ -1842,6 +1842,9 @@ mod tests {
             buy_price: Decimal::from_f64_retain(2000.0).unwrap(),
             sell_price: Decimal::from_f64_retain(2005.0).unwrap(),
             price_spread: Decimal::from_f64_retain(5.0).unwrap(),
+            base_asset: "WETH".to_string(),
+            buy_amount: U256::from(1000000000000000000u64), // 1 WETH
+            expected_profit: U256::from(5000000000000000u64), // 0.005 ETH
             profit_percentage: 0.0025, // 0.25%
             max_amount: U256::from(1000),
             execution_window_ms: 100,

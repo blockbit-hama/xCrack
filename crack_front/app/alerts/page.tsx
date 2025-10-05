@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { 
   getAlerts, 
   getAlertStats, 
@@ -21,7 +21,8 @@ export default function AlertsPage() {
   const [filter, setFilter] = useState<'all' | 'unacknowledged' | AlertSeverity | AlertCategory>('all');
   const [sortBy, setSortBy] = useState<'timestamp' | 'severity'>('timestamp');
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    setLoading(true);
     try {
       const [alertsData, statsData] = await Promise.all([
         getAlerts(filter === 'unacknowledged'),
@@ -39,13 +40,13 @@ export default function AlertsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter]);
 
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 10000); // 10초마다 업데이트
     return () => clearInterval(interval);
-  }, [filter]);
+  }, [filter, fetchData]);
 
   const handleAcknowledgeAlert = async (alertId: string) => {
     const success = await acknowledgeAlert(alertId);
@@ -71,27 +72,23 @@ export default function AlertsPage() {
   };
 
   const getSeverityColor = (severity: AlertSeverity) => {
-    const colors = {
+    const colors: Record<AlertSeverity, string> = {
       critical: 'bg-red-100 text-red-800 border-red-200',
-      high: 'bg-orange-100 text-orange-800 border-orange-200',
-      medium: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-      low: 'bg-blue-100 text-blue-800 border-blue-200',
+      error: 'bg-orange-100 text-orange-800 border-orange-200',
+      warning: 'bg-yellow-100 text-yellow-800 border-yellow-200',
       info: 'bg-gray-100 text-gray-800 border-gray-200'
     };
-    return colors[severity];
+    return colors[severity] || colors.info;
   };
 
   const getCategoryIcon = (category: AlertCategory) => {
-    const icons = {
+    const icons: Record<AlertCategory, string> = {
       system: '🖥️',
       performance: '⚡',
       security: '🛡️',
-      strategy: '📈',
-      network: '🌐',
-      gas: '⛽',
-      profit: '💰'
+      strategy: '📈'
     };
-    return icons[category];
+    return icons[category] || '📋';
   };
 
   const formatTimestamp = (timestamp: string) => {
@@ -114,8 +111,13 @@ export default function AlertsPage() {
     if (sortBy === 'timestamp') {
       return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
     } else {
-      const severityOrder = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
-      return severityOrder[b.severity] - severityOrder[a.severity];
+      const severityOrder: Record<AlertSeverity, number> = {
+        critical: 4,
+        error: 3,
+        warning: 2,
+        info: 0
+      };
+      return (severityOrder[b.severity] || 0) - (severityOrder[a.severity] || 0);
     }
   });
 
@@ -174,29 +176,27 @@ export default function AlertsPage() {
         <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">총 알림</h3>
-            <p className="text-2xl font-bold">{(stats?.total_alerts || 0).toLocaleString()}</p>
+            <p className="text-2xl font-bold">{(stats?.total || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-            <h3 className="text-sm font-medium text-gray-500">미확인</h3>
-            <p className="text-2xl font-bold text-orange-600">{(stats?.unacknowledged_count || 0).toLocaleString()}</p>
+            <h3 className="text-sm font-medium text-gray-500">활성</h3>
+            <p className="text-2xl font-bold text-orange-600">{(stats?.active || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">긴급</h3>
-            <p className="text-2xl font-bold text-red-600">{(stats?.critical_count || 0).toLocaleString()}</p>
+            <p className="text-2xl font-bold text-red-600">{(stats?.critical || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-            <h3 className="text-sm font-medium text-gray-500">24시간</h3>
-            <p className="text-2xl font-bold text-blue-600">{(stats?.alerts_last_24h || 0).toLocaleString()}</p>
+            <h3 className="text-sm font-medium text-gray-500">해결됨</h3>
+            <p className="text-2xl font-bold text-green-600">{(stats?.resolved || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-            <h3 className="text-sm font-medium text-gray-500">주요 범주</h3>
-            <p className="text-lg font-bold">
-              {getCategoryIcon(stats?.most_frequent_category || 'system')} {stats?.most_frequent_category || 'system'}
-            </p>
+            <h3 className="text-sm font-medium text-gray-500">필터</h3>
+            <p className="text-lg font-bold">{filter}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-            <h3 className="text-sm font-medium text-gray-500">평균 해결시간</h3>
-            <p className="text-2xl font-bold text-purple-600">{Math.round(stats?.avg_resolution_time_minutes || 0)}분</p>
+            <h3 className="text-sm font-medium text-gray-500">정렬</h3>
+            <p className="text-lg font-bold">{sortBy}</p>
           </div>
         </div>
       )}
@@ -250,9 +250,9 @@ export default function AlertsPage() {
               alert.acknowledged ? 'opacity-60' : ''
             } ${
               alert.severity === 'critical' ? 'border-red-500' :
-              alert.severity === 'high' ? 'border-orange-500' :
-              alert.severity === 'medium' ? 'border-yellow-500' :
-              alert.severity === 'low' ? 'border-blue-500' : 'border-gray-500'
+              alert.severity === 'error' ? 'border-orange-500' :
+              alert.severity === 'warning' ? 'border-yellow-500' :
+              'border-gray-500'
             }`}
           >
             <div className="flex items-start justify-between">
@@ -263,11 +263,6 @@ export default function AlertsPage() {
                   <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getSeverityColor(alert.severity)}`}>
                     {alert.severity.toUpperCase()}
                   </span>
-                  {alert.action_required && (
-                    <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
-                      조치 필요
-                    </span>
-                  )}
                   {alert.acknowledged && (
                     <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
                       ✓ 확인됨
@@ -276,18 +271,12 @@ export default function AlertsPage() {
                 </div>
                 <p className="text-gray-600 dark:text-gray-300 mb-3">{alert.message}</p>
                 <div className="flex items-center space-x-4 text-sm text-gray-500">
-                  <span>출처: {alert.source}</span>
+                  <span>카테고리: {alert.category}</span>
                   <span>시간: {formatTimestamp(alert.timestamp)}</span>
-                  {alert.resolved_at && (
-                    <span>해결: {formatTimestamp(alert.resolved_at)}</span>
+                  {alert.resolved && (
+                    <span className="text-green-600">✓ 해결됨</span>
                   )}
                 </div>
-                {alert.metadata && Object.keys(alert.metadata).length > 0 && (
-                  <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-700 rounded text-sm">
-                    <strong>추가 정보:</strong>
-                    <pre className="mt-1 text-xs">{JSON.stringify(alert.metadata, null, 2)}</pre>
-                  </div>
-                )}
               </div>
               <div className="flex space-x-2 ml-4">
                 {!alert.acknowledged && (

@@ -6,11 +6,11 @@
 #![allow(non_snake_case)]
 
 pub mod config;
+pub mod common;
+pub mod core;
 pub mod strategies;
 pub mod protocols;
 pub mod dex;
-pub mod utils;
-pub mod execution;
 pub mod mev;
 pub mod exchange;
 pub mod adapters;
@@ -28,6 +28,6 @@ pub mod constants;
 
 // Re-exports for convenience
 pub use config::Config;
-pub use strategies::{integrated_liquidation_manager::IntegratedLiquidationManager, LiquidationStrategyV2};
+pub use strategies::liquidation::IntegratedLiquidationManager;
 pub use protocols::MultiProtocolScanner;
 pub use mev::MEVBundleExecutor;

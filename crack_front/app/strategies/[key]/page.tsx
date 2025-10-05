@@ -1,13 +1,12 @@
 import Link from "next/link";
 import { getStrategyStats, getBundlesRecent } from "@/lib/api";
 
-export default async function StrategyDetail({ params }: { params: { key: string } }) {
-  const key = params.key;
+export default async function StrategyDetail({ params }: { params: Promise<{ key: string }> }) {
+  const { key } = await params;
   const nameMap: Record<string, string> = {
     sandwich: "Sandwich",
     liquidation: "Liquidation",
     micro: "Micro Arbitrage",
-    cross: "Cross-Chain",
   };
   const display = nameMap[key] || key;
 

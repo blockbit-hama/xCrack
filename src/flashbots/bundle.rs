@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn test_sandwich_bundle_creation() {
         let front_run = Transaction {
-            hash: B256::ZERO,
+            hash: alloy::primitives::B256::ZERO,
             from: Address::ZERO,
             to: Some(Address::ZERO),
             value: U256::from_str_radix("1000000000000000000", 10).unwrap(), // 1 ETH
@@ -518,7 +518,7 @@ mod tests {
         
         // 트랜잭션 추가
         bundle.add_transaction(BundleTransaction {
-            hash: B256::ZERO,
+            hash: alloy::primitives::B256::ZERO,
             from: Address::ZERO,
             to: Some(Address::ZERO),
             value: U256::from(1000000000000000000u64),

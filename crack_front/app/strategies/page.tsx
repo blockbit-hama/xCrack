@@ -12,7 +12,7 @@ export default function StrategiesPage() {
     cross: false,
   });
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<Record<string, { transactions_analyzed: number; opportunities_found: number; avg_analysis_time_ms: number }>>({});
+  const [stats, setStats] = useState<{ total_strategies: number; active_strategies: number; total_profit: string; success_rate: number } | null>(null);
   const [saving, setSaving] = useState<StrategyKey | null>(null);
 
   useEffect(() => {
@@ -21,7 +21,7 @@ export default function StrategiesPage() {
       try {
         const [s, st] = await Promise.all([
           getStrategies(),
-          getStrategyStats().catch(() => ({})),
+          getStrategyStats().catch(() => null),
         ]);
         setStrategies(s); setStats(st);
       } finally {
@@ -31,7 +31,7 @@ export default function StrategiesPage() {
     const id = setInterval(async () => {
       const [s, st] = await Promise.all([
         getStrategies().catch(() => strategies),
-        getStrategyStats().catch(() => ({})),
+        getStrategyStats().catch(() => null),
       ]);
       setStrategies(s); setStats(st);
     }, 10000);
@@ -55,7 +55,6 @@ export default function StrategiesPage() {
     { key: "sandwich", name: "Sandwich", desc: "프론트/백런 번들 기반", href: "/strategies/sandwich" },
     { key: "liquidation", name: "Liquidation", desc: "Aave/Compound/Maker 청산", href: "/strategies/liquidation" },
     { key: "micro", name: "Micro Arbitrage", desc: "CEX/DEX 미세차익", href: "/strategies/micro" },
-    { key: "cross", name: "Cross-Chain", desc: "브리지 기반 크로스체인", href: "/strategies/cross" },
   ];
 
   return (
@@ -72,15 +71,13 @@ export default function StrategiesPage() {
                   <a href={it.href} className="font-semibold no-underline hover:underline">{it.name}</a>
                   <div className="text-xs text-gray-500">{it.desc}</div>
                   <div className="mt-1.5 text-xs text-gray-600">
-                    {(() => {
-                      const k = it.name;
-                      const st = (stats as any)[k] || (stats as any)[it.key] || (stats as any)[it.name] || undefined;
-                      return st ? (
-                        <span>
-                          분석 {st.transactions_analyzed} / 발견 {st.opportunities_found} · 평균 {st.avg_analysis_time_ms.toFixed(1)}ms
-                        </span>
-                      ) : <span>지표 없음</span>;
-                    })()}
+                    {stats ? (
+                      <span>
+                        수익률 {stats.success_rate.toFixed(1)}% · 총이익 {stats.total_profit}
+                      </span>
+                    ) : (
+                      <span>지표 없음</span>
+                    )}
                   </div>
                 </div>
                 <button

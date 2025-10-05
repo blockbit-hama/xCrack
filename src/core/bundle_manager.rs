@@ -7,7 +7,8 @@ use std::time::Instant;
 
 use crate::config::Config;
 use serde::Serialize;
-use crate::types::{Bundle, Opportunity, Priority, StrategyType};
+use crate::types::{Opportunity, Priority, StrategyType};
+use crate::mev::bundle::Bundle;
 use alloy::primitives::{Address, B256, U256};
 use crate::flashbots::FlashbotsClient;
 use crate::mocks::{is_mock_mode, MockFlashbotsClient};

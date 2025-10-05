@@ -1,34 +1,27 @@
-pub mod sandwich; 
+//! MEV 전략 모듈
+//! 
+//! 이 모듈은 다양한 MEV (Maximum Extractable Value) 전략들을 포함합니다.
+//! 각 전략은 독립적인 폴더로 구성되어 있으며, 공통 유틸리티는 common 폴더에 있습니다.
+
+// 전략 모듈들
+pub mod sandwich;
 pub mod liquidation;
-pub mod liquidation_v2;
-pub mod integrated_liquidation_manager;
 pub mod micro_arbitrage;
 pub mod multi_asset_arbitrage;
+
+// 공통 유틸리티는 src/common에서 사용
+
+// 전략 관리
 pub mod manager;
-pub mod utils;
-pub mod traits;
 pub mod execution_engine;
-pub mod cross_chain_arbitrage;
-pub mod gas_optimization;
-pub mod liquidation_state_indexer;
-pub mod liquidation_mempool_watcher;
-pub mod liquidation_bundle_builder;
-pub mod liquidation_execution_engine;
-pub mod liquidation_strategy_manager;
 
-// On-chain integrated strategies
-pub mod sandwich_onchain;
-pub mod liquidation_onchain;
+// Re-exports - 전략들
+pub use sandwich::*;
+pub use liquidation::*;
+pub use micro_arbitrage::*;
+pub use multi_asset_arbitrage::*;
 
+// 공통 유틸리티는 src/common에서 직접 import
 
-// Re-exports
-pub use sandwich::RealTimeSandwichStrategy;
-pub use liquidation::CompetitiveLiquidationStrategy;
-pub use liquidation_v2::{LiquidationStrategyV2, LiquidationOpportunity as LiquidationOpportunityV2, LiquidationStrategyStats};
-pub use micro_arbitrage::MicroArbitrageStrategy;
+// Re-exports - 관리자
 pub use manager::StrategyManager;
-pub use traits::Strategy;
-pub use cross_chain_arbitrage::{CrossChainArbitrageStrategy, run_cross_chain_arbitrage_mock};
-
-// On-chain strategy re-exports
-// pub use utils::*;

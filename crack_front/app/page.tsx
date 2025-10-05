@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useState } from 'react'
-import { getStatus, defaultStatus, getBundlesSummary, getBundlesRecent, getReport } from "../lib/api";
+import { getStatus, defaultStatus, getBundlesSummary, getBundlesRecent, getReport, type BundlesSummary, type PerformanceReport, type BundleRow } from "../lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
@@ -11,33 +11,33 @@ import { Activity, TrendingUp, DollarSign, Clock, AlertCircle, CheckCircle } fro
 
 export default function Page() {
   const [status, setStatus] = useState(defaultStatus());
-  const [bundles, setBundles] = useState({ 
-    stats: { 
-      total_created: 0, 
-      total_submitted: 0, 
-      total_included: 0, 
-      total_failed: 0, 
-      total_profit: 0, 
-      total_gas_spent: 0, 
-      avg_submission_time_ms: 0, 
-      success_rate: 0 
-    }, 
-    submitted_count: 0, 
-    pending_count: 0 
+  const [bundles, setBundles] = useState<BundlesSummary>({
+    stats: {
+      total_created: 0,
+      total_submitted: 0,
+      total_included: 0,
+      total_failed: 0,
+      total_profit: 0,
+      total_gas_spent: 0,
+      avg_submission_time_ms: 0,
+      success_rate: 0
+    },
+    submitted_count: 0,
+    pending_count: 0
   });
-  const [recent, setRecent] = useState<any[]>([]);
-  const [report, setReport] = useState({ 
-    summary: { 
-      transactions_processed: 0, 
-      opportunities_found: 0, 
-      bundles_submitted: 0, 
-      bundles_included: 0, 
-      total_profit_eth: '0', 
-      success_rate: 0, 
-      avg_analysis_time_ms: 0, 
-      avg_submission_time_ms: 0 
-    }, 
-    recommendations: [] 
+  const [recent, setRecent] = useState<BundleRow[]>([]);
+  const [report, setReport] = useState<PerformanceReport>({
+    summary: {
+      transactions_processed: 0,
+      opportunities_found: 0,
+      bundles_submitted: 0,
+      bundles_included: 0,
+      total_profit_eth: '0',
+      success_rate: 0,
+      avg_analysis_time_ms: 0,
+      avg_submission_time_ms: 0
+    },
+    recommendations: []
   });
 
   // 차트 데이터 생성

@@ -96,10 +96,16 @@ export function Chart({
     }
   }
 
+  const chart = renderChart()
+
+  if (!chart) {
+    return <div style={{ width: '100%', height }}>Invalid chart type</div>
+  }
+
   return (
     <div style={{ width: '100%', height }}>
       <ResponsiveContainer width="100%" height="100%">
-        {renderChart()}
+        {chart}
       </ResponsiveContainer>
     </div>
   )

@@ -14,8 +14,8 @@ use super::{
     BundleManager, 
     CoreMempoolMonitor, 
     PerformanceTracker,
-    MicroArbitrageOrchestrator,
-    MicroArbitrageSystemStatus,
+    strategies::MicroArbitrageOrchestrator,
+    strategies::MicroArbitrageSystemStatus,
 };
 
 #[derive(Debug, Clone)]

@@ -104,10 +104,6 @@ max_order_size = "10.0"          # 10 ETH maximum
 rate_limit_per_second = 10       # 10 requests per second
 supports_fast_execution = true
 
-[strategies.cross_chain_arbitrage]
-enabled = true
-use_flashloan = false
-# flash_loan_amount = "10000"    # e.g., 10,000 USDC
 
 [[strategies.micro_arbitrage.exchanges]]
 name = "sushiswap"
@@ -159,14 +155,6 @@ max_priority_fee_per_gas = "2"  # 2 gwei
 max_fee_per_gas = "50"          # 50 gwei
 private_key = "0x0000000000000000000000000000000000000000000000000000000000000001"
 
-# Bridge Configuration for Cross-chain Arbitrage
-[bridges]
-enabled = true
-default_slippage = 0.5              # 0.5% default slippage
-max_bridge_time = 1800              # 30 minutes maximum bridge time
-preferred_bridges = ["lifi", "stargate", "hop"]  # Preferred bridges in order
-lifi_api_key = ""                   # Optional LI.FI API key for higher rate limits
-enable_aggregation = true           # Use LI.FI for bridge aggregation
 
 [safety]
 max_concurrent_bundles = 5

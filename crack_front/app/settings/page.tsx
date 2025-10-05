@@ -303,22 +303,6 @@ export default function SettingsPage() {
                   </div>
                 </form>
 
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  const enabled = (e.currentTarget.elements.namedItem('c_flash') as HTMLInputElement).checked;
-                  const amount = (e.currentTarget.elements.namedItem('c_amt') as HTMLInputElement).value;
-                  const updates: any = { use_flashloan: enabled };
-                  if (amount) updates.flash_loan_amount = amount;
-                  const res = await updateStrategyParams('cross_chain_arbitrage', updates);
-                  setMsg(res.ok ? 'Cross-chain flashloan 저장 완료(재시작 필요)' : `Cross-chain flashloan 저장 실패: ${res.error}`);
-                }}>
-                  <label style={{ fontSize: 12, color: '#666' }}>Cross-Chain Flashloan</label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="checkbox" name="c_flash" defaultChecked={Boolean((params as any).cross_chain_arbitrage?.use_flashloan)} />
-                    <input name="c_amt" placeholder="amount (optional)" defaultValue={(params as any).cross_chain_arbitrage?.flash_loan_amount || ''} className="border p-2" />
-                    <button type="submit" className="px-3 py-2 bg-black text-white rounded">Save</button>
-                  </div>
-                </form>
 
                 <div style={{ fontSize: 12, color: '#999' }}>저장 시 `config/default.toml`에 반영되며, 적용에는 재시작이 필요합니다.</div>
               </div>

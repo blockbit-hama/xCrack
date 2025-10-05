@@ -7,7 +7,8 @@ use tower_http::cors::{Any, CorsLayer};
 use axum::response::sse::{Sse, Event};
 use futures_util::stream::Stream;
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
+use tracing::info;
 
 use crate::config::Config;
 use crate::core::SearcherCore;
@@ -155,6 +156,11 @@ impl ApiServer {
         let core_risk = self.core.clone();
         let core_flashloan = self.core.clone();
         let core_cross = self.core.clone();
+        let core_liquidation_dashboard = self.core.clone();
+        let core_liquidation_opportunities = self.core.clone();
+        let core_liquidation_config = self.core.clone();
+        let core_protocol_status = self.core.clone();
+        let config_for_liquidation = Arc::clone(&self.config);
 
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
@@ -181,6 +187,12 @@ impl ApiServer {
             .route("/api/risk/dashboard", get(move || get_risk_dashboard(core_risk.clone())))
             .route("/api/flashloan/dashboard", get(move || get_flashloan_dashboard(core_flashloan.clone())))
             .route("/api/strategies/cross/dashboard", get(move || get_cross_dashboard(core_cross.clone())))
+            // Liquidation endpoints
+            .route("/api/liquidation/dashboard", get(move || get_liquidation_dashboard(core_liquidation_dashboard.clone())))
+            .route("/api/liquidation/opportunities", get(move || get_liquidation_opportunities(core_liquidation_opportunities.clone())))
+            .route("/api/liquidation/config", get(move || get_liquidation_config(Arc::clone(&config_for_liquidation))))
+            .route("/api/liquidation/config", post(move |payload| post_liquidation_config(core_liquidation_config.clone(), payload)))
+            .route("/api/protocols/status", get(move || get_protocol_status(core_protocol_status.clone())))
             .layer(cors);
 
         let addr = SocketAddr::from(([0, 0, 0, 0], self.config.monitoring.api_port));
@@ -276,7 +288,6 @@ async fn toggle_strategy(core: SearcherCore, Json(payload): Json<TogglePayload>)
         "sandwich" => StrategyType::Sandwich,
         "liquidation" => StrategyType::Liquidation,
         "micro" | "micro_arbitrage" => StrategyType::MicroArbitrage,
-        "cross" | "cross_chain" => StrategyType::CrossChainArbitrage,
         _ => return Json(serde_json::json!({"ok": false, "error": "unknown strategy"})),
     };
 
@@ -317,8 +328,8 @@ async fn get_strategy_stats(core: SearcherCore) -> Json<StrategyStatsResp> {
 #[derive(Serialize)]
 struct BundlesResponse {
     stats: BundleStats,
-    submitted: Vec<crate::types::Bundle>,
-    pending: Vec<crate::types::Bundle>,
+    submitted: Vec<crate::mev::bundle::Bundle>,
+    pending: Vec<crate::mev::bundle::Bundle>,
 }
 
 async fn get_bundles(core: SearcherCore) -> Json<BundlesResponse> {
@@ -419,7 +430,6 @@ struct StrategyParamsResponse {
     sandwich: crate::config::SandwichConfig,
     liquidation: crate::config::LiquidationConfig,
     micro_arbitrage: crate::config::MicroArbitrageConfig,
-    cross_chain_arbitrage: crate::config::CrossChainArbitrageConfig,
 }
 
 async fn get_strategy_params(config: Arc<crate::config::Config>) -> Json<StrategyParamsResponse> {
@@ -427,7 +437,6 @@ async fn get_strategy_params(config: Arc<crate::config::Config>) -> Json<Strateg
         sandwich: config.strategies.sandwich.clone(),
         liquidation: config.strategies.liquidation.clone(),
         micro_arbitrage: config.strategies.micro_arbitrage.clone(),
-        cross_chain_arbitrage: config.strategies.cross_chain_arbitrage.clone(),
     })
 }
 
@@ -482,12 +491,6 @@ async fn post_strategy_params(config: Arc<crate::config::Config>, Json(payload):
         "micro" | "micro_arbitrage" => {
             match merge_into(&updated.strategies.micro_arbitrage, &payload.updates) {
                 Ok(new_section) => { updated.strategies.micro_arbitrage = new_section; Ok(()) }
-                Err(e) => Err(e)
-            }
-        }
-        "cross_chain_arbitrage" | "cross" => {
-            match merge_into(&updated.strategies.cross_chain_arbitrage, &payload.updates) {
-                Ok(new_section) => { updated.strategies.cross_chain_arbitrage = new_section; Ok(()) }
                 Err(e) => Err(e)
             }
         }
@@ -736,8 +739,8 @@ async fn get_micro_dashboard(_core: SearcherCore) -> Json<serde_json::Value> {
 }
 
 async fn get_cross_dashboard(core: SearcherCore) -> Json<serde_json::Value> {
-    // Try to read cross-chain metrics via typed handle; fallback to mock if unavailable
-    let metrics = if let Some(strat) = core.strategy_manager.get_cross_chain_strategy() {
+    // Try to read metrics via typed handle; fallback to mock if unavailable
+    let metrics = if let Some(strat) = core.strategy_manager.get_sandwich_strategy() {
         let m = strat.get_performance_metrics();
         serde_json::json!({
             "total_opportunities": m.total_opportunities_found,
@@ -989,10 +992,6 @@ async fn get_flashloan_dashboard(_core: SearcherCore) -> Json<serde_json::Value>
                 "solidity_version": "0.8.19",
                 "source_code": "pragma solidity ^0.8.19;\\n\\nimport \\\"@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol\\\";\\nimport \\\"@aave/core-v3/contracts/interfaces/IPool.sol\\\";\\nimport \\\"@aave/core-v3/contracts/flashloan/base/FlashLoanSimpleReceiverBase.sol\\\";\\nimport \\\"@openzeppelin/contracts/token/ERC20/IERC20.sol\\\";\\n\\n/**\\n * @title xCrack Arbitrage Strategy\\n * @dev Cross-DEX arbitrage using flashloans\\n */\\ncontract ArbitrageStrategy is FlashLoanSimpleReceiverBase {\\n    address private owner;\\n    \\n    struct ArbitrageParams {\\n        address tokenA;\\n        address tokenB;\\n        address dexA;\\n        address dexB;\\n        uint256 amountIn;\\n        uint256 expectedProfitMin;\\n        bytes swapCallDataA;\\n        bytes swapCallDataB;\\n    }\\n    \\n    modifier onlyOwner() {\\n        require(msg.sender == owner, \\\"Not authorized\\\");\\n        _;\\n    }\\n    \\n    constructor(IPoolAddressesProvider provider) FlashLoanSimpleReceiverBase(provider) {\\n        owner = msg.sender;\\n    }\\n    \\n    function executeArbitrage(\\n        address asset,\\n        uint256 amount,\\n        ArbitrageParams calldata params\\n    ) external onlyOwner {\\n        bytes memory data = abi.encode(params);\\n        POOL.flashLoanSimple(address(this), asset, amount, data, 0);\\n    }\\n    \\n    function executeOperation(\\n        address asset,\\n        uint256 amount,\\n        uint256 premium,\\n        address initiator,\\n        bytes calldata params\\n    ) external override returns (bool) {\\n        require(msg.sender == address(POOL), \\\"Invalid caller\\\");\\n        \\n        ArbitrageParams memory arbParams = abi.decode(params, (ArbitrageParams));\\n        \\n        // 1. Buy token on DEX A (lower price)\\n        uint256 tokensBought = _buyOnDexA(arbParams, amount);\\n        \\n        // 2. Sell token on DEX B (higher price)\\n        uint256 tokensReceived = _sellOnDexB(arbParams, tokensBought);\\n        \\n        // 3. Check profitability\\n        require(tokensReceived > amount + premium + arbParams.expectedProfitMin, \\\"Insufficient profit\\\");\\n        \\n        // 4. Repay flashloan\\n        uint256 amountOwed = amount + premium;\\n        IERC20(asset).approve(address(POOL), amountOwed);\\n        \\n        return true;\\n    }\\n    \\n    function _buyOnDexA(ArbitrageParams memory params, uint256 amount) private returns (uint256) {\\n        // Execute buy order on DEX A\\n        // Return amount of tokens received\\n    }\\n    \\n    function _sellOnDexB(ArbitrageParams memory params, uint256 tokenAmount) private returns (uint256) {\\n        // Execute sell order on DEX B\\n        // Return amount of base tokens received\\n    }\\n    \\n    function calculateProfitability(ArbitrageParams calldata params) external view returns (uint256 expectedProfit) {\\n        // Calculate expected profit from arbitrage opportunity\\n        // Consider gas costs, slippage, and flashloan fees\\n    }\\n}"
             },
-            "cross_chain_strategy": {
-                "solidity_version": "0.8.19",
-                "source_code": "pragma solidity ^0.8.19;\\n\\nimport \\\"@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol\\\";\\nimport \\\"@aave/core-v3/contracts/interfaces/IPool.sol\\\";\\nimport \\\"@aave/core-v3/contracts/flashloan/base/FlashLoanSimpleReceiverBase.sol\\\";\\nimport \\\"@openzeppelin/contracts/token/ERC20/IERC20.sol\\\";\\n\\n/**\\n * @title xCrack Cross-Chain Strategy\\n * @dev Cross-chain arbitrage using flashloans and bridges\\n */\\ncontract CrossChainStrategy is FlashLoanSimpleReceiverBase {\\n    address private owner;\\n    \\n    struct CrossChainParams {\\n        uint256 sourceChainId;\\n        uint256 targetChainId;\\n        address sourceToken;\\n        address targetToken;\\n        address bridgeContract;\\n        address targetDex;\\n        uint256 bridgeFee;\\n        uint256 expectedProfit;\\n        bytes bridgeCalldata;\\n        bytes swapCalldata;\\n    }\\n    \\n    modifier onlyOwner() {\\n        require(msg.sender == owner, \\\"Not authorized\\\");\\n        _;\\n    }\\n    \\n    constructor(IPoolAddressesProvider provider) FlashLoanSimpleReceiverBase(provider) {\\n        owner = msg.sender;\\n    }\\n    \\n    function executeCrossChainArbitrage(\\n        address asset,\\n        uint256 amount,\\n        CrossChainParams calldata params\\n    ) external onlyOwner {\\n        bytes memory data = abi.encode(params);\\n        POOL.flashLoanSimple(address(this), asset, amount, data, 0);\\n    }\\n    \\n    function executeOperation(\\n        address asset,\\n        uint256 amount,\\n        uint256 premium,\\n        address initiator,\\n        bytes calldata params\\n    ) external override returns (bool) {\\n        require(msg.sender == address(POOL), \\\"Invalid caller\\\");\\n        \\n        CrossChainParams memory crossChainParams = abi.decode(params, (CrossChainParams));\\n        \\n        // 1. Bridge tokens to target chain\\n        _bridgeTokens(crossChainParams, asset, amount);\\n        \\n        // 2. Execute arbitrage on target chain (handled by target chain contract)\\n        // This would typically involve cross-chain messaging\\n        \\n        // 3. Bridge profits back to source chain\\n        // (Simplified - in practice this requires complex cross-chain coordination)\\n        \\n        // 4. Repay flashloan\\n        uint256 amountOwed = amount + premium;\\n        IERC20(asset).approve(address(POOL), amountOwed);\\n        \\n        return true;\\n    }\\n    \\n    function _bridgeTokens(CrossChainParams memory params, address asset, uint256 amount) private {\\n        // Use bridge protocol (Stargate, Hop, etc.) to bridge tokens\\n        IERC20(asset).approve(params.bridgeContract, amount);\\n        \\n        // Call bridge contract with encoded parameters\\n        (bool success,) = params.bridgeContract.call(params.bridgeCalldata);\\n        require(success, \\\"Bridge failed\\\");\\n    }\\n    \\n    function estimateCrossChainProfit(CrossChainParams calldata params) external view returns (uint256 estimatedProfit, uint256 totalCosts) {\\n        // Calculate expected profit considering:\\n        // - Bridge fees\\n        // - Gas costs on both chains\\n        // - Slippage\\n        // - Flashloan fees\\n    }\\n    \\n    // Emergency function to recover stuck tokens\\n    function emergencyWithdraw(address token, uint256 amount) external onlyOwner {\\n        IERC20(token).transfer(owner, amount);\\n    }\\n}"
-            }
         },
         "gas_analytics": {
             "avg_gas_per_flashloan": "165000",
@@ -1000,5 +999,139 @@ async fn get_flashloan_dashboard(_core: SearcherCore) -> Json<serde_json::Value>
             "cheapest_flashloan": "98000",
             "gas_optimization_savings": "23.5%"
         }
+    }))
+}
+
+// Liquidation Dashboard Endpoint
+async fn get_liquidation_dashboard(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/liquidation/dashboard");
+
+    // TODO: Integrate with IntegratedLiquidationManager when available in SearcherCore
+    // For now, return mock data
+    Json(json!({
+        "total_liquidations": 147,
+        "total_profit": "12345.67",
+        "active_positions": 23,
+        "success_rate": 0.89,
+        "pending_executions": 5,
+        "performance_metrics": {
+            "avg_execution_time_ms": 245.5,
+            "uptime_seconds": 86400,
+            "execution_success_rate": 0.89
+        }
+    }))
+}
+
+// Liquidation Opportunities Endpoint
+async fn get_liquidation_opportunities(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/liquidation/opportunities");
+
+    // TODO: Integrate with IntegratedLiquidationManager when available in SearcherCore
+    // For now, return mock data
+    Json(json!({
+        "opportunities": [
+            {
+                "id": "liq-001",
+                "protocol": "aave_v3",
+                "position": "0x1234...5678",
+                "collateral": "50.5 ETH",
+                "debt": "45000.0 USDC",
+                "liquidation_threshold": 0.825,
+                "health_factor": 1.05,
+                "estimated_profit": "$450.50",
+                "execution_cost": "$125.00",
+                "timestamp": 1703123456
+            },
+            {
+                "id": "liq-002",
+                "protocol": "compound_v3",
+                "position": "0xabcd...ef01",
+                "collateral": "120.0 ETH",
+                "debt": "95000.0 USDC",
+                "liquidation_threshold": 0.80,
+                "health_factor": 1.12,
+                "estimated_profit": "$890.25",
+                "execution_cost": "$210.00",
+                "timestamp": 1703123450
+            }
+        ],
+        "total": 2
+    }))
+}
+
+// Protocol Status Endpoint
+async fn get_protocol_status(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/protocols/status");
+
+    // TODO: Integrate with IntegratedLiquidationManager when available in SearcherCore
+    // For now, return mock data
+    Json(json!([
+        {
+            "protocol": "Aave v3",
+            "status": "active",
+            "users_monitored": 1234,
+            "total_tvl": "$2,450,000.00",
+            "liquidatable_positions": 23,
+            "last_update": chrono::Utc::now().timestamp()
+        },
+        {
+            "protocol": "Compound v3",
+            "status": "active",
+            "users_monitored": 567,
+            "total_tvl": "$1,200,000.00",
+            "liquidatable_positions": 12,
+            "last_update": chrono::Utc::now().timestamp()
+        },
+        {
+            "protocol": "MakerDAO",
+            "status": "active",
+            "users_monitored": 890,
+            "total_tvl": "$3,100,000.00",
+            "liquidatable_positions": 8,
+            "last_update": chrono::Utc::now().timestamp()
+        }
+    ]))
+}
+
+// Get Liquidation Configuration
+async fn get_liquidation_config(config: Arc<Config>) -> Json<Value> {
+    info!("GET /api/liquidation/config");
+
+    Json(json!({
+        "network": {
+            "chain_id": config.network.chain_id,
+            "rpc_url": config.network.rpc_url,
+            "ws_url": config.network.ws_url
+        },
+        "liquidation": {
+            "min_profit_threshold_usd": config.liquidation.min_profit_threshold_usd,
+            "scan_interval_seconds": config.liquidation.scan_interval_seconds,
+            "max_concurrent_liquidations": config.liquidation.max_concurrent_liquidations,
+            "use_flashloan": config.liquidation.use_flashloan,
+            "preferred_flashloan_provider": config.liquidation.preferred_flashloan_provider.clone()
+        },
+        "execution": {
+            "gas_price_gwei": config.execution.gas_price_gwei,
+            "gas_multiplier": config.execution.gas_multiplier,
+            "transaction_timeout_ms": config.execution.transaction_timeout_ms,
+            "max_pending_transactions": config.execution.max_pending_transactions
+        }
+    }))
+}
+
+// Update Liquidation Configuration
+async fn post_liquidation_config(
+    _core: SearcherCore,
+    Json(payload): Json<Value>
+) -> Json<Value> {
+    info!("POST /api/liquidation/config: {:?}", payload);
+
+    // TODO: Implement configuration update logic
+    // For now, we'll just acknowledge the request
+
+    Json(json!({
+        "success": true,
+        "message": "Configuration update received (mock mode)",
+        "updated_fields": payload
     }))
 }

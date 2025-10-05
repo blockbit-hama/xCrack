@@ -1,0 +1,1623 @@
+/// 청산 실행 모듈
+///
+/// 역할: 청산 트랜잭션 생성 및 브로드캐스트
+/// - 프로토콜별 청산 트랜잭션 생성 (Aave, Compound, Maker)
+/// - MEV-Boost를 통한 프라이빗 트랜잭션 제출
+/// - 퍼블릭 멤풀 브로드캐스트
+/// - 동적 팁 계산
+
+use std::sync::Arc;
+use anyhow::Result;
+use alloy::primitives::{Address, U256};
+use tracing::{info, debug, warn};
+use rust_decimal::prelude::ToPrimitive;
+use chrono::Utc;
+
+use crate::types::{Transaction, Opportunity};
+use crate::blockchain::BlockchainClient;
+use crate::config::Config;
+use crate::strategies::liquidation::types::{PrivateSubmissionResult, ExecutionMode};
+
+#[derive(Debug, Clone)]
+pub enum CompetitionLevel {
+    Low,
+    Medium,
+    High,
+    VeryHigh,
+}
+
+#[derive(Debug, Clone)]
+pub struct GasAnalysis {
+    pub current_gas_price: f64,
+    pub is_high_gas: bool,
+    pub trend: GasTrend,
+    pub network_congestion: f64,
+}
+
+#[derive(Debug, Clone)]
+pub enum GasTrend {
+    Rising,
+    Falling,
+    Stable,
+}
+
+pub struct LiquidationExecutor {
+    config: Arc<Config>,
+    blockchain_client: Arc<BlockchainClient>,
+    gas_multiplier: f64,
+    max_gas_price: U256,
+}
+
+impl LiquidationExecutor {
+    pub fn new(
+        config: Arc<Config>,
+        blockchain_client: Arc<BlockchainClient>,
+        gas_multiplier: f64,
+        max_gas_price: U256,
+    ) -> Self {
+        Self {
+            config,
+            blockchain_client,
+            gas_multiplier,
+            max_gas_price,
+        }
+    }
+
+    /// 실행 모드를 선택해서 청산 실행
+    pub async fn execute_liquidation(&self, opportunity: &Opportunity, mode: ExecutionMode) -> Result<bool> {
+        info!("💸 청산 실행 시작 - 모드: {}", mode);
+
+        let tx = self.create_liquidation_transaction(opportunity).await?;
+
+        match mode {
+            ExecutionMode::Flashbot => {
+                info!("🔒 Flashbot 프라이빗 모드로 실행");
+                self.execute_via_flashbot(&tx, opportunity).await
+            },
+            ExecutionMode::Public => {
+                info!("🌐 Public 멤풀 모드로 실행");
+                self.execute_via_public_mempool(&tx).await
+            },
+            ExecutionMode::Hybrid => {
+                info!("⚡ Hybrid 모드로 실행 (Flashbot 우선, 실패 시 Public)");
+
+                // Flashbot 먼저 시도
+                match self.execute_via_flashbot(&tx, opportunity).await {
+                    Ok(true) => {
+                        info!("✅ Flashbot으로 성공");
+                        Ok(true)
+                    },
+                    Ok(false) | Err(_) => {
+                        warn!("⚠️ Flashbot 실패, Public 멤풀로 폴백");
+                        self.execute_via_public_mempool(&tx).await
+                    }
+                }
+            }
+        }
+    }
+
+    /// Flashbot을 통한 프라이빗 실행
+    async fn execute_via_flashbot(&self, tx: &Transaction, opportunity: &Opportunity) -> Result<bool> {
+        info!("🔐 Flashbot을 통한 프라이빗 트랜잭션 제출");
+
+        let tip = self.calculate_dynamic_tip(opportunity).await?;
+
+        let result = self.submit_private(tx.clone(), tip).await?;
+
+        if result.success {
+            info!("✅ Flashbot 제출 성공: bundle_hash={:?}", result.bundle_hash);
+            Ok(true)
+        } else {
+            warn!("❌ Flashbot 제출 실패: {:?}", result.error);
+            Ok(false)
+        }
+    }
+
+    /// Public 멤풀을 통한 실행
+    async fn execute_via_public_mempool(&self, tx: &Transaction) -> Result<bool> {
+        info!("🌐 Public 멤풀로 트랜잭션 브로드캐스트");
+
+        let success = self.broadcast_public(tx.clone()).await?;
+
+        if success {
+            info!("✅ Public 브로드캐스트 성공");
+            Ok(true)
+        } else {
+            warn!("❌ Public 브로드캐스트 실패");
+            Ok(false)
+        }
+    }
+
+    /// MEV-Lite를 이용한 청산 실행 (레거시)
+    pub async fn execute_with_mev_lite(&self, opportunity: &Opportunity) -> Result<bool> {
+        info!("💸 MEV-lite 청산 실행 시작");
+
+        // 1) 청산 트랜잭션 생성
+        let liquidation_tx = self.create_liquidation_transaction(opportunity).await?;
+
+        // 2) 동적 팁 계산 (예상 수익의 일부)
+        let tip_amount = self.calculate_dynamic_tip(opportunity).await?;
+
+        // 3) 프라이빗 제출 (멀티 릴레이)
+        let result = self.submit_private(liquidation_tx.clone(), tip_amount).await?;
+
+        if result.success {
+            info!("✅ 프라이빗 청산 제출 성공 (릴레이: {:?})", result.bundle_hash);
+        } else {
+            warn!("❌ 프라이빗 청산 실패, 퍼블릭 폴백 시도");
+            // 4) 퍼블릭 폴백
+            let fallback_result = self.broadcast_public(liquidation_tx).await?;
+            return Ok(fallback_result);
+        }
+
+        Ok(result.success)
+    }
+
+    /// 청산 트랜잭션 생성
+    pub async fn create_liquidation_transaction(&self, opportunity: &Opportunity) -> Result<Transaction> {
+        info!("🔨 청산 트랜잭션 생성 중...");
+
+        // Opportunity에서 실제 청산 기회 데이터 추출
+        let liquidation_opportunity = self.extract_liquidation_opportunity(opportunity).await?;
+        
+        let user_address = liquidation_opportunity.target_user;
+        let collateral_asset = liquidation_opportunity.collateral_asset;
+        let debt_asset = liquidation_opportunity.debt_asset;
+        let liquidation_amount = liquidation_opportunity.liquidation_amount;
+        let protocol = &liquidation_opportunity.protocol;
+
+        // 프로토콜별 청산 함수 호출 데이터 생성
+        let call_data = match protocol.protocol_type {
+            crate::strategies::liquidation::types::ProtocolType::Aave => {
+                // Aave V3 liquidationCall 함수
+                self.create_aave_v3_call(
+                    collateral_asset,
+                    debt_asset,
+                    user_address,
+                    liquidation_amount
+                ).await?
+            }
+            crate::strategies::liquidation::types::ProtocolType::Compound => {
+                // Compound V2 liquidateBorrow 함수
+                self.create_compound_v2_call(
+                    user_address,
+                    debt_asset,
+                    liquidation_amount,
+                    collateral_asset
+                ).await?
+            }
+            crate::strategies::liquidation::types::ProtocolType::MakerDAO => {
+                // MakerDAO liquidate 함수
+                self.create_maker_liquidate_call(
+                    user_address,
+                    collateral_asset
+                ).await?
+            }
+        };
+
+        // 가스 가격 조회 (EIP-1559)
+        let (base_fee, priority_fee) = self.blockchain_client.get_gas_price().await?;
+        let gas_price_eth = ethers::types::U256::from(base_fee.as_u128()) + ethers::types::U256::from(priority_fee.as_u128());
+
+        // Wallet 주소 조회
+        let from_address = self.blockchain_client.get_wallet_address()
+            .ok_or_else(|| anyhow::anyhow!("Wallet이 설정되지 않았습니다. BlockchainClient.new_with_wallet()을 사용하세요"))?;
+
+        // Nonce 조회 (ethers Address 그대로 사용)
+        let nonce = self.blockchain_client.get_nonce(from_address).await?;
+
+        // ethers Address를 alloy Address로 변환
+        let from_alloy = Address::from_slice(&from_address.to_fixed_bytes());
+
+        // 트랜잭션 생성
+        let tx = crate::types::Transaction {
+            hash: alloy::primitives::TxHash::ZERO, // 나중에 서명 시 설정
+            from: from_alloy,
+            to: Some("0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2".parse::<Address>()?), // Aave V3 Pool
+            value: U256::ZERO, // 청산은 ETH 전송 없음
+            gas_price: U256::from(gas_price_eth.as_u128()),
+            gas_limit: U256::from(500_000u64), // 청산 트랜잭션 가스 한도
+            data: call_data,
+            nonce: nonce.as_u64(),
+            timestamp: chrono::Utc::now(),
+            block_number: None,
+        };
+
+        info!("✅ 청산 트랜잭션 생성 완료: {} -> {} (금액: {} wei)", 
+              user_address, protocol.lending_pool_address, liquidation_amount);
+
+        Ok(tx)
+    }
+
+    /// Opportunity에서 청산 기회 정보 추출
+    async fn extract_liquidation_opportunity(&self, opportunity: &Opportunity) -> Result<crate::strategies::liquidation::types::OnChainLiquidationOpportunity> {
+        info!("🔍 청산 기회 데이터 추출 시작");
+        
+        // OpportunityDetails에서 LiquidationDetails 추출
+        let liquidation_details = match &opportunity.details {
+            crate::types::OpportunityDetails::Liquidation(details) => details,
+            _ => return Err(anyhow::anyhow!("잘못된 기회 타입: 청산 기회가 아닙니다")),
+        };
+        
+        // 프로토콜 정보 매핑
+        let protocol = self.map_protocol_info(&liquidation_details.protocol)?;
+        
+        // 사용자 포지션 정보 구성
+        let position = crate::strategies::liquidation::types::UserPosition {
+            user: liquidation_details.user,
+            protocol: protocol.lending_pool_address,
+            collateral_assets: vec![crate::strategies::liquidation::types::CollateralPosition {
+                asset: liquidation_details.collateral_asset,
+                amount: liquidation_details.collateral_amount,
+                usd_value: self.calculate_usd_value(liquidation_details.collateral_asset, liquidation_details.collateral_amount).await?,
+                liquidation_threshold: protocol.min_health_factor,
+            }],
+            debt_assets: vec![crate::strategies::liquidation::types::DebtPosition {
+                asset: liquidation_details.debt_asset,
+                amount: liquidation_details.debt_amount,
+                usd_value: self.calculate_usd_value(liquidation_details.debt_asset, liquidation_details.debt_amount).await?,
+                borrow_rate: 0.05, // 5% 기본값
+            }],
+            health_factor: liquidation_details.health_factor.to_f64().unwrap_or(0.0),
+            liquidation_threshold: protocol.min_health_factor,
+            total_collateral_usd: self.calculate_usd_value(liquidation_details.collateral_asset, liquidation_details.collateral_amount).await?,
+            total_debt_usd: self.calculate_usd_value(liquidation_details.debt_asset, liquidation_details.debt_amount).await?,
+            last_updated: std::time::Instant::now(),
+        };
+        
+        // 최적 청산 금액 계산
+        let liquidation_amount = self.calculate_optimal_liquidation_amount(&position, &protocol).await?;
+        
+        // 청산 보상 계산
+        let liquidation_bonus = self.calculate_liquidation_bonus(liquidation_amount, &protocol).await?;
+        
+        // 가스 비용 추정
+        let estimated_gas_cost = self.estimate_liquidation_gas_cost(&protocol).await?;
+        
+        // 예상 수익 계산
+        let estimated_profit = if liquidation_bonus > estimated_gas_cost {
+            liquidation_bonus - estimated_gas_cost
+        } else {
+            U256::ZERO
+        };
+        
+        info!("✅ 청산 기회 데이터 추출 완료: 사용자={:?}, 수익={:.4} ETH", 
+               liquidation_details.user, 
+               estimated_profit.to::<u128>() as f64 / 1e18);
+        
+        Ok(crate::strategies::liquidation::types::OnChainLiquidationOpportunity {
+            target_user: liquidation_details.user,
+            protocol,
+            position,
+            collateral_asset: liquidation_details.collateral_asset,
+            debt_asset: liquidation_details.debt_asset,
+            liquidation_amount,
+            collateral_amount: liquidation_details.collateral_amount,
+            liquidation_bonus,
+            expected_profit: estimated_profit,
+            gas_cost: estimated_gas_cost,
+            net_profit: estimated_profit,
+            success_probability: 0.8,
+        })
+    }
+    
+    /// 프로토콜 정보 매핑
+    fn map_protocol_info(&self, protocol_name: &str) -> Result<crate::strategies::liquidation::types::LendingProtocolInfo> {
+        match protocol_name.to_lowercase().as_str() {
+            "aave" | "aave v3" => {
+                Ok(crate::strategies::liquidation::types::LendingProtocolInfo {
+                    name: "Aave V3".to_string(),
+                    protocol_type: crate::strategies::liquidation::types::ProtocolType::Aave,
+                    lending_pool_address: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2".parse::<Address>()?,
+                    price_oracle_address: Some("0x54586bE62E3c3580375aE3723C145253060Ca0C2".parse::<Address>()?),
+                    liquidation_fee: 500, // 5%
+                    min_health_factor: 0.95,
+                    supported_assets: vec![
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse::<Address>()?, // WETH
+                        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse::<Address>()?, // USDC
+                        "0xdAC17F958D2ee523a2206206994597C13D831ec7".parse::<Address>()?, // USDT
+                    ],
+                })
+            },
+            "compound" | "compound v2" => {
+                Ok(crate::strategies::liquidation::types::LendingProtocolInfo {
+                    name: "Compound V2".to_string(),
+                    protocol_type: crate::strategies::liquidation::types::ProtocolType::Compound,
+                    lending_pool_address: "0x3d9819210A31b4961b30EF54bE2eD79B9c9Cd3B7".parse::<Address>()?,
+                    price_oracle_address: Some("0x922018674c12a7F0D394ebEEf9B58F186CdE13c1".parse::<Address>()?),
+                    liquidation_fee: 800, // 8%
+                    min_health_factor: 0.9,
+                    supported_assets: vec![
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse::<Address>()?, // WETH
+                        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse::<Address>()?, // USDC
+                    ],
+                })
+            },
+            "makerdao" | "maker" => {
+                Ok(crate::strategies::liquidation::types::LendingProtocolInfo {
+                    name: "MakerDAO".to_string(),
+                    protocol_type: crate::strategies::liquidation::types::ProtocolType::MakerDAO,
+                    lending_pool_address: "0x35D1b3F3D7966A1DFe207aa4514C12a259A0492B".parse::<Address>()?,
+                    price_oracle_address: Some("0x729D19f657BD0614b4985Cf1D82531c67569197B".parse::<Address>()?),
+                    liquidation_fee: 1300, // 13%
+                    min_health_factor: 1.0,
+                    supported_assets: vec![
+                        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse::<Address>()?, // WETH
+                    ],
+                })
+            },
+            _ => Err(anyhow::anyhow!("지원하지 않는 프로토콜: {}", protocol_name)),
+        }
+    }
+    
+    /// USD 가치 계산
+    async fn calculate_usd_value(&self, asset: Address, amount: U256) -> Result<f64> {
+        // 실제로는 PriceOracle에서 가격을 조회해야 함
+        // 현재는 간단한 매핑 사용
+        let price_per_token = match asset.to_string().to_lowercase().as_str() {
+            "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2" => 2000.0, // WETH
+            "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" => 1.0,    // USDC
+            "0xdac17f958d2ee523a2206206994597c13d831ec7" => 1.0,    // USDT
+            _ => 0.0,
+        };
+        
+        let amount_f64 = amount.to::<u128>() as f64 / 1e18;
+        Ok(amount_f64 * price_per_token)
+    }
+    
+    /// 최적 청산 금액 계산
+    async fn calculate_optimal_liquidation_amount(&self, position: &crate::strategies::liquidation::types::UserPosition, protocol: &crate::strategies::liquidation::types::LendingProtocolInfo) -> Result<U256> {
+        // 부채의 50% 또는 담보의 50% 중 작은 값
+        let max_debt_liquidation = position.total_debt_usd * 0.5;
+        let max_collateral_liquidation = position.total_collateral_usd * 0.5;
+        let max_liquidation_usd = max_debt_liquidation.min(max_collateral_liquidation);
+        
+        // USD를 토큰 단위로 변환 (간단화)
+        let liquidation_amount = U256::from((max_liquidation_usd * 1e18) as u64);
+        
+        Ok(liquidation_amount)
+    }
+    
+    /// 청산 보상 계산
+    async fn calculate_liquidation_bonus(&self, liquidation_amount: U256, protocol: &crate::strategies::liquidation::types::LendingProtocolInfo) -> Result<U256> {
+        let fee_bps = protocol.liquidation_fee as f64;
+        let bonus = liquidation_amount * U256::from(fee_bps as u64) / U256::from(10000);
+        Ok(bonus)
+    }
+    
+    /// 청산 가스 비용 추정
+    async fn estimate_liquidation_gas_cost(&self, protocol: &crate::strategies::liquidation::types::LendingProtocolInfo) -> Result<U256> {
+        let base_gas = match protocol.protocol_type {
+            crate::strategies::liquidation::types::ProtocolType::Aave => 300_000,
+            crate::strategies::liquidation::types::ProtocolType::Compound => 400_000,
+            crate::strategies::liquidation::types::ProtocolType::MakerDAO => 500_000,
+        };
+        
+        let (base_fee, priority_fee) = self.blockchain_client.get_gas_price().await?;
+        let total_gas_cost = U256::from(base_gas) * (U256::from_limbs_slice(&base_fee.0) + U256::from_limbs_slice(&priority_fee.0));
+        
+        Ok(total_gas_cost)
+    }
+
+    /// Aave V3 청산 콜 생성
+    async fn create_aave_v3_call(
+        &self,
+        collateral: Address,
+        debt: Address,
+        user: Address,
+        debt_amount: U256,
+    ) -> Result<Vec<u8>> {
+        use ethers::abi::{Function, Param, ParamType, Token};
+
+        // liquidationCall(address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken)
+        let function = Function {
+            name: "liquidationCall".to_string(),
+            inputs: vec![
+                Param { name: "collateralAsset".to_string(), kind: ParamType::Address, internal_type: None },
+                Param { name: "debtAsset".to_string(), kind: ParamType::Address, internal_type: None },
+                Param { name: "user".to_string(), kind: ParamType::Address, internal_type: None },
+                Param { name: "debtToCover".to_string(), kind: ParamType::Uint(256), internal_type: None },
+                Param { name: "receiveAToken".to_string(), kind: ParamType::Bool, internal_type: None },
+            ],
+            outputs: vec![],
+            constant: None,
+            state_mutability: ethers::abi::StateMutability::NonPayable,
+        };
+
+        let tokens = vec![
+            Token::Address(ethers::types::H160::from_slice(&collateral.to_fixed_bytes())),
+            Token::Address(ethers::types::H160::from_slice(&debt.to_fixed_bytes())),
+            Token::Address(ethers::types::H160::from_slice(&user.to_fixed_bytes())),
+            Token::Uint(ethers::types::U256::from_little_endian(&debt_amount.to_le_bytes::<32>())),
+            Token::Bool(false),
+        ];
+
+        Ok(function.encode_input(&tokens)?)
+    }
+
+    /// Compound V2 청산 콜 생성
+    async fn create_compound_v2_call(
+        &self,
+        user: Address,
+        _debt_token: Address,
+        debt_amount: U256,
+        collateral_token: Address,
+    ) -> Result<Vec<u8>> {
+        use ethers::abi::{Function, Param, ParamType, Token};
+
+        // liquidateBorrow(address borrower, uint256 repayAmount, address cTokenCollateral)
+        let function = Function {
+            name: "liquidateBorrow".to_string(),
+            inputs: vec![
+                Param { name: "borrower".to_string(), kind: ParamType::Address, internal_type: None },
+                Param { name: "repayAmount".to_string(), kind: ParamType::Uint(256), internal_type: None },
+                Param { name: "cTokenCollateral".to_string(), kind: ParamType::Address, internal_type: None },
+            ],
+            outputs: vec![],
+            constant: None,
+            state_mutability: ethers::abi::StateMutability::NonPayable,
+        };
+
+        let tokens = vec![
+            Token::Address(ethers::types::H160::from_slice(&user.to_fixed_bytes())),
+            Token::Uint(ethers::types::U256::from_little_endian(&debt_amount.to_le_bytes::<32>())),
+            Token::Address(ethers::types::H160::from_slice(&collateral_token.to_fixed_bytes())),
+        ];
+
+        Ok(function.encode_input(&tokens)?)
+    }
+
+    /// Compound V3 청산 콜 생성
+    async fn create_compound_v3_call(
+        &self,
+        user: Address,
+        collateral: Address,
+    ) -> Result<Vec<u8>> {
+        // liquidate(address borrower, uint256 repayAmount, address collateralAsset)
+        // Note: This is simplified, actual implementation may vary
+        let function_selector = [0x5, 0x3, 0x7, 0x3, 0x4, 0x1, 0x7, 0x7]; // liquidate 함수 시그니처
+
+        let mut data = function_selector.to_vec();
+
+        // borrower
+        data.extend_from_slice(user.as_slice());
+
+        // repayAmount (using a default value for now)
+        let repay_amount = U256::from(1_000_000_000_000_000_000u64);
+        data.extend_from_slice(&repay_amount.to_be_bytes::<32>());
+
+        // collateralAsset
+        data.extend_from_slice(collateral.as_slice());
+
+        Ok(data)
+    }
+
+    /// MakerDAO 청산 함수 생성
+    async fn create_maker_liquidate_call(
+        &self,
+        user: Address,
+        collateral: Address,
+    ) -> Result<Vec<u8>> {
+        use ethers::abi::{Function, Param, ParamType, Token};
+
+        info!("🏛️ MakerDAO 청산 콜 생성: user={}, collateral={}", user, collateral);
+
+        // MakerDAO liquidate 함수: liquidate(address user, address collateral, uint256 amount)
+        let function = Function {
+            name: "liquidate".to_string(),
+            inputs: vec![
+                Param { name: "user".to_string(), kind: ParamType::Address, internal_type: None },
+                Param { name: "collateral".to_string(), kind: ParamType::Address, internal_type: None },
+                Param { name: "amount".to_string(), kind: ParamType::Uint(256), internal_type: None },
+            ],
+            outputs: vec![],
+            constant: None,
+            state_mutability: ethers::abi::StateMutability::NonPayable,
+        };
+
+        // 최대 청산 금액 (1 ETH)
+        let max_liquidation = ethers::types::U256::from(1_000_000_000_000_000_000u64);
+
+        let tokens = vec![
+            Token::Address(ethers::types::H160::from_slice(&user.to_fixed_bytes())),
+            Token::Address(ethers::types::H160::from_slice(&collateral.to_fixed_bytes())),
+            Token::Uint(max_liquidation),
+        ];
+
+        let call_data = function.encode_input(&tokens)?;
+        info!("✅ MakerDAO 청산 콜 생성 완료: {} bytes", call_data.len());
+        Ok(call_data)
+    }
+
+    /// 프라이빗 청산 제출 (MEV-lite 멀티 릴레이)
+    async fn submit_private(
+        &self,
+        tx: Transaction,
+        tip: U256,
+    ) -> Result<PrivateSubmissionResult> {
+        info!("🔒 MEV-lite 멀티 릴레이 제출 시작");
+        
+        // 1. 릴레이 우선순위 설정
+        let relay_configs = self.get_relay_configurations().await?;
+        
+        // 2. 병렬로 모든 릴레이에 제출
+        let submission_tasks = relay_configs.iter().map(|config| {
+            let tx_clone = tx.clone();
+            let tip_clone = tip;
+            let config_clone = config.clone();
+            
+            tokio::spawn(async move {
+                self.submit_to_relay(&config_clone, &tx_clone, tip_clone).await
+            })
+        }).collect::<Vec<_>>();
+        
+        // 3. 결과 수집 및 분석
+        let mut results = Vec::new();
+        for task in submission_tasks {
+            match task.await {
+                Ok(Ok(result)) => results.push(result),
+                Ok(Err(e)) => {
+                    warn!("릴레이 제출 오류: {}", e);
+                }
+                Err(e) => {
+                    warn!("릴레이 태스크 오류: {}", e);
+                }
+            }
+        }
+        
+        // 4. 최적 결과 선택
+        let best_result = self.select_best_result(&results).await?;
+        
+        if best_result.success {
+            info!("✅ MEV-lite 제출 성공: {} 릴레이", best_result.relay_name);
+        } else {
+            warn!("❌ 모든 MEV-lite 릴레이 실패");
+        }
+        
+        Ok(best_result)
+    }
+    
+    /// 릴레이 설정 가져오기
+    async fn get_relay_configurations(&self) -> Result<Vec<RelayConfig>> {
+        Ok(vec![
+            RelayConfig {
+                name: "flashbots-protect".to_string(),
+                url: "https://relay.flashbots.net".to_string(),
+                priority: 1,
+                timeout_ms: 2000,
+                max_retries: 2,
+                weight: 0.3,
+            },
+            RelayConfig {
+                name: "builder0x69".to_string(),
+                url: "https://builder0x69.io".to_string(),
+                priority: 2,
+                timeout_ms: 1500,
+                max_retries: 2,
+                weight: 0.25,
+            },
+            RelayConfig {
+                name: "beaver-build".to_string(),
+                url: "https://beaverbuild.org".to_string(),
+                priority: 3,
+                timeout_ms: 1000,
+                max_retries: 1,
+                weight: 0.2,
+            },
+            RelayConfig {
+                name: "rsync-builder".to_string(),
+                url: "https://rsync-builder.xyz".to_string(),
+                priority: 4,
+                timeout_ms: 1000,
+                max_retries: 1,
+                weight: 0.15,
+            },
+            RelayConfig {
+                name: "titan-builder".to_string(),
+                url: "https://titan-builder.xyz".to_string(),
+                priority: 5,
+                timeout_ms: 800,
+                max_retries: 1,
+                weight: 0.1,
+            },
+        ])
+    }
+    
+    /// 특정 릴레이에 제출
+    async fn submit_to_relay(
+        &self,
+        config: &RelayConfig,
+        tx: &Transaction,
+        tip: U256,
+    ) -> Result<PrivateSubmissionResult> {
+        let start_time = std::time::Instant::now();
+        
+        for attempt in 1..=config.max_retries {
+            match self.try_relay_submission(config, tx, tip).await {
+                Ok(result) => {
+                    let duration = start_time.elapsed();
+                    info!("✅ {} 릴레이 제출 성공 (시도: {}, 시간: {}ms)", 
+                           config.name, attempt, duration.as_millis());
+                    return Ok(result);
+                }
+                Err(e) => {
+                    if attempt < config.max_retries {
+                        warn!("⚠️ {} 릴레이 시도 {} 실패: {}, 재시도 중...", 
+                               config.name, attempt, e);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    } else {
+                        warn!("❌ {} 릴레이 최종 실패: {}", config.name, e);
+                    }
+                }
+            }
+        }
+        
+        Ok(PrivateSubmissionResult {
+            success: false,
+            bundle_hash: None,
+            error: Some(format!("{} relay failed after {} attempts", config.name, config.max_retries)),
+            relay_name: Some(config.name.clone()),
+        })
+    }
+    
+    /// 릴레이 제출 시도
+    async fn try_relay_submission(
+        &self,
+        config: &RelayConfig,
+        tx: &Transaction,
+        tip: U256,
+    ) -> Result<PrivateSubmissionResult> {
+        let client = reqwest::Client::builder()
+            .timeout(tokio::time::Duration::from_millis(config.timeout_ms))
+            .build()?;
+        
+        // 릴레이별 특화된 페이로드 생성
+        let payload = self.create_relay_payload(config, tx, tip).await?;
+        
+        let response = client
+            .post(&config.url)
+            .json(&payload)
+            .send()
+            .await?;
+        
+        if response.status().is_success() {
+            let response_text = response.text().await?;
+            self.parse_relay_response(config, &response_text).await
+        } else {
+            Err(anyhow::anyhow!("HTTP {}: {}", response.status(), response.text().await?))
+        }
+    }
+    
+    /// 릴레이별 페이로드 생성
+    async fn create_relay_payload(
+        &self,
+        config: &RelayConfig,
+        tx: &Transaction,
+        tip: U256,
+    ) -> Result<serde_json::Value> {
+        match config.name.as_str() {
+            "flashbots-protect" => {
+                Ok(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "eth_sendBundle",
+                    "params": [{
+                        "txs": [format!("0x{}", hex::encode(&tx.data))],
+                        "blockNumber": format!("0x{:x}", self.get_target_block().await?),
+                        "minTimestamp": 0,
+                        "maxTimestamp": 0,
+                        "revertingTxHashes": []
+                    }]
+                }))
+            }
+            "builder0x69" => {
+                Ok(serde_json::json!({
+                    "method": "submit_bundle",
+                    "params": {
+                        "transactions": [format!("0x{}", hex::encode(&tx.data))],
+                        "target_block": self.get_target_block().await?,
+                        "priority_fee": format!("0x{:x}", tip)
+                    }
+                }))
+            }
+            "beaver-build" => {
+                Ok(serde_json::json!({
+                    "bundle": {
+                        "transactions": [format!("0x{}", hex::encode(&tx.data))],
+                        "target_block": self.get_target_block().await?,
+                        "tip": format!("0x{:x}", tip)
+                    }
+                }))
+            }
+            "rsync-builder" => {
+                Ok(serde_json::json!({
+                    "txs": [format!("0x{}", hex::encode(&tx.data))],
+                    "block": self.get_target_block().await?,
+                    "priority": tip.to_string()
+                }))
+            }
+            "titan-builder" => {
+                Ok(serde_json::json!({
+                    "bundle_data": {
+                        "transactions": [format!("0x{}", hex::encode(&tx.data))],
+                        "target_block_number": self.get_target_block().await?,
+                        "tip_amount": format!("0x{:x}", tip)
+                    }
+                }))
+            }
+            _ => Err(anyhow::anyhow!("Unknown relay: {}", config.name))
+        }
+    }
+    
+    /// 릴레이 응답 파싱
+    async fn parse_relay_response(
+        &self,
+        config: &RelayConfig,
+        response: &str,
+    ) -> Result<PrivateSubmissionResult> {
+        let json_response: serde_json::Value = serde_json::from_str(response)?;
+        
+        match config.name.as_str() {
+            "flashbots-protect" => {
+                if let Some(result) = json_response.get("result") {
+                    if let Some(bundle_hash) = result.get("bundleHash") {
+                        return Ok(PrivateSubmissionResult {
+                            success: true,
+                            bundle_hash: Some(bundle_hash.as_str().unwrap().to_string()),
+                            error: None,
+                            relay_name: Some(config.name.clone()),
+                        });
+                    }
+                }
+            }
+            "builder0x69" => {
+                if let Some(success) = json_response.get("success") {
+                    if success.as_bool().unwrap_or(false) {
+                        return Ok(PrivateSubmissionResult {
+                            success: true,
+                            bundle_hash: json_response.get("bundle_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            error: None,
+                            relay_name: Some(config.name.clone()),
+                        });
+                    }
+                }
+            }
+            "beaver-build" => {
+                if let Some(status) = json_response.get("status") {
+                    if status.as_str() == Some("accepted") {
+                        return Ok(PrivateSubmissionResult {
+                            success: true,
+                            bundle_hash: json_response.get("bundle_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            error: None,
+                            relay_name: Some(config.name.clone()),
+                        });
+                    }
+                }
+            }
+            "rsync-builder" => {
+                if let Some(accepted) = json_response.get("accepted") {
+                    if accepted.as_bool().unwrap_or(false) {
+                        return Ok(PrivateSubmissionResult {
+                            success: true,
+                            bundle_hash: json_response.get("bundle_hash").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            error: None,
+                            relay_name: Some(config.name.clone()),
+                        });
+                    }
+                }
+            }
+            "titan-builder" => {
+                if let Some(result) = json_response.get("result") {
+                    if result.as_str() == Some("success") {
+                        return Ok(PrivateSubmissionResult {
+                            success: true,
+                            bundle_hash: json_response.get("bundle_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            error: None,
+                            relay_name: Some(config.name.clone()),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+        
+        // 실패한 경우
+        Ok(PrivateSubmissionResult {
+            success: false,
+            bundle_hash: None,
+            error: Some(format!("{} relay rejected the bundle", config.name)),
+            relay_name: Some(config.name.clone()),
+        })
+    }
+    
+    /// 최적 결과 선택
+    async fn select_best_result(&self, results: &[PrivateSubmissionResult]) -> Result<PrivateSubmissionResult> {
+        // 1. 성공한 결과들 중에서 선택
+        let successful_results: Vec<_> = results.iter()
+            .filter(|r| r.success)
+            .collect();
+        
+        if successful_results.is_empty() {
+            // 모든 결과가 실패한 경우, 가장 최근 에러 반환
+            return Ok(results.last().unwrap().clone());
+        }
+        
+        // 2. 가중치 기반으로 최적 결과 선택
+        let mut best_result = &successful_results[0];
+        let mut best_score = 0.0;
+        
+        for result in &successful_results {
+            let score = self.calculate_result_score(result).await?;
+            if score > best_score {
+                best_score = score;
+                best_result = result;
+            }
+        }
+        
+        info!("🏆 최적 릴레이 선택: {} (점수: {:.2})", 
+               best_result.relay_name.as_deref().unwrap_or("unknown"), best_score);
+        
+        Ok(best_result.clone())
+    }
+    
+    /// 결과 점수 계산
+    async fn calculate_result_score(&self, result: &PrivateSubmissionResult) -> Result<f64> {
+        let mut score = 0.0;
+        
+        // 릴레이별 가중치
+        if let Some(relay_name) = &result.relay_name {
+            let weight = match relay_name.as_str() {
+                "flashbots-protect" => 0.3,
+                "builder0x69" => 0.25,
+                "beaver-build" => 0.2,
+                "rsync-builder" => 0.15,
+                "titan-builder" => 0.1,
+                _ => 0.1,
+            };
+            score += weight * 100.0;
+        }
+        
+        // Bundle hash가 있으면 추가 점수
+        if result.bundle_hash.is_some() {
+            score += 10.0;
+        }
+        
+        // 에러가 없으면 추가 점수
+        if result.error.is_none() {
+            score += 5.0;
+        }
+        
+        Ok(score)
+    }
+    
+    /// 대상 블록 번호 가져오기
+    async fn get_target_block(&self) -> Result<u64> {
+        let current_block = self.blockchain_client.get_current_block().await?;
+        Ok(current_block + 1) // 다음 블록을 대상으로
+    }
+
+    /// 퍼블릭 청산 브로드캐스트
+    async fn broadcast_public(&self, tx: Transaction) -> Result<bool> {
+        info!("📡 퍼블릭 멤풀로 브로드캐스트 시작");
+
+        // 트랜잭션을 ethers 타입으로 변환
+        let ethers_tx = ethers::types::TransactionRequest::new()
+            .to(ethers::types::H160::from_slice(tx.to.unwrap_or(Address::ZERO).as_slice()))
+            .value(ethers::types::U256::from_str_radix(&tx.value.to_string(), 10).unwrap_or_default())
+            .gas(ethers::types::U256::from_str_radix(&tx.gas_limit.to_string(), 10).unwrap_or_default())
+            .gas_price(ethers::types::U256::from_str_radix(&tx.gas_price.to_string(), 10).unwrap_or_default())
+            .data(ethers::types::Bytes::from(tx.data.clone()))
+            .nonce(tx.nonce);
+
+        // 실제 트랜잭션 브로드캐스트
+        match self.blockchain_client.send_transaction(ethers_tx).await {
+            Ok(tx_hash) => {
+                info!("✅ 퍼블릭 트랜잭션 제출 성공: {}", tx_hash);
+                Ok(true)
+            }
+            Err(e) => {
+                warn!("❌ 퍼블릭 트랜잭션 제출 실패: {}", e);
+                Ok(false)
+            }
+        }
+    }
+
+    /// 동적 팁 계산 (경쟁 분석 포함)
+    async fn calculate_dynamic_tip(&self, opportunity: &Opportunity) -> Result<U256> {
+        info!("💰 동적 팁 계산 시작");
+        
+        // 1. 실시간 경쟁 분석
+        let competition_analysis = self.analyze_real_time_competition(opportunity).await?;
+        
+        // 2. 가스 가격 트렌드 분석
+        let gas_trend_analysis = self.analyze_gas_trend().await?;
+        
+        // 3. 기회 우선순위 분석
+        let opportunity_priority = self.analyze_opportunity_priority(opportunity).await?;
+        
+        // 4. 기본 팁 계산 (수익성 기반)
+        let base_tip = self.calculate_base_tip(opportunity, &opportunity_priority).await?;
+        
+        // 5. 경쟁 기반 동적 조정
+        let competition_adjustment = self.calculate_competition_adjustment(&competition_analysis).await?;
+        
+        // 6. 가스 트렌드 기반 조정
+        let gas_trend_adjustment = self.calculate_gas_trend_adjustment(&gas_trend_analysis).await?;
+        
+        // 7. 시장 상황 기반 조정
+        let market_adjustment = self.calculate_market_adjustment(opportunity).await?;
+        
+        // 8. 최종 팁 계산
+        let final_tip = self.combine_tip_adjustments(
+            base_tip,
+            competition_adjustment,
+            gas_trend_adjustment,
+            market_adjustment,
+            opportunity
+        ).await?;
+        
+        info!("📊 동적 팁 계산 완료: 기본={:.4} ETH, 경쟁={:.1}x, 가스={:.1}x, 시장={:.1}x, 최종={:.4} ETH",
+              Self::format_eth_amount(base_tip),
+              competition_adjustment.multiplier,
+              gas_trend_adjustment.multiplier,
+              market_adjustment.multiplier,
+              Self::format_eth_amount(final_tip));
+        
+        Ok(final_tip)
+    }
+    
+    /// 실시간 경쟁 분석
+    async fn analyze_real_time_competition(&self, opportunity: &Opportunity) -> Result<CompetitionAnalysis> {
+        // 1. 멤풀에서 유사한 청산 트랜잭션 스캔
+        let mempool_competitors = self.scan_mempool_competitors(opportunity).await?;
+        
+        // 2. 최근 블록에서 경쟁자 분석
+        let historical_competitors = self.analyze_historical_competitors(opportunity).await?;
+        
+        // 3. 경쟁 강도 계산
+        let competition_intensity = self.calculate_competition_intensity(&mempool_competitors, &historical_competitors).await?;
+        
+        Ok(CompetitionAnalysis {
+            mempool_competitors,
+            historical_competitors,
+            competition_intensity,
+            analysis_timestamp: chrono::Utc::now(),
+        })
+    }
+    
+    /// 멤풀 경쟁자 스캔
+    async fn scan_mempool_competitors(&self, opportunity: &Opportunity) -> Result<Vec<MempoolCompetitor>> {
+        let mut competitors = Vec::new();
+        
+        // 실제로는 WebSocket으로 실시간 멤풀 모니터링
+        // 현재는 시뮬레이션
+        let simulated_competitors = vec![
+            MempoolCompetitor {
+                address: "0x1234567890123456789012345678901234567890".parse().unwrap(),
+                gas_price: U256::from(25_000_000_000u64), // 25 gwei
+                estimated_profit: U256::from(50000000000000000u64), // 0.05 ETH
+                time_to_execution: 12, // 12초
+            },
+            MempoolCompetitor {
+                address: "0x2345678901234567890123456789012345678901".parse().unwrap(),
+                gas_price: U256::from(30_000_000_000u64), // 30 gwei
+                estimated_profit: U256::from(30000000000000000u64), // 0.03 ETH
+                time_to_execution: 8, // 8초
+            },
+        ];
+        
+        Ok(simulated_competitors)
+    }
+    
+    /// 과거 경쟁자 분석
+    async fn analyze_historical_competitors(&self, opportunity: &Opportunity) -> Result<Vec<HistoricalCompetitor>> {
+        let mut competitors = Vec::new();
+        
+        // 최근 10개 블록에서 청산 트랜잭션 분석
+        let current_block = self.blockchain_client.get_current_block().await?;
+        
+        for block_offset in 1..=10 {
+            let block_number = current_block - block_offset;
+            if let Some(block) = self.blockchain_client.get_block(block_number).await? {
+                if let Some(transactions) = block.transactions {
+                    for tx in transactions {
+                        if self.is_liquidation_transaction(&tx).await? {
+                            competitors.push(HistoricalCompetitor {
+                                address: tx.from,
+                                gas_price: tx.gas_price.unwrap_or_default(),
+                                success: true, // 간단화
+                                block_number,
+                                profit_earned: U256::from(100000000000000000u64), // 0.1 ETH 가정
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(competitors)
+    }
+    
+    /// 경쟁 강도 계산
+    async fn calculate_competition_intensity(
+        &self,
+        mempool: &[MempoolCompetitor],
+        historical: &[HistoricalCompetitor],
+    ) -> Result<CompetitionIntensity> {
+        let mempool_count = mempool.len();
+        let historical_avg_gas = if !historical.is_empty() {
+            let total_gas: u64 = historical.iter()
+                .map(|c| c.gas_price.to::<u128>() as u64)
+                .sum();
+            total_gas / historical.len() as u64
+        } else {
+            20_000_000_000 // 20 gwei 기본값
+        };
+        
+        let intensity = if mempool_count >= 5 {
+            CompetitionIntensity::VeryHigh
+        } else if mempool_count >= 3 {
+            CompetitionIntensity::High
+        } else if mempool_count >= 1 {
+            CompetitionIntensity::Medium
+        } else {
+            CompetitionIntensity::Low
+        };
+        
+        Ok(intensity)
+    }
+    
+    /// 가스 트렌드 분석
+    async fn analyze_gas_trend(&self) -> Result<GasTrendAnalysis> {
+        // 최근 20개 블록의 가스 가격 분석
+        let current_block = self.blockchain_client.get_current_block().await?;
+        let mut gas_prices = Vec::new();
+        
+        for block_offset in 1..=20 {
+            let block_number = current_block - block_offset;
+            if let Some(block) = self.blockchain_client.get_block(block_number).await? {
+                if let Some(base_fee) = block.base_fee_per_gas {
+                    gas_prices.push(base_fee.to::<u128>() as u64);
+                }
+            }
+        }
+        
+        if gas_prices.len() < 10 {
+            return Ok(GasTrendAnalysis {
+                trend: GasTrend::Stable,
+                volatility: 0.1,
+                multiplier: 1.0,
+            });
+        }
+        
+        // 트렌드 계산 (선형 회귀)
+        let n = gas_prices.len() as f64;
+        let sum_x: f64 = (0..gas_prices.len()).map(|i| i as f64).sum();
+        let sum_y: f64 = gas_prices.iter().map(|&p| p as f64).sum();
+        let sum_xy: f64 = gas_prices.iter().enumerate().map(|(i, &p)| i as f64 * p as f64).sum();
+        let sum_x2: f64 = (0..gas_prices.len()).map(|i| (i as f64).powi(2)).sum();
+        
+        let slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x.powi(2));
+        
+        // 변동성 계산
+        let mean = sum_y / n;
+        let variance: f64 = gas_prices.iter()
+            .map(|&p| ((p as f64 - mean) / mean).powi(2))
+            .sum::<f64>() / n;
+        let volatility = variance.sqrt();
+        
+        let trend = if slope > 0.05 {
+            GasTrend::Rising
+        } else if slope < -0.05 {
+            GasTrend::Falling
+        } else {
+            GasTrend::Stable
+        };
+        
+        let multiplier = match trend {
+            GasTrend::Rising => 1.2,
+            GasTrend::Falling => 0.9,
+            GasTrend::Stable => 1.0,
+        };
+        
+        Ok(GasTrendAnalysis {
+            trend,
+            volatility,
+            multiplier,
+        })
+    }
+    
+    /// 기회 우선순위 분석
+    async fn analyze_opportunity_priority(&self, opportunity: &Opportunity) -> Result<OpportunityPriority> {
+        let profit_score = opportunity.expected_profit.to::<u128>() as f64 / 1e18;
+        let confidence_score = opportunity.confidence;
+        let urgency_score = self.calculate_urgency_score(opportunity).await?;
+        
+        let priority = if profit_score > 1.0 && confidence_score > 0.8 && urgency_score > 0.7 {
+            OpportunityPriority::Critical
+        } else if profit_score > 0.5 && confidence_score > 0.6 && urgency_score > 0.5 {
+            OpportunityPriority::High
+        } else if profit_score > 0.1 && confidence_score > 0.4 {
+            OpportunityPriority::Medium
+        } else {
+            OpportunityPriority::Low
+        };
+        
+        Ok(priority)
+    }
+    
+    /// 긴급도 점수 계산
+    async fn calculate_urgency_score(&self, opportunity: &Opportunity) -> Result<f64> {
+        // 만료 시간까지 남은 시간 계산
+        let now = chrono::Utc::now();
+        let time_remaining = opportunity.expiry_block as i64 - now.timestamp();
+        
+        if time_remaining <= 0 {
+            return Ok(0.0); // 이미 만료
+        }
+        
+        // 5분 이내면 높은 긴급도
+        if time_remaining <= 300 {
+            Ok(1.0)
+        } else if time_remaining <= 600 {
+            Ok(0.8)
+        } else if time_remaining <= 1800 {
+            Ok(0.5)
+        } else {
+            Ok(0.2)
+        }
+    }
+    
+    /// 기본 팁 계산
+    async fn calculate_base_tip(&self, opportunity: &Opportunity, priority: &OpportunityPriority) -> Result<U256> {
+        let base_percentage = match priority {
+            OpportunityPriority::Critical => 30, // 30%
+            OpportunityPriority::High => 25,     // 25%
+            OpportunityPriority::Medium => 20,   // 20%
+            OpportunityPriority::Low => 15,      // 15%
+        };
+        
+        let base_tip = opportunity.expected_profit * U256::from(base_percentage) / U256::from(100);
+        Ok(base_tip)
+    }
+    
+    /// 경쟁 기반 조정 계산
+    async fn calculate_competition_adjustment(&self, analysis: &CompetitionAnalysis) -> Result<TipAdjustment> {
+        let multiplier = match analysis.competition_intensity {
+            CompetitionIntensity::Low => 1.0,
+            CompetitionIntensity::Medium => 1.3,
+            CompetitionIntensity::High => 1.8,
+            CompetitionIntensity::VeryHigh => 2.5,
+        };
+        
+        Ok(TipAdjustment {
+            multiplier,
+            reason: "Competition analysis".to_string(),
+        })
+    }
+    
+    /// 가스 트렌드 기반 조정 계산
+    async fn calculate_gas_trend_adjustment(&self, analysis: &GasTrendAnalysis) -> Result<TipAdjustment> {
+        let mut multiplier = analysis.multiplier;
+        
+        // 변동성이 높으면 추가 조정
+        if analysis.volatility > 0.3 {
+            multiplier *= 1.1;
+        }
+        
+        Ok(TipAdjustment {
+            multiplier,
+            reason: format!("Gas trend: {:?}", analysis.trend),
+        })
+    }
+    
+    /// 시장 상황 기반 조정 계산
+    async fn calculate_market_adjustment(&self, opportunity: &Opportunity) -> Result<TipAdjustment> {
+        // 시장 상황 분석 (간단화)
+        let market_volatility = 0.2; // 20% 변동성 가정
+        let market_trend = 0.1; // 10% 상승 추세 가정
+        
+        let multiplier = 1.0 + market_volatility + market_trend;
+        
+        Ok(TipAdjustment {
+            multiplier,
+            reason: "Market conditions".to_string(),
+        })
+    }
+    
+    /// 팁 조정 결합
+    async fn combine_tip_adjustments(
+        &self,
+        base_tip: U256,
+        competition: TipAdjustment,
+        gas_trend: TipAdjustment,
+        market: TipAdjustment,
+        opportunity: &Opportunity,
+    ) -> Result<U256> {
+        // 가중 평균으로 조정 승수 계산
+        let total_multiplier = (competition.multiplier * 0.4 + 
+                               gas_trend.multiplier * 0.3 + 
+                               market.multiplier * 0.3);
+        
+        let adjusted_tip = base_tip * U256::from((total_multiplier * 100.0) as u64) / U256::from(100);
+        
+        // 최소/최대 제한
+        let min_tip = U256::from(10000000000000000u64); // 0.01 ETH
+        let max_tip = opportunity.expected_profit * U256::from(90) / U256::from(100); // 최대 90%
+        
+        let final_tip = adjusted_tip.max(min_tip).min(max_tip);
+        
+        debug!("🔧 팁 조정 상세: 기본={:.4} ETH, 경쟁={:.2}x, 가스={:.2}x, 시장={:.2}x, 총합={:.2}x, 최종={:.4} ETH",
+               Self::format_eth_amount(base_tip),
+               competition.multiplier,
+               gas_trend.multiplier,
+               market.multiplier,
+               total_multiplier,
+               Self::format_eth_amount(final_tip));
+        
+        Ok(final_tip)
+    }
+
+    /// 경쟁 상황 분석
+    async fn analyze_competition(&self, opportunity: &Opportunity) -> Result<CompetitionLevel> {
+        // 실제 구현에서는 멤풀을 분석하여 경쟁자 수를 파악해야 함
+        // 현재는 시뮬레이션으로 더미 데이터 반환
+        
+        // 1. 동일한 청산 기회를 노리는 다른 봇들 분석
+        // 2. 최근 청산 성공률 분석
+        // 3. 가스 가격 경쟁 수준 분석
+        
+        // 시뮬레이션: 랜덤하게 경쟁 수준 결정
+        let random_value = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() % 4) as u8;
+        
+        let competition_level = match random_value {
+            0 => CompetitionLevel::Low,
+            1 => CompetitionLevel::Medium,
+            2 => CompetitionLevel::High,
+            _ => CompetitionLevel::VeryHigh,
+        };
+        
+        info!("🔍 경쟁 분석: {:?}", competition_level);
+        Ok(competition_level)
+    }
+
+    /// 가스 조건 분석
+    async fn analyze_gas_conditions(&self) -> Result<GasAnalysis> {
+        // 실제 구현에서는 최근 블록들의 가스 가격을 분석해야 함
+        
+        // 1. 최근 블록들의 평균 가스 가격
+        // 2. 가스 가격 추세 분석
+        // 3. 네트워크 혼잡도 분석
+        
+        let current_gas_price = 20.0; // gwei (시뮬레이션)
+        let is_high_gas = current_gas_price > 50.0;
+        
+        let analysis = GasAnalysis {
+            current_gas_price,
+            is_high_gas,
+            trend: GasTrend::Stable,
+            network_congestion: 0.5,
+        };
+        
+        info!("⛽ 가스 분석: {:.1} gwei, 높음={}, 혼잡도={:.1}%",
+              analysis.current_gas_price,
+              analysis.is_high_gas,
+              analysis.network_congestion * 100.0);
+        
+        Ok(analysis)
+    }
+
+    /// ETH 금액 포맷팅 헬퍼
+    fn format_eth_amount(amount: U256) -> String {
+        let eth_amount = amount.to::<u128>() as f64 / 1e18;
+        format!("{:.4}", eth_amount)
+    }
+
+    /// 프라이빗 릴레이 시도
+    async fn try_private_relay(
+        &self,
+        relay_name: &str,
+        tx: &Transaction,
+        tip: U256,
+    ) -> Result<PrivateSubmissionResult> {
+        info!("🔗 {} 릴레이로 프라이빗 제출 시도", relay_name);
+        
+        match relay_name {
+            "flashbots-protect" => {
+                self.try_flashbots_protect(tx, tip).await
+            }
+            "builder0x69" => {
+                self.try_builder0x69(tx, tip).await
+            }
+            "beaver-build" => {
+                self.try_beaver_build(tx, tip).await
+            }
+            "rsync-builder" => {
+                self.try_rsync_builder(tx, tip).await
+            }
+            "titan-builder" => {
+                self.try_titan_builder(tx, tip).await
+            }
+            _ => {
+                Ok(PrivateSubmissionResult {
+                    success: false,
+                    bundle_hash: None,
+                    error: Some(format!("Unknown relay: {}", relay_name)),
+                })
+            }
+        }
+    }
+
+    /// Flashbots Protect RPC 제출
+    async fn try_flashbots_protect(&self, tx: &Transaction, tip: U256) -> Result<PrivateSubmissionResult> {
+        let client = reqwest::Client::new();
+        let url = "https://relay.flashbots.net";
+        
+        // Flashbots Protect API 요청 구성
+        let payload = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_sendBundle",
+            "params": [{
+                "txs": [format!("0x{}", hex::encode(&tx.data))],
+                "blockNumber": format!("0x{:x}", tx.block_number.unwrap_or(0)),
+                "minTimestamp": 0,
+                "maxTimestamp": 0,
+                "revertingTxHashes": []
+            }]
+        });
+        
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("X-Flashbots-Signature", self.generate_flashbots_signature(&payload))
+            .json(&payload)
+            .send()
+            .await?;
+        
+        if response.status().is_success() {
+            let result: serde_json::Value = response.json().await?;
+            if let Some(bundle_hash) = result.get("result").and_then(|r| r.as_str()) {
+                info!("✅ Flashbots Protect 제출 성공: {}", bundle_hash);
+                return Ok(PrivateSubmissionResult {
+                    success: true,
+                    bundle_hash: Some(bundle_hash.to_string()),
+                    error: None,
+                });
+            }
+        }
+        
+        Ok(PrivateSubmissionResult {
+            success: false,
+            bundle_hash: None,
+            error: Some("Flashbots Protect submission failed".to_string()),
+        })
+    }
+
+    /// Builder0x69 제출
+    async fn try_builder0x69(&self, tx: &Transaction, tip: U256) -> Result<PrivateSubmissionResult> {
+        let client = reqwest::Client::new();
+        let url = "https://builder0x69.io/api/v1/bundle";
+        
+        let payload = serde_json::json!({
+            "transactions": [format!("0x{}", hex::encode(&tx.data))],
+            "block_number": tx.block_number.unwrap_or(0),
+            "priority_fee": tip.to_string()
+        });
+        
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+        
+        if response.status().is_success() {
+            let result: serde_json::Value = response.json().await?;
+            if let Some(bundle_id) = result.get("bundle_id").and_then(|id| id.as_str()) {
+                info!("✅ Builder0x69 제출 성공: {}", bundle_id);
+                return Ok(PrivateSubmissionResult {
+                    success: true,
+                    bundle_hash: Some(bundle_id.to_string()),
+                    error: None,
+                });
+            }
+        }
+        
+        Ok(PrivateSubmissionResult {
+            success: false,
+            bundle_hash: None,
+            error: Some("Builder0x69 submission failed".to_string()),
+        })
+    }
+
+    /// Beaver Build 제출
+    async fn try_beaver_build(&self, tx: &Transaction, _tip: U256) -> Result<PrivateSubmissionResult> {
+        let client = reqwest::Client::new();
+        let url = "https://beaverbuild.org/api/v1/submit";
+        
+        let payload = serde_json::json!({
+            "txs": [format!("0x{}", hex::encode(&tx.data))],
+            "block_number": tx.block_number.unwrap_or(0)
+        });
+        
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+        
+        if response.status().is_success() {
+            let result: serde_json::Value = response.json().await?;
+            if let Some(bundle_id) = result.get("bundle_id").and_then(|id| id.as_str()) {
+                info!("✅ Beaver Build 제출 성공: {}", bundle_id);
+                return Ok(PrivateSubmissionResult {
+                    success: true,
+                    bundle_hash: Some(bundle_id.to_string()),
+                    error: None,
+                });
+            }
+        }
+        
+        Ok(PrivateSubmissionResult {
+            success: false,
+            bundle_hash: None,
+            error: Some("Beaver Build submission failed".to_string()),
+        })
+    }
+
+    /// RSync Builder 제출
+    async fn try_rsync_builder(&self, tx: &Transaction, _tip: U256) -> Result<PrivateSubmissionResult> {
+        let client = reqwest::Client::new();
+        let url = "https://rsync-builder.xyz/api/v1/bundle";
+        
+        let payload = serde_json::json!({
+            "transactions": [format!("0x{}", hex::encode(&tx.data))],
+            "target_block": tx.block_number.unwrap_or(0)
+        });
+        
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+        
+        if response.status().is_success() {
+            let result: serde_json::Value = response.json().await?;
+            if let Some(bundle_id) = result.get("bundle_id").and_then(|id| id.as_str()) {
+                info!("✅ RSync Builder 제출 성공: {}", bundle_id);
+                return Ok(PrivateSubmissionResult {
+                    success: true,
+                    bundle_hash: Some(bundle_id.to_string()),
+                    error: None,
+                });
+            }
+        }
+        
+        Ok(PrivateSubmissionResult {
+            success: false,
+            bundle_hash: None,
+            error: Some("RSync Builder submission failed".to_string()),
+        })
+    }
+
+    /// Titan Builder 제출
+    async fn try_titan_builder(&self, tx: &Transaction, _tip: U256) -> Result<PrivateSubmissionResult> {
+        let client = reqwest::Client::new();
+        let url = "https://titan-builder.xyz/api/v1/submit";
+        
+        let payload = serde_json::json!({
+            "txs": [format!("0x{}", hex::encode(&tx.data))],
+            "block_number": tx.block_number.unwrap_or(0)
+        });
+        
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+        
+        if response.status().is_success() {
+            let result: serde_json::Value = response.json().await?;
+            if let Some(bundle_id) = result.get("bundle_id").and_then(|id| id.as_str()) {
+                info!("✅ Titan Builder 제출 성공: {}", bundle_id);
+                return Ok(PrivateSubmissionResult {
+                    success: true,
+                    bundle_hash: Some(bundle_id.to_string()),
+                    error: None,
+                });
+            }
+        }
+        
+        Ok(PrivateSubmissionResult {
+            success: false,
+            bundle_hash: None,
+            error: Some("Titan Builder submission failed".to_string()),
+        })
+    }
+
+    /// Flashbots 서명 생성
+    fn generate_flashbots_signature(&self, payload: &serde_json::Value) -> String {
+        // 실제 구현에서는 개인키로 서명해야 함
+        // 여기서는 시뮬레이션용 더미 서명
+        let signature = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        format!("0x0000000000000000000000000000000000000000000000000000000000000000:{}", signature)
+    }
+}
+
+/// 경쟁 분석 결과
+#[derive(Debug, Clone)]
+struct CompetitionAnalysis {
+    mempool_competitors: Vec<MempoolCompetitor>,
+    historical_competitors: Vec<HistoricalCompetitor>,
+    competition_intensity: CompetitionIntensity,
+    analysis_timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+/// 멤풀 경쟁자
+#[derive(Debug, Clone)]
+struct MempoolCompetitor {
+    address: Address,
+    gas_price: U256,
+    estimated_profit: U256,
+    time_to_execution: u64, // 초
+}
+
+/// 과거 경쟁자
+#[derive(Debug, Clone)]
+struct HistoricalCompetitor {
+    address: Address,
+    gas_price: U256,
+    success: bool,
+    block_number: u64,
+    profit_earned: U256,
+}
+
+/// 경쟁 강도
+#[derive(Debug, Clone, PartialEq)]
+enum CompetitionIntensity {
+    Low,
+    Medium,
+    High,
+    VeryHigh,
+}
+
+/// 가스 트렌드 분석
+#[derive(Debug, Clone)]
+struct GasTrendAnalysis {
+    trend: GasTrend,
+    volatility: f64,
+    multiplier: f64,
+}
+
+// GasTrend는 이미 위에 정의되어 있음 (Line 38-42)
+
+/// 기회 우선순위
+#[derive(Debug, Clone, PartialEq)]
+enum OpportunityPriority {
+    Critical,
+    High,
+    Medium,
+    Low,
+}
+
+/// 팁 조정
+#[derive(Debug, Clone)]
+struct TipAdjustment {
+    multiplier: f64,
+    reason: String,
+}
+
+/// 릴레이 설정
+#[derive(Debug, Clone)]
+struct RelayConfig {
+    name: String,
+    url: String,
+    priority: u8,
+    timeout_ms: u64,
+    max_retries: u8,
+    weight: f64,
+}
