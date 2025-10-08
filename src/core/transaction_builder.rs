@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use tracing::{debug, warn, info};
-use alloy::primitives::{Address, U256, Bytes};
+use ethers::types::{Address, U256, Bytes};
 use ethers::{
     providers::{Provider, Ws, Middleware},
     abi::{Abi, Token},
@@ -47,7 +47,7 @@ impl TransactionBuilder {
         let function = self.liquidation_contract_abi.function("executeLiquidation")?;
         
         // Parameters conversion
-        let debt_asset_h160 = H160::from_slice(debt_asset.as_slice());
+        let debt_asset_h160 = H160::from_slice(debt_asset.as_bytes());
         let amount_ethers = EthersU256::from_dec_str(&amount.to_string())?;
         
         // LiquidationParams 구조체 디코딩 (간단화된 구현)
@@ -108,7 +108,7 @@ impl TransactionBuilder {
         
         // Transaction 구성
         let _tx_request = TransactionRequest::new()
-            .to(H160::from_slice(contract_address.as_slice()))
+            .to(H160::from_slice(contract_address.as_bytes()))
             .data(EthersBytes::from(calldata.to_vec()))
             .gas_price(gas_price)
             .gas(gas_limit)
@@ -170,7 +170,7 @@ impl TransactionBuilder {
         
         // eth_call을 사용한 시뮬레이션
         let call_request = TransactionRequest::new()
-            .to(H160::from_slice(contract_address.as_slice()))
+            .to(H160::from_slice(contract_address.as_bytes()))
             .data(EthersBytes::from(calldata.to_vec()))
             .value(EthersU256::zero());
         
@@ -361,9 +361,9 @@ mod tests {
         let liquidation_amount = U256::from(1000000000000000000u128); // 1 ETH
         
         let mut params = vec![0u8; 96];
-        params[12..32].copy_from_slice(user_address.as_slice());
-        params[44..64].copy_from_slice(collateral_asset.as_slice());
-        params[64..96].copy_from_slice(&liquidation_amount.to_be_bytes::<32>());
+        params[12..32].copy_from_slice(user_address.as_bytes());
+        params[44..64].copy_from_slice(collateral_asset.as_bytes());
+        params[64..96].copy_from_slice(&crate::common::abi::u256_to_be_bytes(liquidation_amount));
         
         assert_eq!(params.len(), 96);
         println!("Encoded params: {} bytes", params.len());

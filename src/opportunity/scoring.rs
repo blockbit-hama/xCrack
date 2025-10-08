@@ -1,4 +1,4 @@
-use alloy::primitives::U256;
+use ethers::types::U256;
 use tracing::debug;
 
 use crate::types::{Opportunity, OpportunityType, StrategyType};
@@ -80,7 +80,7 @@ impl OpportunityScorer {
         }
         
         // 로그 스케일로 점수 계산 (수익이 클수록 점수 증가, 최대 1.0)
-        let profit_ratio = net_profit.to::<u128>() as f64 / self.min_profit_threshold.to::<u128>() as f64;
+        let profit_ratio = net_profit.as_u128() as f64 / self.min_profit_threshold.as_u128() as f64;
         let score = (profit_ratio.ln() / 10.0).min(1.0).max(0.0);
         
         // 전략별 가중치 적용
@@ -103,8 +103,8 @@ impl OpportunityScorer {
         
         // 가스 비용 리스크
         let approx_gas_cost = U256::from(opportunity.gas_estimate) * U256::from(20_000_000_000u64);
-        let gas_ratio = approx_gas_cost.to::<u128>() as f64 
-            / opportunity.expected_profit.to::<u128>().max(1) as f64;
+        let gas_ratio = approx_gas_cost.as_u128() as f64 
+            / opportunity.expected_profit.as_u128().max(1) as f64;
         risk_score += gas_ratio.min(1.0) * 0.2;
         
         // 전략별 기본 리스크

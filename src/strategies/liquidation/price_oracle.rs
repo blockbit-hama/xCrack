@@ -1,17 +1,22 @@
+use ethers::types::Bytes;
 /// 가격 조회 모듈
 ///
 /// 역할: 자산 가격 조회 및 DEX 견적 가져오기
+/// - Chainlink Oracle을 통한 실시간 가격
 /// - 0x API를 통한 스왑 견적
 /// - 1inch API를 통한 스왑 견적
 /// - 가격 캐시 관리
 /// - 멀티소스 가격 집계
 
 use std::sync::Arc;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use tokio::sync::Mutex;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256, I256};
+use ethers::providers::{Provider, Ws, Middleware};
+use ethers::contract::Contract;
+use ethers::abi::Abi;
 use std::collections::HashMap;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 use reqwest::Client;
 use serde_json::Value;
 use std::time::{Duration, Instant};
@@ -22,6 +27,7 @@ use crate::strategies::liquidation::types::{AssetPrice, ZeroExQuote, PriceSource
 pub struct PriceOracle {
     asset_prices: Arc<Mutex<HashMap<Address, AssetPrice>>>,
     http_client: Client,
+    provider: Option<Arc<Provider<Ws>>>, // Ethereum provider for on-chain calls
     chainlink_feeds: HashMap<Address, Address>, // asset -> chainlink feed address
     update_interval: Duration,
     last_update: Arc<Mutex<Instant>>,
@@ -30,7 +36,7 @@ pub struct PriceOracle {
 impl PriceOracle {
     pub fn new(asset_prices: Arc<Mutex<HashMap<Address, AssetPrice>>>) -> Self {
         let mut chainlink_feeds = HashMap::new();
-        
+
         // 주요 자산들의 Chainlink 피드 주소 설정 (Ethereum Mainnet)
         chainlink_feeds.insert(
             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse().unwrap(), // WETH
@@ -49,13 +55,20 @@ impl PriceOracle {
             "0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9".parse().unwrap(), // DAI/USD
         );
 
-        Self { 
+        Self {
             asset_prices,
             http_client: Client::new(),
+            provider: None, // Will be set with with_provider()
             chainlink_feeds,
             update_interval: Duration::from_secs(30), // 30초마다 업데이트
             last_update: Arc::new(Mutex::new(Instant::now())),
         }
+    }
+
+    /// Set the Ethereum provider for on-chain calls
+    pub fn with_provider(mut self, provider: Arc<Provider<Ws>>) -> Self {
+        self.provider = Some(provider);
+        self
     }
 
     /// 자산 가격 초기화
@@ -102,7 +115,7 @@ impl PriceOracle {
         for (asset, feed_address) in &self.chainlink_feeds {
             match self.get_chainlink_price(*feed_address).await {
                 Ok(price_usd) => {
-                    let eth_price = prices.get(&"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse().unwrap())
+                    let eth_price = prices.get(&"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse::<Address>().unwrap())
                         .map(|p| p.price_usd)
                         .unwrap_or(2800.0);
                     
@@ -206,7 +219,7 @@ impl PriceOracle {
         let to: Address = q.to.parse()?;
         let data_bytes = hex::decode(q.data.trim_start_matches("0x")).unwrap_or_default();
         let value = if let Some(v) = q.value {
-            Some(U256::from_str_radix(&v, 10).unwrap_or(U256::ZERO))
+            Some(U256::from_str_radix(&v, 10).unwrap_or(U256::zero()))
         } else {
             None
         };
@@ -214,7 +227,7 @@ impl PriceOracle {
         
         Ok(Some(ZeroExQuote { 
             to, 
-            data: alloy::primitives::Bytes::from(data_bytes), 
+            data: Bytes::from(data_bytes), 
             value, 
             allowance_target 
         }))
@@ -271,14 +284,14 @@ impl PriceOracle {
         let to: Address = to_str.parse()?;
         let data_bytes = hex::decode(data_str.trim_start_matches("0x")).unwrap_or_default();
         let value = if let Some(v) = q.value { 
-            Some(U256::from_str_radix(&v, 10).unwrap_or(U256::ZERO)) 
+            Some(U256::from_str_radix(&v, 10).unwrap_or(U256::zero())) 
         } else { 
             None 
         };
         
         Ok(Some(ZeroExQuote { 
             to, 
-            data: alloy::primitives::Bytes::from(data_bytes), 
+            data: Bytes::from(data_bytes), 
             value, 
             allowance_target: None // 1inch는 allowanceTarget을 제공하지 않음
         }))
@@ -298,12 +311,71 @@ impl PriceOracle {
 
     /// Chainlink Oracle에서 가격 조회
     async fn get_chainlink_price(&self, feed_address: Address) -> Result<f64> {
-        // 실제 구현에서는 블록체인에서 Chainlink 피드 데이터를 읽어야 함
-        // 현재는 시뮬레이션으로 더미 데이터 반환
-        
-        let url = format!("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd");
-        let response = self.http_client.get(&url).send().await?;
-        
+        // Provider가 없으면 CoinGecko 폴백
+        let provider = match &self.provider {
+            Some(p) => p.clone(),
+            None => {
+                tracing::warn!("⚠️ Provider not set, falling back to CoinGecko for Chainlink price");
+                return self.get_coingecko_fallback().await;
+            }
+        };
+
+        // Chainlink ABI 로드
+        let abi_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("abi")
+            .join("ChainlinkAggregator.json");
+
+        let abi_bytes = tokio::fs::read(&abi_path).await.map_err(|e| {
+            anyhow::anyhow!("Failed to read Chainlink ABI: {}", e)
+        })?;
+
+        let abi: ethers::abi::Abi = serde_json::from_slice(&abi_bytes)?;
+
+        // Contract 인스턴스 생성
+        let contract = Contract::new(feed_address, abi, provider);
+
+        // latestRoundData() 호출
+        let result: (u80, I256, U256, U256, u80) = contract
+            .method::<_, (u80, I256, U256, U256, u80)>("latestRoundData", ())?
+            .call()
+            .await
+            .map_err(|e| {
+                tracing::warn!("⚠️ Chainlink latestRoundData failed: {}, using CoinGecko fallback", e);
+                e
+            })?;
+
+        let (_round_id, answer, _started_at, updated_at, _answered_in_round) = result;
+
+        // 가격 검증: updated_at이 1시간 이상 오래되었으면 경고
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs();
+
+        let updated_at_secs = updated_at.as_u64();
+        if now - updated_at_secs > 3600 {
+            tracing::warn!("⚠️ Chainlink price data is stale (updated {} seconds ago)", now - updated_at_secs);
+        }
+
+        // answer는 int256이고 보통 8 decimals
+        // answer를 f64로 변환 (8 decimals 가정)
+        let price = if answer.is_negative() {
+            tracing::error!("❌ Chainlink returned negative price: {}", answer);
+            return Err(anyhow::anyhow!("Negative price from Chainlink"));
+        } else {
+            let answer_u256 = answer.into_raw();
+            let price_f64 = answer_u256.as_u128() as f64 / 1e8;
+            price_f64
+        };
+
+        tracing::debug!("✅ Chainlink price for {:?}: ${:.2}", feed_address, price);
+        Ok(price)
+    }
+
+    /// CoinGecko 폴백 가격 조회
+    async fn get_coingecko_fallback(&self) -> Result<f64> {
+        let url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd";
+        let response = self.http_client.get(url).send().await?;
+
         if response.status().is_success() {
             let data: Value = response.json().await?;
             if let Some(eth_data) = data.get("ethereum") {
@@ -312,8 +384,8 @@ impl PriceOracle {
                 }
             }
         }
-        
-        // 폴백: 기본 가격
+
+        // 최종 폴백: 기본 가격
         Ok(2800.0)
     }
 

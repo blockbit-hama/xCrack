@@ -7,7 +7,7 @@
 /// - 최적 청산 자산 쌍 찾기
 
 use anyhow::Result;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use tracing::{info, warn, error};
 use std::collections::HashMap;
 
@@ -52,7 +52,7 @@ impl PositionAnalyzer {
         // 실제로는 lending_pool.get_user_account_data()를 호출해야 함
         
         // 더미 데이터로 청산 기회 생성
-        if user == Address::ZERO {
+        if user == Address::zero() {
             return Ok(None);
         }
         
@@ -102,7 +102,7 @@ impl PositionAnalyzer {
         protocol: &LendingProtocolInfo,
     ) -> Result<Option<OnChainLiquidationOpportunity>> {
         // Compound V3 간단 시뮬레이션
-        if user == Address::ZERO {
+        if user == Address::zero() {
             return Ok(None);
         }
         
@@ -151,7 +151,7 @@ impl PositionAnalyzer {
         protocol: &LendingProtocolInfo,
     ) -> Result<Option<OnChainLiquidationOpportunity>> {
         // MakerDAO 간단 시뮬레이션
-        if user == Address::ZERO {
+        if user == Address::zero() {
             return Ok(None);
         }
         
@@ -242,12 +242,12 @@ impl PositionAnalyzer {
         
         if estimated_profit < self.min_profit_eth {
             return Err(anyhow::anyhow!("Insufficient profit: {:.6} ETH < minimum {:.6} ETH", 
-                estimated_profit.to::<u128>() as f64 / 1e18, 
-                self.min_profit_eth.to::<u128>() as f64 / 1e18));
+                estimated_profit.as_u128() as f64 / 1e18, 
+                self.min_profit_eth.as_u128() as f64 / 1e18));
         }
         
         info!("🎯 최적 청산 쌍 선택: 담보={:?}, 부채={:?}, 예상수익={:.6} ETH", 
-            best_collateral, best_debt, estimated_profit.to::<u128>() as f64 / 1e18);
+            best_collateral, best_debt, estimated_profit.as_u128() as f64 / 1e18);
         
         Ok((best_collateral, best_debt))
     }
@@ -280,14 +280,14 @@ impl PositionAnalyzer {
         let net_profit = if liquidation_bonus > gas_cost {
             liquidation_bonus - gas_cost
         } else {
-            U256::ZERO
+            U256::zero()
         };
         
         info!("📊 수익성 분석 완료: 청산금액={:.6} ETH, 보상={:.6} ETH, 가스비용={:.6} ETH, 순수익={:.6} ETH",
-              liquidation_amount.to::<u128>() as f64 / 1e18,
-              liquidation_bonus.to::<u128>() as f64 / 1e18,
-              gas_cost.to::<u128>() as f64 / 1e18,
-              net_profit.to::<u128>() as f64 / 1e18);
+              liquidation_amount.as_u128() as f64 / 1e18,
+              liquidation_bonus.as_u128() as f64 / 1e18,
+              gas_cost.as_u128() as f64 / 1e18,
+              net_profit.as_u128() as f64 / 1e18);
         
         Ok(net_profit)
     }
@@ -335,7 +335,7 @@ impl PositionAnalyzer {
         };
         
         info!("✅ 최적 청산 금액: {:.6} 토큰, 예상수익: {:.2} USD, 시나리오: {:?}", 
-               liquidation_amount.to::<u128>() as f64 / 1e18,
+               liquidation_amount.as_u128() as f64 / 1e18,
                best_profit,
                best_scenario.strategy);
         
@@ -429,7 +429,7 @@ impl PositionAnalyzer {
         let net_profit = gross_profit - total_costs;
         
         // 6. 최소 수익 검증
-        let min_profit_usd = self.min_profit_eth.to::<u128>() as f64 * 2000.0 / 1e18;
+        let min_profit_usd = self.min_profit_eth.as_u128() as f64 * 2000.0 / 1e18;
         if net_profit < min_profit_usd {
             return Ok(-1.0); // 수익이 부족한 경우 음수 반환
         }
@@ -458,7 +458,7 @@ impl PositionAnalyzer {
         market_condition: &MarketCondition,
     ) -> f64 {
         // 기본 청산 비율 (50%)
-        let mut base_ratio = 0.5;
+        let mut base_ratio: f64 = 0.5;
         
         // 시장 상황에 따른 조정
         if market_condition.volatility > 0.5 {
@@ -495,10 +495,10 @@ impl PositionAnalyzer {
         let liquidation_bonus = liquidation_amount * liquidation_fee / U256::from(10000);
         
         // USD 가치로 변환
-        let bonus_usd = liquidation_bonus.to::<u128>() as f64 / 1e18 * debt_price.price_usd;
+        let bonus_usd = liquidation_bonus.as_u128() as f64 / 1e18 * debt_price.price_usd;
         
         info!("🎁 청산 보상: {:.6} 토큰 (${:.2})", 
-              liquidation_bonus.to::<u128>() as f64 / 1e18, bonus_usd);
+              liquidation_bonus.as_u128() as f64 / 1e18, bonus_usd);
         
         Ok(liquidation_bonus)
     }
@@ -519,10 +519,10 @@ impl PositionAnalyzer {
             .map(|p| p.price_usd)
             .unwrap_or(2800.0);
         
-        let gas_cost_usd = total_gas_cost.to::<u128>() as f64 / 1e18 * eth_price;
+        let gas_cost_usd = total_gas_cost.as_u128() as f64 / 1e18 * eth_price;
         
         info!("⛽ 가스 비용: {:.6} ETH (${:.2}) @ {} gwei", 
-              total_gas_cost.to::<u128>() as f64 / 1e18, gas_cost_usd, self.gas_price_gwei);
+              total_gas_cost.as_u128() as f64 / 1e18, gas_cost_usd, self.gas_price_gwei);
         
         Ok(total_gas_cost)
     }
@@ -547,7 +547,7 @@ impl PositionAnalyzer {
         let net_profit = if expected_profit > gas_cost {
             expected_profit - gas_cost
         } else {
-            U256::ZERO
+            U256::zero()
         };
         
         Ok((expected_profit, gas_cost, net_profit))

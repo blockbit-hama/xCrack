@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, error};
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use ethers::{
     providers::{Provider, Ws, Middleware},
     contract::Contract,
@@ -227,7 +227,7 @@ impl CompoundV2Scanner {
                 
                 collateral_positions.push(CollateralPosition {
                     asset: Address::from_slice(&underlying.0),
-                    amount: U256::from_limbs_slice(&underlying_amount.0),
+                    amount: crate::common::abi::u256_from_ethers_internal(underlying_amount.0),
                     usd_value: supply_usd,
                     liquidation_threshold: 0.75, // Default for Compound
                     price_usd,
@@ -241,7 +241,7 @@ impl CompoundV2Scanner {
                 
                 debt_positions.push(DebtPosition {
                     asset: Address::from_slice(&underlying.0),
-                    amount: U256::from_limbs_slice(&borrow_balance.0),
+                    amount: crate::common::abi::u256_from_ethers_internal(borrow_balance.0),
                     usd_value: debt_usd,
                     borrow_rate: 0.0, // TODO: Get from cToken
                     price_usd,
@@ -251,7 +251,7 @@ impl CompoundV2Scanner {
                 let max_liquidatable = borrow_balance * EthersU256::from((close_factor_rate * 1e18) as u128) / EthersU256::from(1e18 as u128);
                 max_liquidatable_debt.insert(
                     Address::from_slice(&underlying.0),
-                    U256::from_limbs_slice(&max_liquidatable.0)
+                    crate::common::abi::u256_from_ethers_internal(max_liquidatable.0)
                 );
                 
                 liquidation_bonus.insert(Address::from_slice(&underlying.0), liquidation_bonus_rate);
@@ -348,7 +348,7 @@ impl ProtocolScanner for CompoundV2Scanner {
     }
     
     async fn get_user_data(&self, user: Address) -> Result<Option<LiquidatableUser>> {
-        let h160_user = H160::from_slice(user.as_slice());
+        let h160_user = H160::from_slice(user.as_bytes());
         self.get_user_account_data_detailed(h160_user).await
     }
     

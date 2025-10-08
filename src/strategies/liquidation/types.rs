@@ -1,5 +1,6 @@
+use ethers::types::Bytes;
 use std::time::Instant;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 
 #[derive(Debug, Clone)]
 pub struct LendingProtocolInfo {
@@ -112,7 +113,7 @@ pub(crate) struct ZeroExQuoteWire {
 #[derive(Debug, Clone)]
 pub struct ZeroExQuote {
     pub to: Address,
-    pub data: alloy::primitives::Bytes,
+    pub data: Bytes,
     pub value: Option<U256>,
     pub allowance_target: Option<Address>,
 }

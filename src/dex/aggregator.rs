@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use async_trait::async_trait;
 
 use super::{DexAggregator, SwapQuote, SwapParams, DexType};
@@ -34,9 +34,9 @@ impl BaseAggregator {
             sell_amount: params.sell_amount,
             buy_amount,
             buy_amount_min: buy_amount * U256::from(95) / U256::from(100), // 5% 슬리피지 허용
-            router_address: Address::ZERO, // TODO: 실제 라우터 주소
+            router_address: Address::zero(), // TODO: 실제 라우터 주소
             calldata: vec![],
-            allowance_target: Address::ZERO,
+            allowance_target: Address::zero(),
             gas_estimate: 200_000,
             gas_price: U256::from(20_000_000_000u64), // 20 gwei
             price_impact: 0.01,

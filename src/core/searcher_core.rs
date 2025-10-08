@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use anyhow::Result;
 use tracing::{info, debug, error, warn};
-use alloy::primitives::U256;
+use ethers::types::U256;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{RwLock, mpsc, Mutex};
 use std::time::{Instant, Duration};
@@ -11,12 +11,11 @@ use crate::config::Config;
 use crate::types::{PerformanceMetrics, Transaction, Opportunity, Bundle};
 use crate::strategies::StrategyManager;
 use super::{
-    BundleManager, 
-    CoreMempoolMonitor, 
+    BundleManager,
+    CoreMempoolMonitor,
     PerformanceTracker,
-    strategies::MicroArbitrageOrchestrator,
-    strategies::MicroArbitrageSystemStatus,
 };
+use crate::strategies::cex_dex_arbitrage::{MicroArbitrageManager, MicroArbitrageSystemStatus};
 
 #[derive(Debug, Clone)]
 pub struct SearcherStatus {
@@ -58,8 +57,8 @@ impl SearcherCore {
             opportunities_found: 0,
             bundles_submitted: 0,
             bundles_included: 0,
-            total_profit: U256::ZERO,
-            total_gas_spent: U256::ZERO,
+            total_profit: U256::zero(),
+            total_gas_spent: U256::zero(),
             avg_analysis_time: 0.0,
             avg_submission_time: 0.0,
             success_rate: 0.0,
@@ -72,8 +71,8 @@ impl SearcherCore {
         let mempool_monitor = Arc::new(CoreMempoolMonitor::new(Arc::clone(&config), Arc::clone(&provider)).await?);
         let performance_tracker = Arc::new(PerformanceTracker::new(Arc::clone(&config)).await?);
         
-        // 마이크로아비트래지 시스템 초기화 (활성화된 경우)
-        let micro_arbitrage_orchestrator = if config.strategies.micro_arbitrage.enabled {
+        // CEX/DEX 아비트리지 시스템 초기화 (활성화된 경우)
+        let micro_arbitrage_orchestrator = if config.strategies.cex_dex_arbitrage.enabled {
             info!("🎼 마이크로아비트래지 시스템 초기화 중...");
             
             // 타입 안전한 핸들로 직접 가져오기
@@ -131,7 +130,38 @@ impl SearcherCore {
         }
     }
 
-    /// 서쳐 시작
+    /// 서쳐 초기화 (전략은 시작하지 않음)
+    pub async fn initialize(&self) -> Result<()> {
+        info!("🔧 SearcherCore 초기화 중...");
+        
+        if self.is_running.load(Ordering::SeqCst) {
+            warn!("⚠️ SearcherCore가 이미 초기화되었습니다");
+            return Ok(());
+        }
+        
+        // 채널 생성
+        let (tx_sender, tx_receiver) = mpsc::unbounded_channel::<Transaction>();
+        let (opportunity_sender, opportunity_receiver) = mpsc::unbounded_channel::<Opportunity>();
+        let (bundle_sender, bundle_receiver) = mpsc::unbounded_channel::<Bundle>();
+        
+        // 멤풀 모니터링만 시작 (전략은 API를 통해 제어)
+        info!("📡 멤풀 모니터링 초기화 중...");
+        self.mempool_monitor.start(tx_sender.clone()).await?;
+        
+        // 메인 처리 루프 시작 (전략이 시작되면 처리)
+        self.run_main_loop(
+            tx_receiver,
+            opportunity_receiver,
+            bundle_receiver,
+            opportunity_sender,
+            bundle_sender,
+        ).await?;
+        
+        info!("✅ SearcherCore 초기화 완료");
+        Ok(())
+    }
+
+    /// 서쳐 시작 (모든 활성화된 전략 시작)
     pub async fn start(&self) -> Result<()> {
         info!("🚀 SearcherCore 시작 중...");
         
@@ -174,20 +204,20 @@ impl SearcherCore {
             });
         }
         
-        // 3.2. 크로스체인 주기 스캐너 시작 (핵심 백엔드 기능, UI 제외)
-        if let Some(cross_strategy) = self.strategy_manager.get_cross_chain_strategy() {
-            let cross = Arc::clone(&cross_strategy);
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_secs(30));
-                loop {
-                    interval.tick().await;
-                    if let Err(e) = cross.scan_opportunities().await {
-                        tracing::warn!("cross-scan error: {}", e);
-                    }
-                }
-            });
-            info!("🌉 크로스체인 기회 주기 스캐너 시작(30s interval)");
-        }
+        // // 3.2. 크로스체인 주기 스캐너 시작 (제거됨)
+        // if let Some(cross_strategy) = self.strategy_manager.get_cross_chain_strategy() {
+        //     let cross = Arc::clone(&cross_strategy);
+        //     tokio::spawn(async move {
+        //         let mut interval = tokio::time::interval(Duration::from_secs(30));
+        //         loop {
+        //             interval.tick().await;
+        //             if let Err(e) = cross.scan_opportunities().await {
+        //                 tracing::warn!("cross-scan error: {}", e);
+        //             }
+        //         }
+        //     });
+        //     info!("🌉 크로스체인 기회 주기 스캐너 시작(30s interval)");
+        // }
 
         // 4. 메인 처리 루프 실행
         info!("🔄 메인 처리 루프 시작 중...");

@@ -1,3 +1,5 @@
+pub mod database;
+
 use std::sync::Arc;
 use anyhow::Result;
 use redis::{AsyncCommands, Client as RedisClient};
@@ -5,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::info;
 use chrono::{Utc, DateTime};
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
+
+pub use database::Database;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -105,7 +109,7 @@ impl Storage {
 }
 
 fn to_hex(addr: &Address) -> String {
-    format!("0x{}", hex::encode(addr.as_slice()))
+    format!("0x{}", hex::encode(addr.as_bytes()))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

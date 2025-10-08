@@ -10,7 +10,7 @@ use crate::types::{
     Opportunity, OpportunityType, MicroArbitrageDetails, 
     ExchangeInfo, PriceData
 };
-use alloy::primitives::U256;
+use ethers::types::U256;
 use crate::mocks::{MockConfig, get_mock_config};
 
 /// 마이크로아비트래지 기회 시뮬레이터

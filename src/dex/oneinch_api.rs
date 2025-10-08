@@ -3,7 +3,7 @@ use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::Deserialize;
 use tracing::debug;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use async_trait::async_trait;
 
 use super::{DexAggregator, DexType, SwapQuote, SwapParams, SwapSource};
@@ -240,7 +240,7 @@ impl DexAggregator for OneInchAggregator {
         
         // Calculate minimum amount based on slippage
         let slippage_multiplier = 1.0 - params.slippage_tolerance;
-        let min_amount_f64 = buy_amount.to::<u128>() as f64 * slippage_multiplier;
+        let min_amount_f64 = buy_amount.as_u128() as f64 * slippage_multiplier;
         let buy_amount_min = U256::from(min_amount_f64 as u128);
         
         let router_address = swap_response.tx.to.parse::<Address>()
@@ -299,7 +299,7 @@ impl DexAggregator for OneInchAggregator {
             buy_token,
             sell_amount: U256::from(1_000_000_000_000_000_000u128), // 1 token (18 decimals)
             slippage_tolerance: 0.01,
-            recipient: Some(Address::ZERO), // Dummy address for price check
+            recipient: Some(Address::zero()), // Dummy address for price check
             deadline_seconds: None,
             exclude_sources: vec![],
             include_sources: vec![],
@@ -324,7 +324,7 @@ impl DexAggregator for OneInchAggregator {
     
     async fn get_liquidity(&self, _token: Address) -> Result<U256> {
         // 1inch doesn't provide direct liquidity data
-        Ok(U256::ZERO)
+        Ok(U256::zero())
     }
     
     fn aggregator_type(&self) -> DexType {

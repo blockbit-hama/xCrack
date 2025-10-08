@@ -7,9 +7,9 @@ use std::time::Instant;
 
 use crate::config::Config;
 use serde::Serialize;
-use crate::types::{Opportunity, Priority, StrategyType};
+use crate::types::{Opportunity, Priority, StrategyType, OpportunityType};
 use crate::mev::bundle::Bundle;
-use alloy::primitives::{Address, B256, U256};
+use ethers::types::{Address, H256, U256};
 use crate::flashbots::FlashbotsClient;
 use crate::mocks::{is_mock_mode, MockFlashbotsClient};
 
@@ -41,8 +41,8 @@ impl BundleManager {
             total_submitted: 0,
             total_included: 0,
             total_failed: 0,
-            total_profit: U256::ZERO,
-            total_gas_spent: U256::ZERO,
+            total_profit: U256::zero(),
+            total_gas_spent: U256::zero(),
             avg_submission_time_ms: 0.0,
             success_rate: 0.0,
         };
@@ -104,12 +104,9 @@ impl BundleManager {
         // 번들 통계 업데이트
         self.update_bundle_stats(&bundle, "created").await;
         
-        info!("📦 최적 번들 생성됨: {} (기회: {}개, 예상 수익: {} ETH)", 
-              bundle.id, bundle.transactions.len(), 
-              ethers::utils::format_ether({
-                  let ethers_profit = ethers::types::U256::from_big_endian(&bundle.expected_profit.to_be_bytes::<32>());
-                  ethers_profit
-              }));
+        info!("📦 최적 번들 생성됨: {} (기회: {}개, 예상 수익: {} ETH)",
+              bundle.id, bundle.transactions.len(),
+              ethers::utils::format_ether(bundle.metadata.expected_profit));
         
         Ok(Some(bundle))
     }
@@ -121,7 +118,7 @@ impl BundleManager {
         let min_profit = {
             let mut bytes = [0u8; 32];
             min_profit_ethers.to_big_endian(&mut bytes);
-            alloy::primitives::U256::from_be_bytes(bytes)
+            U256::from_big_endian(&bytes)
         };
         if opportunity.expected_profit < min_profit {
             return Ok(false);
@@ -144,7 +141,7 @@ impl BundleManager {
     /// 기회들로부터 번들 생성
     async fn create_bundle_from_opportunities(&self, opportunities: Vec<Opportunity>) -> Result<Bundle> {
         let mut all_transactions = Vec::new();
-        let mut total_profit = U256::ZERO;
+        let mut total_profit = U256::zero();
         let mut total_gas = 0u64;
         let mut target_block = 0u64;
         
@@ -165,15 +162,48 @@ impl BundleManager {
         
         // 번들 ID 생성
         let _bundle_id = format!("bundle_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
-        
-        let bundle = Bundle::new(
-            all_transactions,
+
+        use crate::mev::bundle::BundleType;
+        // 간단한 더미 트랜잭션 생성 (실제로는 types::Transaction을 사용해야 함)
+        let ethers_transactions: Vec<ethers::types::Transaction> = all_transactions
+            .into_iter()
+            .map(|_tx| ethers::types::Transaction {
+                hash: ethers::types::H256::random(),
+                nonce: 0.into(),
+                block_hash: None,
+                block_number: None,
+                transaction_index: None,
+                from: ethers::types::H160::random(),
+                to: Some(ethers::types::H160::random()),
+                value: ethers::types::U256::zero(),
+                gas_price: Some(ethers::types::U256::from(20000000000u64)), // 20 gwei
+                gas: ethers::types::U256::from(21000),
+                input: ethers::types::Bytes::new(),
+                v: ethers::types::U64::from(0),
+                r: ethers::types::U256::zero(),
+                s: ethers::types::U256::zero(),
+                transaction_type: Some(ethers::types::U64::from(2)), // EIP-1559
+                access_list: None,
+                max_fee_per_gas: Some(ethers::types::U256::from(20000000000u64)),
+                max_priority_fee_per_gas: Some(ethers::types::U256::from(2000000000u64)),
+                chain_id: Some(ethers::types::U256::from(1)), // Mainnet
+                other: ethers::types::OtherFields::default(),
+            })
+            .collect();
+
+        let mut bundle = Bundle::new(
+            ethers_transactions,
             target_block,
-            total_profit,
-            total_gas,
-            StrategyType::Sandwich, // 기본값, 실제로는 혼합 전략
+            BundleType::Composite, // 기본값, 실제로는 혼합 전략
+            OpportunityType::MicroArbitrage,
         );
-        
+
+        // 메타데이터 업데이트 - alloy U256 -> ethers U256 변환
+        bundle.metadata.expected_profit = {
+            let bytes = crate::common::abi::u256_to_be_bytes(total_profit);
+            ethers::types::U256::from_big_endian(&bytes)
+        };
+
         Ok(bundle)
     }
 
@@ -181,10 +211,10 @@ impl BundleManager {
     async fn create_dummy_transaction_for_opportunity(&self, _opportunity: &Opportunity) -> Result<crate::types::Transaction> {
         // 실제 구현에서는 전략별로 적절한 트랜잭션 생성
         Ok(crate::types::Transaction {
-            hash: B256::ZERO,
-            from: Address::ZERO,
-            to: Some(Address::ZERO),
-            value: U256::ZERO,
+            hash: H256::zero(),
+            from: Address::zero(),
+            to: Some(Address::zero()),
+            value: U256::zero(),
             gas_price: U256::from(20_000_000_000u64),
             gas_limit: U256::from(200_000u64),
             data: vec![],
@@ -280,7 +310,10 @@ impl BundleManager {
             }
             "included" => {
                 stats.total_included += 1;
-                stats.total_profit += bundle.expected_profit;
+                // ethers U256을 alloy U256으로 변환
+                let ethers_profit = bundle.metadata.expected_profit;
+                let alloy_profit = crate::common::abi::u256_from_ethers_internal(ethers_profit.0);
+                stats.total_profit += alloy_profit;
             }
             "failed" => {
                 stats.total_failed += 1;
@@ -328,17 +361,25 @@ impl BundleManager {
         None
     }
 
+    /// 현재 블록 번호 가져오기
+    async fn get_current_block(&self) -> Result<u64> {
+        // 실제로는 provider에서 가져와야 함
+        // 현재는 시뮬레이션
+        Ok(18000000) // 예시 블록 번호
+    }
+
     /// 번들 정리 (만료된 번들 제거)
     pub async fn cleanup_expired_bundles(&self) -> Result<()> {
         let mut pending = self.pending_bundles.lock().await;
         let mut submitted = self.submitted_bundles.lock().await;
         
         let current_time = chrono::Utc::now();
+        let current_block = self.get_current_block().await?;
         let mut expired_count = 0;
         
         // 대기 중인 번들에서 만료된 것들 제거
         pending.retain(|_, bundle| {
-            if bundle.is_expired() {
+            if bundle.is_expired(current_block) {
                 expired_count += 1;
                 false
             } else {
@@ -348,8 +389,9 @@ impl BundleManager {
         
         // 제출된 번들에서 오래된 것들 제거 (24시간 이상)
         let cutoff_time = current_time - chrono::Duration::hours(24);
+        let cutoff_system_time = std::time::SystemTime::from(cutoff_time);
         submitted.retain(|_, bundle| {
-            if bundle.timestamp < cutoff_time {
+            if bundle.creation_time < cutoff_system_time {
                 expired_count += 1;
                 false
             } else {
@@ -391,7 +433,7 @@ impl std::fmt::Debug for BundleManager {
 mod tests {
     use super::*;
     use crate::types::{Opportunity, OpportunityType, StrategyType, Priority};
-    use alloy::primitives::U256;
+    use ethers::types::U256;
     // use chrono::Utc;
 
     #[tokio::test]
@@ -416,10 +458,10 @@ mod tests {
                 150_000,
                 1000,
                 crate::types::OpportunityDetails::Arbitrage(crate::types::ArbitrageDetails {
-                    token_in: Address::ZERO,
-                    token_out: Address::ZERO,
-                    amount_in: U256::ZERO,
-                    amount_out: U256::ZERO,
+                    token_in: Address::zero(),
+                    token_out: Address::zero(),
+                    amount_in: U256::zero(),
+                    amount_out: U256::zero(),
                     dex_path: vec![],
                     price_impact: 0.0,
                 }),

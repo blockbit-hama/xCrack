@@ -1,6 +1,6 @@
 use super::traits::*;
 use anyhow::Result;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -218,16 +218,20 @@ impl OneInchAdapter {
         metadata.insert("to_token_symbol".to_string(), oneinch_quote.to_token.symbol);
         
         Ok(Quote {
+            dex_type: DexType::OneInch,
             token_in,
             token_out,
             amount_in,
             amount_out,
             amount_out_min,
+            price_impact_bps: 0,
             price_impact: 0.0, // 1inch는 견적에서 가격 영향 정보를 제공하지 않음
             gas_estimate,
             valid_for: 60, // 1inch 견적은 보통 1분 유효
             timestamp: chrono::Utc::now().timestamp() as u64,
             metadata,
+            extra_data: HashMap::new(),
+            route_hash: vec![],
         })
     }
 }
@@ -283,7 +287,7 @@ impl DexAdapter for OneInchAdapter {
         deadline: u64,
     ) -> Result<CalldataBundle, AdapterError> {
         // 슬리피지를 퍼센트로 변환
-        let slippage = (U256::from(10000) - quote.amount_out_min * U256::from(10000) / quote.amount_out).to::<u64>() as f64 / 100.0;
+        let slippage = (U256::from(10000) - quote.amount_out_min * U256::from(10000) / quote.amount_out).as_u64() as f64 / 100.0;
         
         // 1inch API에서 스왑 데이터 조회
         let swap = self.fetch_swap(
@@ -301,11 +305,13 @@ impl DexAdapter for OneInchAdapter {
             .map_err(|e| AdapterError::CalldataGenerationFailed { message: format!("Invalid calldata: {}", e) })?;
         
         let value = U256::from_str_radix(&swap.tx.value, 10)
-            .unwrap_or(U256::ZERO);
+            .unwrap_or(U256::zero());
         
         let gas_estimate = swap.tx.gas.parse::<u64>().unwrap_or(quote.gas_estimate);
         
         Ok(CalldataBundle {
+            target: to_address,
+            calldata: calldata.clone(),
             to: to_address,
             spender: None, // 1inch는 일반적으로 별도의 allowance target이 없음
             data: calldata,
@@ -317,7 +323,7 @@ impl DexAdapter for OneInchAdapter {
     
     async fn validate_quote(&self, quote: &Quote) -> Result<bool, AdapterError> {
         // 견적 유효성 검증
-        if quote.amount_out == U256::ZERO {
+        if quote.amount_out == U256::zero() {
             return Ok(false);
         }
         
@@ -349,10 +355,12 @@ impl DexAdapter for OneInchAdapter {
     async fn get_fee_info(&self, _token_in: Address, _token_out: Address) -> Result<FeeInfo, AdapterError> {
         // 1inch는 프로토콜 수수료가 있음
         Ok(FeeInfo {
+            fee_bps: 0,
+            recipient: None,
+            fee_recipient: None,
             trading_fee_bps: 0, // 1inch 자체 수수료는 없음
             platform_fee_bps: 0, // 프로토콜 수수료는 별도
             total_fee_bps: 0,
-            fee_recipient: None,
         })
     }
 }

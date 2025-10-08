@@ -2,10 +2,12 @@ pub mod aave;
 pub mod compound;
 pub mod maker;
 pub mod scanner;
+pub mod thegraph;
 
 pub use scanner::*;
+pub use thegraph::TheGraphClient;
 
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use async_trait::async_trait;

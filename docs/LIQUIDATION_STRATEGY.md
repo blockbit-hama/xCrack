@@ -2727,29 +2727,49 @@ A: **아니오**, 다음 순서로 테스트하세요:
 
 ---
 
-**마지막 업데이트**: 2025-01-06
-**구현 완성도**: 98% (Production Ready)
+**마지막 업데이트**: 2025-01-06 (Updated: Wallet/Signer Integration Complete)
+**구현 완성도**: 98% (Production Ready - v2.2)
 **추천 시작 순서**: 1위 (가장 안정적인 수익 전략)
 
-## 🚀 **v2.1 주요 업데이트 (2025-01-06)**
+## 🚀 **v2.2 주요 업데이트 (2025-01-06)** - Transaction Signing Enabled
 
-### **P0 핵심 기능 완성** ✅
+### **🔑 Wallet/Signer Integration** ✅ (NEW in v2.2)
+- **LocalWallet 통합**: `BlockchainClient`에 `ethers::signers::LocalWallet` 추가
+- **SignerMiddleware**: 자동 트랜잭션 서명 지원 (`send_transaction()` 개선)
+- **Private Key 관리**: `config.toml`에서 안전한 private key 로드
+- **Chain ID 설정**: EIP-155 호환 트랜잭션 서명 (`wallet.with_chain_id()`)
+
+### **📝 Real ABI Encoding** ✅ (NEW in v2.2)
+- **ethers::abi::Function**: 정확한 Solidity 함수 인코딩
+- **Aave V3 liquidationCall**: 5개 파라미터 정확한 ABI 인코딩
+- **Compound V2 liquidateBorrow**: 4개 파라미터 정확한 ABI 인코딩
+- **MakerDAO liquidate**: CDP 청산 함수 정확한 ABI 인코딩
+- **Type Conversion**: ethers::U256 ↔ alloy::U256 정확한 변환
+
+### **⚡ Transaction Creation Improvements** ✅ (NEW in v2.2)
+- **Real From Address**: `Address::ZERO` → 실제 wallet 주소
+- **Real Nonce**: 하드코딩 `0` → `blockchain_client.get_nonce()` 실시간 조회
+- **Gas Estimation**: 동적 가스 가격 조회 및 경쟁 분석 기반 설정
+
+### **P0 핵심 기능 완성** ✅ (v2.1)
 - **실제 트랜잭션 제출**: `BlockchainClient::send_transaction()` 구현
-- **실제 데이터 파싱**: `extract_liquidation_opportunity()` 구현  
+- **실제 데이터 파싱**: `extract_liquidation_opportunity()` 구현
 - **EIP-1559 가스 가격**: 동적 base fee + priority fee 조회
 
-### **P1 고급 기능 완성** ✅
+### **P1 고급 기능 완성** ✅ (v2.1)
 - **실시간 경쟁 분석**: 멤풀 스캔, 가스 가격 분포 분석 (P25/P50/P75/P90)
 - **동적 가스 조정**: 경쟁/트렌드/시장 상황 기반 팁 계산
 - **MEV-lite 멀티 릴레이**: 5개 릴레이 병렬 제출 (Flashbots, Builder0x69, Beaver, Rsync, Titan)
 
-### **P2 최적화 기능 완성** ✅
+### **P2 최적화 기능 완성** ✅ (v2.1)
 - **최적 청산 금액**: 5가지 시나리오 분석 (보수적/균형/공격적/최대/동적)
 - **수익성 분석**: 다중 시나리오 비교, 시장 변동성 고려
 - **에러 처리**: 포괄적인 에러 처리 및 복구 로직
 
 ### **새로운 기능들**
 - **경쟁 분석**: `CompetitionAnalysis`, `MempoolCompetitor` 구조체
-- **가스 트렌드**: `GasTrendAnalysis`, `TipAdjustment` 구조체  
+- **가스 트렌드**: `GasTrendAnalysis`, `TipAdjustment` 구조체
 - **청산 시나리오**: `LiquidationScenario`, `MarketCondition` 구조체
 - **릴레이 설정**: `RelayConfig` 구조체로 멀티 릴레이 관리
+- **Wallet 관리**: `LocalWallet`, `SignerMiddleware` 통합 (v2.2)
+- **ABI 인코딩**: `ethers::abi::Function` 정확한 함수 호출 (v2.2)

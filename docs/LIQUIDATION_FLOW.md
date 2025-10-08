@@ -1,593 +1,1002 @@
-# xCrack Liquidation 2.0 Production System
+# 🏦 Liquidation Flow 시퀀스 다이어그램
 
-DeFi 프로토콜 청산 시스템의 완전한 아키텍처와 실행 플로우 문서
-
-**Last Updated**: 2025-01-06 (Updated: Wallet/Signer Integration Complete)
-**Total Files**: 13개
-**Total Lines**: 6,249 LOC (+1,292 LOC from v2.0)
-**Status**: ✅ Production Ready (v2.2 - Transaction Signing Enabled)
+> **DeFi 청산 전략의 모든 시나리오별 상세 시퀀스 다이어그램**
+>
+> 각 컴포넌트와 외부 서비스 간의 상호작용을 단계별로 시각화
 
 ---
 
-## 📊 시스템 아키텍처
+## 📋 목차
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Frontend (Next.js 15.5.2)                          │
-│  crack_front/app/liquidation/                                               │
-│  ├─ page.tsx (Server Component - SSR)                                       │
-│  └─ LiquidationClient.tsx (Client Component - 4 Tabs)                       │
-│     ├─ Dashboard Tab (실시간 통계)                                            │
-│     ├─ Opportunities Tab (청산 기회 목록)                                      │
-│     ├─ History Tab (실행 기록)                                                │
-│     └─ Settings Tab (환경 설정)                                               │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    │ HTTP REST API (Port 5000)
-                                    │
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Backend API (Axum)                                │
-│  src/api.rs                                                                 │
-│  ├─ GET  /api/liquidation/dashboard                                         │
-│  ├─ GET  /api/liquidation/opportunities                                     │
-│  ├─ GET  /api/liquidation/config                                            │
-│  ├─ POST /api/liquidation/config                                            │
-│  └─ GET  /api/protocols/status                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    IntegratedLiquidationManager                             │
-│  src/strategies/liquidation/manager.rs (662 LOC)                            │
-│  ├─ start_automated_liquidation() → 자동 청산 봇 시작                          │
-│  ├─ run_execution_loop() → 30초 간격 실행 루프                                │
-│  ├─ detect_and_analyze_opportunities() → 기회 탐지                            │
-│  ├─ execute_opportunities() → 청산 실행                                       │
-│  ├─ liquidate_user(address) → 특정 사용자 청산                                │
-│  └─ get_liquidation_summary() → 실시간 통계                                   │
-└─────────────────────────────────────────────────────────────────────────────┘
-         │              │                │              │             │
-    ┌────┴───┬──────────┴────┬───────────┴───┬──────────┴───┬─────────┴────┐
-    ▼        ▼               ▼               ▼              ▼              ▼
-┌─────┐ ┌─────┐      ┌──────────┐   ┌──────────┐   ┌─────────┐   ┌─────────┐
-│State│ │Strat│      │Bundle    │   │Execution │   │Price    │   │Mem      │
-│Index│ │Mgr  │      │Builder   │   │Engine    │   │Oracle   │   │Watch    │
-│475  │ │541  │      │403 LOC   │   │675 LOC   │   │399 LOC  │   │520 LOC  │
-└─────┘ └─────┘      └──────────┘   └──────────┘   └─────────┘   └─────────┘
-    │        │              │               │              │            │
-    │        │              │               │              │            │
-┌───┴────────┴──────────────┴───────────────┴──────────────┴────────────┴───┐
-│                    Core Liquidation Components                             │
-│                                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                     │
-│  │Position      │  │Position      │  │Liquidation   │                     │
-│  │Scanner       │  │Analyzer      │  │Executor      │                     │
-│  │162 LOC       │  │607 LOC       │  │1623 LOC★     │                     │
-│  └──────────────┘  └──────────────┘  └──────────────┘                     │
-│                                                                             │
-│  ┌──────────────┐  ┌──────────────┐                                        │
-│  │Stats         │  │Types         │                                        │
-│  │26 LOC        │  │160 LOC       │                                        │
-│  └──────────────┘  └──────────────┘                                        │
-│                                                                             │
-│  ★ v2.2 Update: +710 LOC                                                   │
-│     - Wallet/Signer Integration (LocalWallet)                              │
-│     - Transaction Signing (SignerMiddleware)                               │
-│     - Real ABI Encoding (ethers::abi::Function)                            │
-│     - MEV-lite Multi-Relay (5 Relays)                                      │
-│     - Real-time Competition Analysis                                       │
-│     - Dynamic Tip Calculation (8-stage)                                    │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         External Services                                   │
-│                                                                             │
-│  🌐 Blockchain RPC                    📊 DeFi Protocols                     │
-│     - Ethereum Mainnet                   - Aave V3                          │
-│     - Provider: Infura/Alchemy           - Compound V2/V3                   │
-│     - WebSocket: Pending TX Stream       - MakerDAO                         │
-│                                                                             │
-│  ⚡ MEV Infrastructure                🔄 DEX Aggregators                     │
-│     - Flashbots Relay                    - 0x API (실시간 견적)              │
-│     - MEV-Boost                          - 1inch API (실시간 견적)           │
-│     - Private TX Pool                    - Uniswap (백업)                   │
-│                                                                             │
-│  💰 Price Oracles                    📈 Market Data                         │
-│     - Chainlink Feeds                    - CoinGecko API (ETH/USD)         │
-│     - DEX Price Feeds                    - Gas Price Oracle                │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+1. [전체 청산 프로세스](#-전체-청산-프로세스)
+2. [Aave v3 청산 상세 플로우](#-aave-v3-청산-상세-플로우)
+3. [Compound v3 청산 상세 플로우](#-compound-v3-청산-상세-플로우)
+4. [MakerDAO 청산 상세 플로우](#-makerdao-청산-상세-플로우)
+5. [MEV 번들 생성 및 제출 플로우](#-mev-번들-생성-및-제출-플로우)
+6. [프라이빗 제출 vs 퍼블릭 폴백 플로우](#-프라이빗-제출-vs-퍼블릭-폴백-플로우)
+7. [Flashloan 청산 실행 플로우](#-flashloan-청산-실행-플로우)
+8. [DEX Aggregator 스왑 플로우](#-dex-aggregator-스왑-플로우)
+9. [경쟁 분석 및 가스 최적화 플로우](#-경쟁-분석-및-가스-최적화-플로우)
+10. [에러 처리 및 복구 플로우](#-에러-처리-및-복구-플로우)
 
 ---
 
-## 🔄 청산 실행 플로우 (7단계)
+## 🔄 전체 청산 프로세스
 
-### 1️⃣ **State Indexing** (상태 인덱싱)
+### 1️⃣ 통합 청산 관리자 실행 플로우
 
-**파일**: `state_indexer.rs` (475 LOC)
+```mermaid
+sequenceDiagram
+    participant User as 사용자/봇
+    participant ILM as IntegratedLiquidationManager
+    participant MPS as MultiProtocolScanner
+    participant LSV2 as LiquidationStrategyV2
+    participant PC as ProfitabilityCalculator
+    participant LBB as LiquidationBundleBuilder
+    participant LEE as LiquidationExecutionEngine
+    participant FB as FlashbotsClient
+    participant BC as Blockchain
 
-```rust
-// 1.1 모든 프로토콜의 사용자 포지션 인덱싱
-pub async fn start_indexing() -> Result<()>
+    User->>ILM: start_automated_liquidation()
+    activate ILM
 
-// 1.2 청산 후보 업데이트 (30초 주기)
-async fn indexing_loop()
-async fn scan_all_protocols()
-async fn update_liquidation_candidates()
+    ILM->>MPS: start_background_scanning()
+    activate MPS
+    MPS-->>ILM: OK
+    deactivate MPS
 
-// 1.3 프로토콜별 정확한 파라미터 적용
-fn get_protocol_liquidation_threshold(protocol: &ProtocolType) -> f64
-fn get_protocol_close_factor(protocol: &ProtocolType) -> f64
-fn get_protocol_liquidation_bonus(protocol: &ProtocolType) -> f64
-```
+    loop 메인 실행 루프 (30초마다)
+        ILM->>ILM: detect_and_analyze_opportunities()
 
-**프로토콜별 파라미터**:
-- **Aave V3**: Threshold 82.5%, Close Factor 50%, Bonus 5%
-- **Compound V2**: Threshold 80%, Close Factor 50%, Bonus 8%
-- **Compound V3**: Threshold 83%, Close Factor 100%, Bonus 5%
-- **MakerDAO**: Threshold 85%, Close Factor 100%, Bonus 13%
+        ILM->>LSV2: detect_opportunities()
+        activate LSV2
 
-**Output**:
-- `indexed_positions`: 모든 사용자 포지션 맵
-- `liquidation_candidates`: 우선순위별 청산 후보 목록
+        LSV2->>MPS: scan_all_protocols()
+        activate MPS
+        MPS->>BC: get_user_account_data()
+        activate BC
+        BC-->>MPS: account_data
+        deactivate BC
+        MPS-->>LSV2: liquidatable_users[]
+        deactivate MPS
 
----
+        loop 각 청산 대상 사용자
+            LSV2->>PC: analyze_liquidation_profitability()
+            activate PC
+            PC->>BC: get_current_gas_price()
+            activate BC
+            BC-->>PC: (base_fee, priority_fee)
+            deactivate BC
+            PC-->>LSV2: profitability_analysis
+            deactivate PC
 
-### 2️⃣ **Strategy Management** (전략 관리)
+            alt 수익성 있음
+                LSV2->>LSV2: calculate_success_probability()
+            end
+        end
 
-**파일**: `strategy_manager.rs` (743 LOC)
+        LSV2-->>ILM: opportunities[]
+        deactivate LSV2
 
-```rust
-// 2.1 청산 기회 탐지
-async fn detect_liquidation_opportunities() -> Result<Vec<LiquidationOpportunity>>
-async fn get_real_swap_quotes(user: &LiquidatableUser) -> Result<HashMap<SwapQuote>>
-async fn get_real_eth_price() -> Result<f64>
+        alt 기회 발견
+            ILM->>LBB: build_liquidation_bundle(scenario)
+            activate LBB
+            LBB->>LBB: analyze_competition_level()
+            LBB->>LBB: calculate_success_probability()
+            LBB->>LBB: create_mev_bundle()
+            LBB-->>ILM: liquidation_bundle
+            deactivate LBB
 
-// 2.2 수익성 필터링
-async fn filter_profitable_opportunities() -> Result<Vec<LiquidationOpportunity>>
+            ILM->>LEE: execute_liquidation_bundle(bundle)
+            activate LEE
+            LEE->>LEE: simulate_bundle()
 
-// 2.3 우선순위 정렬
-fn sort_opportunities_by_priority() -> Vec<LiquidationOpportunity>
+            alt 시뮬레이션 성공
+                LEE->>FB: submit_bundle()
+                activate FB
+                FB->>BC: send to Flashbots relay
+                activate BC
+                BC-->>FB: bundle_hash
+                deactivate BC
+                FB-->>LEE: bundle_hash
+                deactivate FB
 
-// 2.4 최적 스왑 견적 (실시간 DEX 통합)
-async fn get_best_swap_quote() -> Result<SwapQuote>
-```
+                loop 최대 20블록 대기
+                    LEE->>BC: check_bundle_status()
+                    activate BC
+                    BC-->>LEE: status
+                    deactivate BC
 
-**DEX Aggregator 통합**:
-```rust
-// 0x, 1inch, Uniswap에서 견적 조회 후 최적 선택
-if let Some(zerox_aggregator) = self.dex_aggregators.get(&DexType::ZeroX) {
-    let quote = zerox_aggregator.get_swap_quote(sell_token, buy_token, sell_amount).await?;
-    if quote.buy_amount > best_buy_amount {
-        best_quote = Some(quote);
-    }
-}
-```
+                    alt 번들 포함됨
+                        LEE->>LEE: update_execution_stats()
+                        LEE-->>ILM: SubmissionResult{success=true}
+                    end
+                end
+            else 시뮬레이션 실패
+                LEE-->>ILM: SubmissionResult{success=false}
+            end
+            deactivate LEE
 
-**ETH 가격 조회** (CoinGecko API):
-```rust
-let url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd";
-let response = self.http_client.get(url).send().await?;
-let price = data["ethereum"]["usd"].as_f64().unwrap_or(2000.0);
+            ILM->>ILM: process_execution_results()
+        end
+
+        ILM->>ILM: update_performance_metrics()
+        ILM->>ILM: cleanup_expired_data()
+    end
+
+    User->>ILM: stop_automated_liquidation()
+    ILM->>MPS: stop_background_scanning()
+    ILM-->>User: final_stats
+    deactivate ILM
 ```
 
 ---
 
-### 3️⃣ **Position Analysis** (포지션 분석)
+## 🏦 Aave v3 청산 상세 플로우
 
-**파일**: `position_analyzer.rs` (505 LOC)
+### 2️⃣ Aave v3 청산 기회 탐지 및 분석
 
-```rust
-// 3.1 프로토콜별 포지션 분석
-async fn analyze_aave_position(user: Address, protocol: &ProtocolInfo)
-async fn analyze_compound_position(user: Address, protocol: &ProtocolInfo)
-async fn analyze_maker_position(user: Address, protocol: &ProtocolInfo)
+```mermaid
+sequenceDiagram
+    participant MPS as MultiProtocolScanner
+    participant Aave as Aave LendingPool
+    participant User as User Account
+    participant PC as ProfitabilityCalculator
+    participant DEX as DEX Aggregator (0x/1inch)
+    participant Oracle as Price Oracle
 
-// 3.2 실제 수익성 계산
-async fn calculate_estimated_profit() -> Result<U256>
-fn calculate_optimal_liquidation_amount() -> Result<U256>
-fn calculate_liquidation_bonus() -> Result<U256>
+    MPS->>Aave: scan_aave_positions(protocol)
+    activate MPS
 
-// 3.3 가스 비용 계산
-fn calculate_gas_cost() -> Result<U256>
+    loop 각 고위험 사용자
+        MPS->>Aave: get_user_account_data(user)
+        activate Aave
+        Aave->>User: read collateral & debt
+        activate User
+        User-->>Aave: (total_collateral, total_debt, health_factor)
+        deactivate User
+        Aave-->>MPS: UserAccountData
+        deactivate Aave
+
+        MPS->>MPS: health_factor = account_data.health_factor / 1e18
+
+        alt health_factor < 1.0 (청산 가능)
+            MPS->>MPS: find_best_liquidation_pair()
+
+            MPS->>PC: calculate_liquidation_profit()
+            activate PC
+
+            PC->>Oracle: get_asset_price(collateral_asset)
+            activate Oracle
+            Oracle-->>PC: collateral_price_usd
+            deactivate Oracle
+
+            PC->>Oracle: get_asset_price(debt_asset)
+            activate Oracle
+            Oracle-->>PC: debt_price_usd
+            deactivate Oracle
+
+            PC->>DEX: get_swap_quote(collateral→debt)
+            activate DEX
+            DEX-->>PC: SwapQuote{price_impact, expected_output}
+            deactivate DEX
+
+            PC->>PC: gross_profit = liquidation_amount × 0.05 (5% 보너스)
+            PC->>PC: gas_cost = 800k × gas_price
+            PC->>PC: slippage = price_impact × collateral_value
+            PC->>PC: flashloan_fee = debt_amount × 0.0009
+            PC->>PC: net_profit = gross_profit - gas_cost - slippage - flashloan_fee
+
+            PC-->>MPS: ProfitabilityAnalysis{net_profit_usd}
+            deactivate PC
+
+            alt net_profit > min_threshold
+                MPS->>MPS: create_liquidation_opportunity()
+                Note right of MPS: LiquidationOpportunity<br/>추가
+            end
+        end
+    end
+
+    MPS-->>MPS: sort by net_profit (DESC)
+    deactivate MPS
 ```
 
-**수익성 계산 로직**:
-```
-liquidation_bonus = collateral * protocol_bonus (5-13%)
-gas_cost = gas_estimate * gas_price
-swap_cost = collateral * slippage (0.5-2%)
+### 3️⃣ Aave v3 청산 실행 (Flashloan 모드)
 
-net_profit = liquidation_bonus - gas_cost - swap_cost
-```
+```mermaid
+sequenceDiagram
+    participant LEE as LiquidationExecutionEngine
+    participant Aave as Aave LendingPool
+    participant Flashloan as Aave FlashLoan
+    participant DEX as DEX Aggregator
+    participant User as User Account
+    participant BC as Blockchain
 
----
+    LEE->>LEE: execute_liquidation_bundle(bundle)
+    activate LEE
 
-### 4️⃣ **Bundle Building** (번들 생성)
+    LEE->>Aave: liquidationCall(collateral, debt, user, amount, false)
+    activate Aave
 
-**파일**: `bundle_builder.rs` (464 LOC)
+    Note over Aave,Flashloan: Flashloan 청산 실행
+    Aave->>Flashloan: flashLoanSimple(receiver, asset, amount, params, 0)
+    activate Flashloan
 
-```rust
-// 4.1 청산 번들 생성
-pub async fn build_liquidation_bundle(scenario: LiquidationScenario) -> Result<LiquidationBundle>
+    Flashloan->>LEE: executeOperation(asset, amount, premium, initiator, params)
+    activate LEE
 
-// 4.2 경쟁 분석 (Mempool 기반)
-async fn analyze_competition_level(scenario: &LiquidationScenario) -> Result<CompetitionLevel>
-async fn check_pending_liquidations_count() -> Result<u64>
+    Note over LEE: 1. 청산 실행
+    LEE->>Aave: liquidationCall(collateral, debt, user, amount, false)
+    Aave->>User: transfer collateral to liquidator
+    activate User
+    User-->>Aave: collateral transferred
+    deactivate User
+    Aave-->>LEE: liquidation successful
 
-// 4.3 프로토콜별 트랜잭션 생성
-async fn create_liquidation_transaction() -> Result<Bytes>
-async fn encode_protocol_liquidation_call() -> Result<Bytes>
+    Note over LEE: 2. 담보 판매
+    LEE->>DEX: swap(collateral, debt, collateral_amount)
+    activate DEX
+    DEX-->>LEE: debt_tokens_received
+    deactivate DEX
 
-// 4.4 플래시론 통합
-async fn encode_liquidation_transaction() -> Result<Bytes>
-```
+    Note over LEE: 3. Flashloan 상환
+    LEE->>Flashloan: repay(amount + premium)
+    Flashloan-->>LEE: repayment successful
+    deactivate LEE
 
-**경쟁 수준 분석**:
-```rust
-// Mempool에서 동일 사용자 대상 청산 트랜잭션 개수 확인
-let pending_liquidations = self.check_pending_liquidations_count(scenario).await?;
+    Flashloan-->>Aave: flashloan completed
+    deactivate Flashloan
 
-if health_factor < 0.95 && pending_liquidations > 5 {
-    CompetitionLevel::Critical // 가스 가격 200% 상승
-} else if health_factor < 0.98 && pending_liquidations > 3 {
-    CompetitionLevel::High // 가스 가격 150% 상승
-} else {
-    CompetitionLevel::Medium
-}
-```
+    Aave-->>LEE: liquidation completed
+    deactivate Aave
 
----
+    LEE->>BC: transfer profit to owner
+    activate BC
+    BC-->>LEE: profit transferred
+    deactivate BC
 
-### 5️⃣ **Gas Estimation** (가스 추정)
-
-**파일**: `strategy_manager.rs` 내 함수
-
-```rust
-// 5.1 프로토콜별 정확한 가스 계산
-async fn estimate_gas_for_liquidation(
-    opportunity: &LiquidationOpportunity,
-    swap_quote: &SwapQuote
-) -> Result<u64>
-
-// 5.2 현재 가스 가격 조회
-async fn get_current_gas_price() -> Result<U256>
-```
-
-**가스 계산 로직**:
-```rust
-let protocol_gas = match opportunity.user.protocol {
-    ProtocolType::Aave => 400_000,      // Aave V3
-    ProtocolType::CompoundV2 => 350_000, // Compound V2
-    ProtocolType::CompoundV3 => 300_000, // Compound V3
-    ProtocolType::MakerDAO => 500_000,   // MakerDAO
-};
-
-let swap_gas = swap_quote.gas_estimate;
-let flash_loan_gas = if requires_flash_loan { 200_000 } else { 0 };
-
-let total_gas = (protocol_gas + swap_gas + flash_loan_gas) * 110 / 100; // 10% 버퍼
-```
-
----
-
-### 6️⃣ **Execution** (실행)
-
-**파일**: `execution_engine.rs` (423 LOC)
-
-```rust
-// 6.1 번들 시뮬레이션
-async fn simulate_bundle(bundle: &LiquidationBundle) -> Result<SimulationResult>
-
-// 6.2 Flashbots 제출 (실제 구현)
-async fn submit_to_flashbots(bundle: &LiquidationBundle) -> Result<String>
-
-// 6.3 번들 포함 모니터링
-async fn monitor_bundle_inclusion(
-    bundle_hash: String,
-    submission_time: DateTime<Utc>,
-    bundle: &LiquidationBundle
-) -> Result<SubmissionResult>
-```
-
-**Flashbots 제출 플로우**:
-```rust
-// 1. Flashbots RPC 엔드포인트
-let flashbots_rpc = "https://relay.flashbots.net";
-
-// 2. 번들 구성
-let target_block = current_block + 1;
-let bundle_transactions = vec![bundle.transactions];
-
-// 3. 번들 해시 생성 (SHA256)
-let mut hasher = Sha256::new();
-hasher.update(bundle.transactions.as_ref());
-hasher.update(target_block.to_be_bytes());
-let bundle_hash = format!("0x{}", hex::encode(hasher.finalize()));
-
-// 4. HTTP POST 제출
-POST /relay/v1/bundle
-{
-  "jsonrpc": "2.0",
-  "method": "eth_sendBundle",
-  "params": [{
-    "txs": [bundleTx],
-    "blockNumber": targetBlock
-  }],
-  "id": 1
-}
-```
-
-**번들 모니터링** (최대 20블록 = 4분):
-```rust
-for attempt in 0..20 {
-    let bundle_status = self.flashbots_client.get_bundle_status(&bundle_hash).await?;
-
-    match bundle_status {
-        BundleStatus::Included(block_hash) => {
-            info!("🎉 Bundle included in block {:?}", block_hash);
-            return Ok(SubmissionResult { ... });
-        }
-        BundleStatus::Rejected(reason) => {
-            warn!("❌ Bundle rejected: {}", reason);
-            return Ok(SubmissionResult { ... });
-        }
-        BundleStatus::Pending => {
-            sleep(Duration::from_secs(12)).await; // 1블록 대기
-        }
-    }
-}
+    LEE-->>LEE: update_execution_stats()
+    deactivate LEE
 ```
 
 ---
 
-### 7️⃣ **Mempool Monitoring** (멤풀 모니터링)
+## 🏛️ Compound v3 청산 상세 플로우
 
-**파일**: `mempool_watcher.rs` (520 LOC)
+### 4️⃣ Compound v3 청산 기회 탐지
 
-```rust
-// 7.1 Pending 트랜잭션 스트림 구독
-async fn subscribe_to_mempool_events() -> Result<()>
+```mermaid
+sequenceDiagram
+    participant MPS as MultiProtocolScanner
+    participant Comet as Compound Comet
+    participant User as User Account
+    participant PC as ProfitabilityCalculator
 
-// 7.2 트랜잭션 분석
-async fn analyze_pending_transaction(tx_hash: H256) -> Result<()>
+    MPS->>Comet: scan_compound_positions(protocol)
+    activate MPS
 
-// 7.3 청산 감지
-fn is_liquidation_call(input: &Bytes) -> bool
-async fn process_competitor_liquidation(tx: Transaction) -> Result<()>
+    loop 각 고위험 사용자
+        MPS->>Comet: borrow_balance_of(user)
+        activate Comet
+        Comet->>User: read normalized debt
+        activate User
+        User-->>Comet: borrow_base
+        deactivate User
+        Comet-->>MPS: borrow_base (기초자산 부채)
+        deactivate Comet
 
-// 7.4 오라클 업데이트 감지
-async fn process_oracle_update(tx: Transaction) -> Result<()>
+        alt borrow_base > 0
+            MPS->>MPS: liquidation_amount = min(borrow_base, max_size)
 
-// 7.5 가스 가격 급등 감지
-async fn check_gas_price_spike(tx: &Transaction) -> Result<()>
+            Note right of MPS: 최적 담보 자산 선택
+            loop 각 지원 담보 자산
+                MPS->>Comet: quote_collateral(asset, liquidation_amount)
+                activate Comet
+                Comet-->>MPS: collateral_amount
+                deactivate Comet
+
+                MPS->>MPS: 최대 담보 수령량 비교
+            end
+
+            MPS->>MPS: best_collateral = max(collateral_amounts)
+
+            MPS->>PC: calculate_liquidation_profit()
+            activate PC
+            PC->>PC: gross_profit = liquidation_amount × 0.075 (7.5% 보너스)
+            PC->>PC: gas_cost = 800k × gas_price
+            PC->>PC: net_profit = gross_profit - gas_cost
+            PC-->>MPS: ProfitabilityAnalysis
+            deactivate PC
+
+            alt net_profit > min_threshold
+                MPS->>MPS: create_compound_opportunity()
+            end
+        end
+    end
+
+    MPS-->>MPS: opportunities[]
+    deactivate MPS
 ```
 
-**실제 Mempool 모니터링**:
-```rust
-// Pending 트랜잭션 스트림 생성
-let mut pending_tx_stream = self.provider.watch_pending_transactions().await?;
+### 5️⃣ Compound v3 청산 실행
 
-while let Some(tx_hash) = pending_tx_stream.next().await {
-    if let Ok(Some(tx)) = self.provider.get_transaction(tx_hash).await {
-        // 대출 프로토콜 주소 확인
-        if self.is_lending_protocol_address(&tx.to) {
-            // 청산 함수 호출 감지
-            if self.is_liquidation_call(&tx.input) {
-                self.process_competitor_liquidation(tx).await?;
-            }
-        }
-    }
-}
-```
+```mermaid
+sequenceDiagram
+    participant LEE as LiquidationExecutionEngine
+    participant Comet as Compound Comet
+    participant User as User Account
+    participant DEX as DEX Aggregator
+    participant BC as Blockchain
 
-**청산 함수 시그니처 감지**:
-```rust
-let liquidation_selectors = vec![
-    [0xe8, 0xef, 0xa4, 0x40], // Aave liquidationCall
-    [0xf5, 0xe3, 0xc4, 0x62], // Compound liquidateBorrow
-    [0x72, 0xc6, 0xc1, 0xe6], // MakerDAO bite
-];
+    LEE->>LEE: execute_compound_liquidation(opportunity)
+    activate LEE
 
-liquidation_selectors.iter().any(|selector| function_selector == selector)
-```
+    LEE->>Comet: liquidate(user, asset, amount, collateral_asset)
+    activate Comet
 
----
+    Comet->>User: transfer collateral to liquidator
+    activate User
+    User-->>Comet: collateral transferred
+    deactivate User
 
-## 📈 전체 실행 예시 (30초 사이클)
+    Comet->>User: reduce borrow balance
+    activate User
+    User-->>Comet: borrow balance reduced
+    deactivate User
 
-```
-[00:00] 🔍 State Indexer: 프로토콜 스캔 시작
-        ├─ Aave V3: 1,245 사용자 스캔
-        ├─ Compound V2: 892 사용자 스캔
-        └─ MakerDAO: 345 사용자 스캔
+    Comet-->>LEE: liquidation successful
+    deactivate Comet
 
-[00:05] 📊 State Indexer: 청산 후보 17명 발견
-        ├─ Critical: 3명 (HF < 0.95)
-        ├─ High: 7명 (HF < 0.98)
-        └─ Medium: 7명 (HF < 1.0)
+    LEE->>DEX: swap(collateral, base_asset, collateral_amount)
+    activate DEX
+    DEX-->>LEE: base_tokens_received
+    deactivate DEX
 
-[00:06] 💰 Strategy Manager: 청산 기회 분석
-        ├─ DEX 견적 조회 (0x, 1inch, Uniswap)
-        ├─ ETH 가격: $3,245.67 (CoinGecko)
-        └─ 수익성 있는 기회: 5건
+    LEE->>BC: transfer profit to owner
+    activate BC
+    BC-->>LEE: profit transferred
+    deactivate BC
 
-[00:08] 🎯 Position Analyzer: 최적 청산 금액 계산
-        User: 0x1234...5678
-        ├─ Collateral: 10 ETH ($32,456)
-        ├─ Debt: $28,000 USDC
-        ├─ Health Factor: 0.94
-        ├─ Max Liquidatable: 50% ($14,000)
-        └─ Expected Profit: $726 (5% bonus - gas - slippage)
-
-[00:10] 📦 Bundle Builder: MEV 번들 생성
-        ├─ Mempool 경쟁 분석: 2개 pending TX (Medium)
-        ├─ Gas Price: 25 gwei → 30 gwei (120%)
-        ├─ Estimated Gas: 550,000 (protocol + swap + buffer)
-        └─ Total Gas Cost: 0.0165 ETH ($53.55)
-
-[00:12] ⚡ Execution Engine: Flashbots 제출
-        ├─ Target Block: 18,234,567
-        ├─ Bundle Hash: 0xabcd...ef01
-        └─ Priority Fee: 0.05 ETH
-
-[00:24] 🎉 Execution Engine: 번들 포함 확인
-        ├─ Block: 18,234,567
-        ├─ TX Hash: 0x9876...5432
-        ├─ Profit Realized: 0.224 ETH ($726.88)
-        └─ Execution Time: 14.2s
-
-[00:25] 📡 Mempool Watcher: 경쟁 청산 감지
-        ├─ Competitor TX: 0x5555...6666
-        ├─ Gas Price: 40 gwei (우리보다 33% 높음)
-        └─ Signal: 다음 라운드 가스 가격 조정 필요
-
-[00:30] 🔄 State Indexer: 다음 사이클 시작
+    LEE-->>LEE: update_execution_stats()
+    deactivate LEE
 ```
 
 ---
 
-## 🔧 실행 모드
+## 🏰 MakerDAO 청산 상세 플로우
 
-### 1. Flashbot 모드 (기본)
-```rust
-ExecutionMode::Flashbot {
-    mode: FlashbotMode::Standard,
-    max_block_wait: 3,
-    priority_fee_eth: 0.05,
-}
-```
-- MEV 보호
-- Private TX Pool
-- 번들 우선순위 보장
+### 6️⃣ MakerDAO 청산 기회 탐지
 
-### 2. Public 모드
-```rust
-ExecutionMode::Public {
-    max_retries: 3,
-    dynamic_tip: true,
-}
-```
-- 빠른 실행
-- 경쟁 노출
-- 가스 전쟁 위험
+```mermaid
+sequenceDiagram
+    participant MPS as MultiProtocolScanner
+    participant Vat as MakerDAO Vat
+    participant User as User Vault (Urn)
+    participant PC as ProfitabilityCalculator
 
-### 3. Hybrid 모드
-```rust
-ExecutionMode::Hybrid {
-    flashbot_first: true,
-    public_fallback_after_blocks: 2,
-}
-```
-- Flashbot 우선 시도
-- 실패 시 Public으로 전환
+    MPS->>Vat: scan_maker_positions(protocol)
+    activate MPS
 
----
+    loop 각 고위험 사용자
+        loop 각 ilk (ETH-A, ETH-B, WBTC-A)
+            MPS->>Vat: urns(ilk, user)
+            activate Vat
+            Vat->>User: read vault state
+            activate User
+            User-->>Vat: (ink, art) // 담보, 정규화 부채
+            deactivate User
+            Vat-->>MPS: (ink, art)
+            deactivate Vat
 
-## 📊 성능 메트릭
+            alt art > 0 (부채 존재)
+                MPS->>Vat: ilks(ilk)
+                activate Vat
+                Vat-->>MPS: (Art, rate, spot, line, dust)
+                deactivate Vat
 
-### State Indexer
-- **Scan Interval**: 30초
-- **Protocols Supported**: 4개 (Aave, Compound V2/V3, MakerDAO)
-- **Avg Scan Time**: 3-5초
-- **Indexed Positions**: 2,000-5,000
+                MPS->>MPS: debt_wad = art × rate / RAY
+                MPS->>MPS: collateral_value = ink × spot / RAY
+                MPS->>MPS: health_factor = collateral_value / debt_wad
 
-### Strategy Manager
-- **Opportunity Detection**: 5-10초
-- **DEX Quote Time**: 1-2초 (병렬 조회)
-- **ETH Price Update**: <500ms (CoinGecko API)
-- **Profitability Filter**: <100ms
+                alt health_factor < 1.0
+                    MPS->>MPS: liquidation_amount = min(debt_wad, max_size)
 
-### Execution Engine
-- **Bundle Simulation**: <1초
-- **Flashbots Submission**: <2초
-- **Bundle Inclusion Wait**: 12-36초 (1-3 블록)
-- **Success Rate**: 70-85% (경쟁 수준에 따라)
+                    MPS->>PC: calculate_liquidation_profit()
+                    activate PC
+                    PC->>PC: gross_profit = liquidation_amount × 0.13 (13% 보너스)
+                    PC->>PC: gas_cost = 800k × gas_price
+                    PC->>PC: flashloan_fee = debt_amount × 0.0009
+                    PC->>PC: net_profit = gross_profit - gas_cost - flashloan_fee
+                    PC-->>MPS: ProfitabilityAnalysis
+                    deactivate PC
 
-### Mempool Watcher
-- **Stream Latency**: <100ms
-- **TX Analysis Time**: <50ms
-- **Signal Detection**: Real-time
-- **Competitor Detection Rate**: 95%+
+                    alt net_profit > min_threshold
+                        MPS->>MPS: create_maker_opportunity()
+                        Note right of MPS: 선택된 ilk 저장<br/>(ETH-A, WBTC-A 등)
+                    end
 
----
+                    MPS->>MPS: break // 사용자당 1개 ilk만
+                end
+            end
+        end
+    end
 
-## 🔐 보안 고려사항
-
-### Private Key Management
-```rust
-// 환경 변수로 관리
-let private_key = std::env::var("LIQUIDATION_BOT_PRIVATE_KEY")?;
-let wallet = LocalWallet::from_str(&private_key)?;
+    MPS-->>MPS: opportunities[]
+    deactivate MPS
 ```
 
-### Slippage Protection
-```rust
-let max_slippage = 0.02; // 2%
-let min_output = expected_output * (1.0 - max_slippage);
-```
+### 7️⃣ MakerDAO 청산 실행
 
-### Gas Limit Protection
-```rust
-let max_gas = 1_000_000;
-if estimated_gas > max_gas {
-    return Err("Gas limit exceeded");
-}
-```
+```mermaid
+sequenceDiagram
+    participant LEE as LiquidationExecutionEngine
+    participant Vat as MakerDAO Vat
+    participant Clipper as MakerDAO Clipper
+    participant User as User Vault
+    participant DEX as DEX Aggregator
+    participant BC as Blockchain
 
-### Profit Threshold
-```rust
-let min_profit_eth = U256::from_str_radix("50000000000000000", 10)?; // 0.05 ETH
-if estimated_profit < min_profit_eth {
-    return Ok(None); // Skip unprofitable opportunity
-}
-```
+    LEE->>LEE: execute_maker_liquidation(opportunity)
+    activate LEE
 
----
+    LEE->>Clipper: kick(urn, ilk, user, kpr)
+    activate Clipper
 
-## 🚀 배포 및 운영
+    Clipper->>Vat: grab(ilk, urn, address(this), address(this), int(art), int(rad))
+    activate Vat
+    Vat->>User: transfer collateral to clipper
+    activate User
+    User-->>Vat: collateral transferred
+    deactivate User
+    Vat-->>Clipper: grab completed
+    deactivate Vat
 
-### 환경 변수
-```bash
-# Blockchain
-ETHEREUM_RPC_URL=https://mainnet.infura.io/v3/YOUR_KEY
-ETHEREUM_WS_URL=wss://mainnet.infura.io/ws/v3/YOUR_KEY
+    Clipper-->>LEE: kick successful
+    deactivate Clipper
 
-# MEV
-FLASHBOTS_RELAY_URL=https://relay.flashbots.net
-FLASHBOTS_SIGNATURE_KEY=0x...
+    LEE->>Clipper: take(urn, max_art, max_ink, address(this), calldata)
+    activate Clipper
 
-# DEX
-ZEROX_API_URL=https://api.0x.org
-ONEINCH_API_KEY=YOUR_1INCH_API_KEY
+    Clipper->>DEX: swap(collateral, dai, collateral_amount)
+    activate DEX
+    DEX-->>Clipper: dai_received
+    deactivate DEX
 
-# Bot
-LIQUIDATION_BOT_PRIVATE_KEY=0x...
-MIN_PROFIT_ETH=0.05
-MAX_GAS_PRICE_GWEI=300
-```
+    Clipper->>Vat: heal(art)
+    activate Vat
+    Vat-->>Clipper: heal completed
+    deactivate Vat
 
-### 실행 명령어
-```bash
-# 개발 모드 (시뮬레이션)
-API_MODE=mock cargo run --bin searcher -- --strategies liquidation
+    Clipper-->>LEE: take successful
+    deactivate Clipper
 
-# 프로덕션 모드 (실제 실행)
-API_MODE=real cargo run --bin searcher -- --strategies liquidation --flashbot-mode standard
+    LEE->>BC: transfer profit to owner
+    activate BC
+    BC-->>LEE: profit transferred
+    deactivate BC
+
+    LEE-->>LEE: update_execution_stats()
+    deactivate LEE
 ```
 
 ---
 
-## 📝 참고 문서
+## 📦 MEV 번들 생성 및 제출 플로우
 
-- [LIQUIDATION_STRATEGY.md](./LIQUIDATION_STRATEGY.md) - 전략 상세 설명
-- [Aave V3 Documentation](https://docs.aave.com/developers/core-contracts/pool#liquidationcall)
-- [Compound V3 Documentation](https://docs.compound.finance/)
-- [Flashbots Documentation](https://docs.flashbots.net/)
-- [0x API Documentation](https://docs.0x.org/)
-- [1inch API Documentation](https://docs.1inch.io/)
+### 8️⃣ MEV 번들 생성 과정
+
+```mermaid
+sequenceDiagram
+    participant LBB as LiquidationBundleBuilder
+    participant ABICodec as ABICodec
+    participant DEX as DEX Aggregator
+    participant Bundle as BundleBuilder
+    participant LEE as LiquidationExecutionEngine
+    participant FB as FlashbotsClient
+    participant Relay as Flashbots Relay
+
+    LBB->>LBB: build_liquidation_bundle(scenario)
+    activate LBB
+
+    LBB->>LBB: analyze_competition_level()
+    Note right of LBB: Health Factor 0.95 미만<br/>→ Critical Competition
+
+    LBB->>LBB: calculate_success_probability()
+    Note right of LBB: base_prob × gas_factor × slippage_factor
+
+    Note over LBB,Bundle: 플래시론 활성화 시 (권장)
+    LBB->>DEX: get_swap_quote(collateral→debt)
+    activate DEX
+    DEX-->>LBB: SwapQuote{to, data, allowanceTarget}
+    deactivate DEX
+
+    LBB->>ABICodec: encode_flashloan_receiver_liquidation_params()
+    activate ABICodec
+    ABICodec-->>LBB: encoded_params
+    deactivate ABICodec
+
+    LBB->>ABICodec: encode_aave_flashloan_simple()
+    activate ABICodec
+    ABICodec-->>LBB: flashloan_calldata
+    deactivate ABICodec
+
+    LBB->>Bundle: create_liquidation_bundle(flashloan_tx)
+    activate Bundle
+    Bundle-->>LBB: Bundle{tx[], max_fee, max_priority_fee}
+    deactivate Bundle
+
+    LBB-->>LEE: LiquidationBundle
+    deactivate LBB
+
+    LEE->>LEE: execute_liquidation_bundle(bundle)
+    activate LEE
+
+    LEE->>LEE: simulate_bundle()
+    Note right of LEE: 시뮬레이션 성공 확인
+
+    LEE->>FB: submit_bundle(bundle)
+    activate FB
+
+    FB->>Relay: POST /relay/v1/builders
+    activate Relay
+    Relay-->>FB: bundle_hash
+    deactivate Relay
+
+    FB-->>LEE: bundle_hash
+    deactivate FB
+
+    loop 최대 20블록 대기 (4분)
+        LEE->>Relay: GET /relay/v1/bundle_status
+        activate Relay
+        Relay-->>LEE: status (pending/included/rejected)
+        deactivate Relay
+
+        alt status == included
+            LEE->>LEE: update_execution_stats(success)
+            LEE-->>LEE: SubmissionResult{success=true, profit_realized}
+        else status == rejected
+            LEE-->>LEE: SubmissionResult{success=false, error}
+        end
+    end
+
+    deactivate LEE
+```
 
 ---
 
-**End of Document**
+## 🔒 프라이빗 제출 vs 퍼블릭 폴백 플로우
+
+### 9️⃣ MEV-lite 프라이빗 제출
+
+```mermaid
+sequenceDiagram
+    participant OCLS as OnChainLiquidationStrategy
+    participant FB as Flashbots
+    participant Beaver as BeaverBuild
+    participant Titan as TitanBuilder
+    participant Mempool as Public Mempool
+
+    OCLS->>OCLS: execute_liquidation_with_mev_lite(opportunity)
+    activate OCLS
+
+    OCLS->>OCLS: create_liquidation_transaction()
+    OCLS->>OCLS: calculate_dynamic_tip() // 예상 수익의 20%
+
+    Note over OCLS,Titan: 프라이빗 제출 시도 (멀티 릴레이)
+
+    OCLS->>FB: try_private_relay("flashbots-protect", tx, tip)
+    activate FB
+    FB-->>OCLS: PrivateSubmissionResult{success=true/false}
+    deactivate FB
+
+    alt Flashbots 성공
+        OCLS-->>OCLS: ✅ 프라이빗 제출 성공
+    else Flashbots 실패
+        OCLS->>Beaver: try_private_relay("beaver-build", tx, tip)
+        activate Beaver
+        Beaver-->>OCLS: PrivateSubmissionResult{success=true/false}
+        deactivate Beaver
+
+        alt BeaverBuild 성공
+            OCLS-->>OCLS: ✅ 프라이빗 제출 성공
+        else BeaverBuild 실패
+            OCLS->>Titan: try_private_relay("titan-builder", tx, tip)
+            activate Titan
+            Titan-->>OCLS: PrivateSubmissionResult{success=true/false}
+            deactivate Titan
+
+            alt TitanBuilder 성공
+                OCLS-->>OCLS: ✅ 프라이빗 제출 성공
+            else 모든 릴레이 실패
+                Note over OCLS,Mempool: 퍼블릭 폴백 시도
+
+                OCLS->>OCLS: broadcast_public_liquidation(tx)
+                OCLS->>Mempool: eth_sendRawTransaction(signed_tx)
+                activate Mempool
+                Mempool-->>OCLS: tx_hash
+                deactivate Mempool
+
+                OCLS-->>OCLS: ⚠️ 퍼블릭 브로드캐스트 완료
+            end
+        end
+    end
+
+    deactivate OCLS
+```
+
+---
+
+## 💰 Flashloan 청산 실행 플로우
+
+### 🔟 Aave Flashloan 청산 상세 과정
+
+```mermaid
+sequenceDiagram
+    participant LEE as LiquidationExecutionEngine
+    participant AavePool as Aave Pool
+    participant LiquidationContract as LiquidationStrategy Contract
+    participant User as User Account
+    participant DEX as DEX Aggregator
+    participant Owner as Bot Owner
+
+    LEE->>AavePool: flashLoanSimple(contract, asset, amount, params, 0)
+    activate AavePool
+
+    AavePool->>LiquidationContract: executeOperation(asset, amount, premium, initiator, params)
+    activate LiquidationContract
+
+    Note over LiquidationContract: 1. 청산 실행
+    LiquidationContract->>AavePool: liquidationCall(collateral, debt, user, amount, false)
+    activate AavePool
+    AavePool->>User: transfer collateral to contract
+    activate User
+    User-->>AavePool: collateral transferred
+    deactivate User
+    AavePool-->>LiquidationContract: liquidation successful
+    deactivate AavePool
+
+    Note over LiquidationContract: 2. 담보 판매
+    LiquidationContract->>DEX: swap(collateral, debt, collateral_amount)
+    activate DEX
+    DEX-->>LiquidationContract: debt_tokens_received
+    deactivate DEX
+
+    Note over LiquidationContract: 3. Flashloan 상환
+    LiquidationContract->>AavePool: repay(amount + premium)
+    AavePool-->>LiquidationContract: repayment successful
+
+    Note over LiquidationContract: 4. 수익 전송
+    LiquidationContract->>Owner: transfer(profit)
+    activate Owner
+    Owner-->>LiquidationContract: profit received
+    deactivate Owner
+
+    LiquidationContract-->>AavePool: executeOperation completed
+    deactivate LiquidationContract
+
+    AavePool-->>LEE: flashloan completed
+    deactivate AavePool
+
+    LEE->>LEE: update_execution_stats()
+```
+
+---
+
+## 🔄 DEX Aggregator 스왑 플로우
+
+### 1️⃣1️⃣ 0x Protocol + 1inch 폴백
+
+```mermaid
+sequenceDiagram
+    participant LSV2 as LiquidationStrategyV2
+    participant ZeroX as 0x Protocol
+    participant OneInch as 1inch
+    participant DEX as DEX Router
+    participant BC as Blockchain
+
+    LSV2->>LSV2: collect_swap_quotes(user)
+    activate LSV2
+
+    Note over LSV2,ZeroX: 0x Protocol 우선 시도
+    LSV2->>ZeroX: get_quote(sell_token, buy_token, sell_amount)
+    activate ZeroX
+    ZeroX->>DEX: find_best_route()
+    activate DEX
+    DEX-->>ZeroX: optimal_route
+    deactivate DEX
+    ZeroX-->>LSV2: SwapQuote{to, data, allowanceTarget, price_impact}
+    deactivate ZeroX
+
+    alt 0x 성공
+        LSV2->>LSV2: select_best_quote(quotes)
+        Note right of LSV2: 최소 슬리피지 선택
+    else 0x 실패
+        Note over LSV2,OneInch: 1inch 폴백 시도
+        LSV2->>OneInch: get_quote(sell_token, buy_token, sell_amount)
+        activate OneInch
+        OneInch->>DEX: find_best_route()
+        activate DEX
+        DEX-->>OneInch: optimal_route
+        deactivate DEX
+        OneInch-->>LSV2: SwapQuote{to, data, allowanceTarget, price_impact}
+        deactivate OneInch
+
+        LSV2->>LSV2: select_best_quote(quotes)
+    end
+
+    LSV2->>BC: execute_swap(quote)
+    activate BC
+    BC->>DEX: call swap function
+    activate DEX
+    DEX-->>BC: swap completed
+    deactivate DEX
+    BC-->>LSV2: swap successful
+    deactivate BC
+
+    LSV2-->>LSV2: update_swap_stats()
+    deactivate LSV2
+```
+
+---
+
+## ⚡ 경쟁 분석 및 가스 최적화 플로우
+
+### 1️⃣2️⃣ 실시간 경쟁 분석
+
+```mermaid
+sequenceDiagram
+    participant MempoolWatcher as MempoolWatcher
+    participant GasAnalyzer as GasAnalyzer
+    participant CompetitionAnalyzer as CompetitionAnalyzer
+    participant GasOptimizer as GasOptimizer
+    participant LEE as LiquidationExecutionEngine
+
+    MempoolWatcher->>MempoolWatcher: watch_pending_transactions()
+    activate MempoolWatcher
+
+    loop 각 새 트랜잭션
+        MempoolWatcher->>MempoolWatcher: is_liquidation_tx(tx)
+        
+        alt 청산 트랜잭션 감지
+            MempoolWatcher->>GasAnalyzer: analyze_gas_price(tx)
+            activate GasAnalyzer
+            GasAnalyzer-->>MempoolWatcher: gas_analysis
+            deactivate GasAnalyzer
+
+            MempoolWatcher->>CompetitionAnalyzer: analyze_competition(tx)
+            activate CompetitionAnalyzer
+            CompetitionAnalyzer-->>MempoolWatcher: competition_level
+            deactivate CompetitionAnalyzer
+
+            MempoolWatcher->>GasOptimizer: adjust_gas_strategy(analysis)
+            activate GasOptimizer
+            GasOptimizer->>GasOptimizer: calculate_optimal_gas()
+            GasOptimizer-->>MempoolWatcher: optimal_gas_price
+            deactivate GasOptimizer
+
+            MempoolWatcher->>LEE: update_gas_strategy(optimal_gas)
+            activate LEE
+            LEE->>LEE: apply_gas_adjustment()
+            deactivate LEE
+        end
+    end
+
+    deactivate MempoolWatcher
+```
+
+### 1️⃣3️⃣ 동적 가스 가격 조정
+
+```mermaid
+sequenceDiagram
+    participant GasOptimizer as GasOptimizer
+    participant BC as Blockchain
+    participant TrendAnalyzer as TrendAnalyzer
+    participant CompetitionAnalyzer as CompetitionAnalyzer
+    participant LEE as LiquidationExecutionEngine
+
+    GasOptimizer->>BC: get_current_gas_price()
+    activate BC
+    BC-->>GasOptimizer: (base_fee, priority_fee)
+    deactivate BC
+
+    GasOptimizer->>TrendAnalyzer: analyze_gas_trends()
+    activate TrendAnalyzer
+    TrendAnalyzer->>BC: get_historical_gas_prices()
+    activate BC
+    BC-->>TrendAnalyzer: historical_data
+    deactivate BC
+    TrendAnalyzer-->>GasOptimizer: trend_analysis
+    deactivate TrendAnalyzer
+
+    GasOptimizer->>CompetitionAnalyzer: get_competition_level()
+    activate CompetitionAnalyzer
+    CompetitionAnalyzer-->>GasOptimizer: competition_score
+    deactivate CompetitionAnalyzer
+
+    GasOptimizer->>GasOptimizer: calculate_aggressiveness(urgency, competition)
+    Note right of GasOptimizer: urgency × 0.6 + competition × 0.4
+
+    GasOptimizer->>GasOptimizer: adjust_priority_fee(aggressiveness)
+    Note right of GasOptimizer: priority_fee + (1 + aggressiveness) × 2 gwei
+
+    GasOptimizer->>GasOptimizer: calculate_max_fee()
+    Note right of GasOptimizer: base_fee + priority_fee × 2
+
+    GasOptimizer->>LEE: apply_gas_strategy(max_fee, priority_fee)
+    activate LEE
+    LEE->>LEE: update_transaction_gas()
+    deactivate LEE
+```
+
+---
+
+## 🚨 에러 처리 및 복구 플로우
+
+### 1️⃣4️⃣ 청산 실행 실패 처리
+
+```mermaid
+sequenceDiagram
+    participant LEE as LiquidationExecutionEngine
+    participant BC as Blockchain
+    participant ErrorHandler as ErrorHandler
+    participant RetryManager as RetryManager
+    participant FallbackStrategy as FallbackStrategy
+
+    LEE->>LEE: execute_liquidation_bundle(bundle)
+    activate LEE
+
+    LEE->>BC: submit_transaction(tx)
+    activate BC
+    BC-->>LEE: transaction_result
+    deactivate BC
+
+    alt 트랜잭션 실패
+        LEE->>ErrorHandler: handle_execution_error(error)
+        activate ErrorHandler
+
+        ErrorHandler->>ErrorHandler: classify_error(error)
+        Note right of ErrorHandler: 가스 부족, 슬리피지 초과,<br/>경쟁자 선점 등
+
+        alt 가스 부족 에러
+            ErrorHandler->>RetryManager: retry_with_higher_gas()
+            activate RetryManager
+            RetryManager->>LEE: retry_with_adjusted_gas()
+            deactivate RetryManager
+        else 슬리피지 초과 에러
+            ErrorHandler->>FallbackStrategy: use_alternative_dex()
+            activate FallbackStrategy
+            FallbackStrategy->>LEE: retry_with_different_dex()
+            deactivate FallbackStrategy
+        else 경쟁자 선점 에러
+            ErrorHandler->>LEE: skip_opportunity()
+            Note right of LEE: 다음 기회로 넘어감
+        else 기타 에러
+            ErrorHandler->>LEE: log_error_and_skip()
+        end
+
+        deactivate ErrorHandler
+    else 트랜잭션 성공
+        LEE->>LEE: update_success_stats()
+    end
+
+    deactivate LEE
+```
+
+### 1️⃣5️⃣ DEX Aggregator 실패 처리
+
+```mermaid
+sequenceDiagram
+    participant LSV2 as LiquidationStrategyV2
+    participant ZeroX as 0x Protocol
+    participant OneInch as 1inch
+    participant FallbackDEX as Fallback DEX
+    participant ErrorHandler as ErrorHandler
+
+    LSV2->>ZeroX: get_swap_quote()
+    activate ZeroX
+    ZeroX-->>LSV2: error_response
+    deactivate ZeroX
+
+    LSV2->>ErrorHandler: handle_dex_error(error)
+    activate ErrorHandler
+
+    ErrorHandler->>ErrorHandler: classify_dex_error(error)
+    Note right of ErrorHandler: API 키 오류, Rate Limit,<br/>지원하지 않는 토큰 쌍 등
+
+    alt API 키 오류
+        ErrorHandler->>LSV2: use_fallback_aggregator()
+        LSV2->>OneInch: get_swap_quote()
+        activate OneInch
+        OneInch-->>LSV2: swap_quote
+        deactivate OneInch
+    else Rate Limit 오류
+        ErrorHandler->>LSV2: wait_and_retry()
+        Note right of LSV2: 1초 대기 후 재시도
+    else 지원하지 않는 토큰 쌍
+        ErrorHandler->>LSV2: use_alternative_route()
+        LSV2->>FallbackDEX: find_alternative_route()
+        activate FallbackDEX
+        FallbackDEX-->>LSV2: alternative_quote
+        deactivate FallbackDEX
+    else 기타 오류
+        ErrorHandler->>LSV2: skip_opportunity()
+        Note right of LSV2: 해당 기회 건너뛰기
+    end
+
+    deactivate ErrorHandler
+```
+
+---
+
+## 📊 성능 모니터링 플로우
+
+### 1️⃣6️⃣ 실시간 성능 추적
+
+```mermaid
+sequenceDiagram
+    participant ILM as IntegratedLiquidationManager
+    participant MetricsCollector as MetricsCollector
+    participant StatsCalculator as StatsCalculator
+    participant Dashboard as Dashboard
+    participant AlertManager as AlertManager
+
+    ILM->>MetricsCollector: collect_execution_metrics()
+    activate MetricsCollector
+
+    MetricsCollector->>MetricsCollector: track_opportunities_detected()
+    MetricsCollector->>MetricsCollector: track_bundles_submitted()
+    MetricsCollector->>MetricsCollector: track_bundles_included()
+    MetricsCollector->>MetricsCollector: track_profit_realized()
+
+    MetricsCollector-->>ILM: raw_metrics
+    deactivate MetricsCollector
+
+    ILM->>StatsCalculator: calculate_performance_stats(raw_metrics)
+    activate StatsCalculator
+
+    StatsCalculator->>StatsCalculator: calculate_success_rate()
+    StatsCalculator->>StatsCalculator: calculate_avg_profit()
+    StatsCalculator->>StatsCalculator: calculate_uptime()
+    StatsCalculator->>StatsCalculator: calculate_efficiency()
+
+    StatsCalculator-->>ILM: performance_stats
+    deactivate StatsCalculator
+
+    ILM->>Dashboard: update_dashboard(performance_stats)
+    activate Dashboard
+    Dashboard-->>ILM: dashboard_updated
+    deactivate Dashboard
+
+    ILM->>AlertManager: check_alert_conditions(performance_stats)
+    activate AlertManager
+
+    alt 성공률 < 50%
+        AlertManager->>ILM: trigger_alert("Low success rate")
+    else 수익 < 임계값
+        AlertManager->>ILM: trigger_alert("Low profitability")
+    else 시스템 오류
+        AlertManager->>ILM: trigger_alert("System error")
+    end
+
+    deactivate AlertManager
+    deactivate ILM
+```
+
+---
+
+## 🎯 결론
+
+이 문서는 DeFi 청산 전략의 모든 주요 시나리오를 시퀀스 다이어그램으로 상세히 설명합니다. 각 다이어그램은:
+
+1. **실제 컴포넌트 간 상호작용**을 정확히 반영
+2. **외부 서비스와의 통신**을 포함
+3. **에러 처리 및 복구 로직**을 명시
+4. **성능 최적화 전략**을 시각화
+
+이를 통해 개발자는 청산 시스템의 전체적인 흐름을 이해하고, 각 단계에서 발생할 수 있는 문제점을 파악할 수 있습니다.
+
+---
+
+**마지막 업데이트**: 2025-01-06  
+**문서 버전**: v2.2  
+**구현 완성도**: 98% (Production Ready)

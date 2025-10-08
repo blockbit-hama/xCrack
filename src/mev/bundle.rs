@@ -1,8 +1,9 @@
 use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use ethers::{
-    types::{Transaction, H256, U256, Address, Bytes, TransactionRequest, NameOrAddress},
+    types::{Address, H256, U256, Bytes, Transaction, TransactionRequest, NameOrAddress},
     signers::{LocalWallet, Signer},
+    providers::{Provider, Ws, Middleware},
 };
 use tracing::{info, debug};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -13,7 +14,7 @@ use crate::blockchain::BlockchainClient;
 use crate::types::OpportunityType;
 
 /// MEV 번들
-/// 
+///
 /// 여러 트랜잭션을 하나의 원자적 실행 단위로 묶어서 MEV를 추출하는 핵심 구조
 #[derive(Debug, Clone)]
 pub struct Bundle {
@@ -24,6 +25,10 @@ pub struct Bundle {
     pub optimization_info: OptimizationInfo,
     pub validation_status: ValidationStatus,
     pub creation_time: SystemTime,
+    /// EIP-1559 max priority fee per gas
+    pub max_priority_fee_per_gas: Option<U256>,
+    /// EIP-1559 max fee per gas
+    pub max_fee_per_gas: Option<U256>,
 }
 
 /// 번들 메타데이터
@@ -229,6 +234,8 @@ impl Bundle {
             optimization_info: OptimizationInfo::default(),
             validation_status: ValidationStatus::Pending,
             creation_time: SystemTime::now(),
+            max_priority_fee_per_gas: None,
+            max_fee_per_gas: None,
         }
     }
 

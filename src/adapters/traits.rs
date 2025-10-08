@@ -1,5 +1,5 @@
 use anyhow::Result;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -32,6 +32,8 @@ pub enum AdapterError {
 /// 견적 정보
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Quote {
+    /// DEX 타입
+    pub dex_type: DexType,
     /// 입력 토큰 주소
     pub token_in: Address,
     /// 출력 토큰 주소
@@ -40,18 +42,32 @@ pub struct Quote {
     pub amount_in: U256,
     /// 예상 출력 수량
     pub amount_out: U256,
-    /// 최소 출력 수량 (슬리피지 고려)
+    /// 최소 출력 수량 (슬리피지 고려, optional for compatibility)
+    #[serde(default)]
     pub amount_out_min: U256,
-    /// 가격 영향 (0.0 ~ 1.0)
+    /// 가격 영향 (basis points, optional for compatibility)
+    #[serde(default)]
+    pub price_impact_bps: u64,
+    /// 가격 영향 (0.0 ~ 1.0, optional for compatibility)
+    #[serde(default)]
     pub price_impact: f64,
     /// 가스 추정량
     pub gas_estimate: u64,
-    /// 견적 유효 시간 (초)
+    /// 라우트 해시 (optional for compatibility)
+    #[serde(default)]
+    pub route_hash: Vec<u8>,
+    /// 견적 유효 시간 (초, optional for compatibility)
+    #[serde(default)]
     pub valid_for: u64,
-    /// 견적 생성 시간
+    /// 견적 생성 시간 (optional for compatibility)
+    #[serde(default)]
     pub timestamp: u64,
     /// 추가 메타데이터
+    #[serde(default)]
     pub metadata: HashMap<String, String>,
+    /// 추가 데이터 (for extra fields)
+    #[serde(default)]
+    pub extra_data: HashMap<String, String>,
 }
 
 /// 실행용 calldata 번들
@@ -59,10 +75,14 @@ pub struct Quote {
 pub struct CalldataBundle {
     /// 호출 대상 주소 (DEX 라우터 또는 집계기)
     pub to: Address,
+    /// 호출 대상 주소 (alias for compatibility)
+    pub target: Address,
     /// 승인 대상 주소 (집계기 사용 시 allowanceTarget)
     pub spender: Option<Address>,
     /// 실행할 calldata
     pub data: Vec<u8>,
+    /// 실행할 calldata (alias for compatibility)
+    pub calldata: Vec<u8>,
     /// 전송할 ETH 값 (대부분 0)
     pub value: U256,
     /// 가스 추정량
@@ -114,7 +134,7 @@ pub trait DexAdapter: Send + Sync {
 }
 
 /// DEX 타입
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DexType {
     /// Uniswap V2 (네이티브)
     UniswapV2,
@@ -122,6 +142,8 @@ pub enum DexType {
     UniswapV3,
     /// SushiSwap (네이티브)
     SushiSwap,
+    /// Sushiswap (alias for compatibility)
+    Sushiswap,
     /// 0x Protocol (애그리게이터)
     ZeroEx,
     /// 1inch (애그리게이터)
@@ -135,7 +157,7 @@ pub enum DexType {
 impl DexType {
     /// DEX가 네이티브 프로토콜인지 확인
     pub fn is_native(&self) -> bool {
-        matches!(self, DexType::UniswapV2 | DexType::UniswapV3 | DexType::SushiSwap | DexType::NativeRouter)
+        matches!(self, DexType::UniswapV2 | DexType::UniswapV3 | DexType::SushiSwap | DexType::Sushiswap | DexType::NativeRouter)
     }
     
     /// DEX가 애그리게이터인지 확인
@@ -146,7 +168,7 @@ impl DexType {
     /// 가스 비용 가중치 (네이티브가 더 저렴)
     pub fn gas_weight(&self) -> f64 {
         match self {
-            DexType::UniswapV2 | DexType::SushiSwap => 1.0,
+            DexType::UniswapV2 | DexType::Sushiswap | DexType::SushiSwap => 1.0,
             DexType::UniswapV3 => 1.1,  // V3는 약간 더 비쌈
             DexType::ZeroEx | DexType::OneInch => 1.3,  // 애그리게이터는 30% 더 비쌈
             DexType::NativeRouter => 1.0,  // 네이티브 라우터
@@ -169,12 +191,20 @@ impl DexType {
 pub struct FeeInfo {
     /// 거래 수수료 (basis points, 300 = 0.3%)
     pub trading_fee_bps: u32,
+    /// 수수료 (alias for compatibility)
+    #[serde(default)]
+    pub fee_bps: u32,
     /// 플랫폼 수수료 (basis points)
+    #[serde(default)]
     pub platform_fee_bps: u32,
     /// 총 수수료 (basis points)
+    #[serde(default)]
     pub total_fee_bps: u32,
     /// 수수료 수취자 주소
     pub fee_recipient: Option<Address>,
+    /// 수수료 수취자 (alias for compatibility)
+    #[serde(default)]
+    pub recipient: Option<Address>,
 }
 
 /// 어댑터 설정
@@ -182,6 +212,8 @@ pub struct FeeInfo {
 pub struct AdapterConfig {
     /// RPC URL
     pub rpc_url: String,
+    /// 라우터 주소 (for compatibility)
+    pub router_address: Address,
     /// API 키 (집계기용)
     pub api_key: Option<String>,
     /// 타임아웃 (초)
@@ -198,6 +230,7 @@ impl Default for AdapterConfig {
     fn default() -> Self {
         Self {
             rpc_url: "https://eth-mainnet.g.alchemy.com/v2/demo".to_string(),
+            router_address: Address::zero(),
             api_key: None,
             timeout_seconds: 30,
             max_retries: 3,
@@ -319,8 +352,8 @@ impl QuoteComparator {
         let mut differences = HashMap::new();
         for (name, quote) in &quotes {
             if name != best_adapter {
-                let diff = (best_quote.amount_out.to::<u128>() as f64 - quote.amount_out.to::<u128>() as f64)
-                    / quote.amount_out.to::<u128>() as f64 * 100.0;
+                let diff = (best_quote.amount_out.as_u128() as f64 - quote.amount_out.as_u128() as f64)
+                    / quote.amount_out.as_u128() as f64 * 100.0;
                 differences.insert(name.clone(), diff);
             }
         }

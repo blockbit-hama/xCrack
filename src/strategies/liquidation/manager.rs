@@ -1,10 +1,11 @@
+use ethers::types::{Address, U256};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn, error};
-use alloy::primitives::Address;
 use ethers::providers::{Provider, Ws};
+use ethers::middleware::Middleware;
 use tokio::time::{interval, Duration};
 use tokio::sync::RwLock;
 
@@ -65,8 +66,8 @@ impl IntegratedLiquidationManager {
         ));
 
         // 포지션 분석기 초기화
-        let min_profit_eth = alloy::primitives::U256::from(
-            (config.liquidation.min_profit_threshold_usd * 1e18 / 2800.0) as u64 // ETH 가격 2800 USD 가정
+        let min_profit_eth = U256::from(
+            (config.liquidation.min_profit_threshold_usd.unwrap_or(100.0) * 1e18 / 2800.0) as u64 // ETH 가격 2800 USD 가정
         );
         let health_factor_threshold = 1.0; // 청산 임계값
         let position_analyzer = Arc::new(PositionAnalyzer::new(min_profit_eth, health_factor_threshold));
@@ -191,21 +192,76 @@ impl IntegratedLiquidationManager {
         let protocol_summary = self.protocol_scanner.lock().await.get_liquidation_summary().await?;
 
         // 각 프로토콜에 대해 고위험 사용자 조회 및 분석
-        for protocol in protocol_summary.protocols {
+        for (protocol_type, protocol_data) in &protocol_summary.protocol_breakdown {
             // 고위험 사용자 목록 가져오기
-            let high_risk_users = self.get_high_risk_users_for_protocol(&protocol).await?;
+            // LendingProtocolInfo 생성
+            let protocol_info = crate::strategies::liquidation::types::LendingProtocolInfo {
+                protocol_type: match protocol_type {
+                    crate::protocols::ProtocolType::Aave => crate::strategies::liquidation::types::ProtocolType::Aave,
+                    crate::protocols::ProtocolType::CompoundV2 => crate::strategies::liquidation::types::ProtocolType::Compound,
+                    crate::protocols::ProtocolType::MakerDAO => crate::strategies::liquidation::types::ProtocolType::MakerDAO,
+                    crate::protocols::ProtocolType::CompoundV3 => crate::strategies::liquidation::types::ProtocolType::Compound,
+                },
+                lending_pool_address: Address::zero(),
+                name: format!("{:?}", protocol_type),
+                liquidation_fee: 500, // 5% 기본값
+                min_health_factor: 1.0,
+                price_oracle_address: Some(Address::zero()),
+                supported_assets: vec![],
+            };
+            let high_risk_users = self.get_high_risk_users_for_protocol(&protocol_info).await?;
 
             // 각 사용자에 대해 포지션 분석
             for user_address in high_risk_users {
-                let opportunity = match protocol.protocol_type {
-                    crate::strategies::liquidation::types::ProtocolType::Aave => {
-                        self.position_analyzer.analyze_aave_position(user_address, &protocol).await?
+                let opportunity = match protocol_type {
+                    crate::protocols::ProtocolType::Aave => {
+                        // LendingProtocolInfo를 생성해야 함
+                        let protocol_info = crate::strategies::liquidation::types::LendingProtocolInfo {
+                            protocol_type: crate::strategies::liquidation::types::ProtocolType::Aave,
+                            lending_pool_address: Address::zero(), // 실제 주소로 교체 필요
+                            name: "Aave".to_string(),
+                            liquidation_fee: 500,
+                            min_health_factor: 1.0,
+                            price_oracle_address: Some(Address::zero()),
+                            supported_assets: vec![],
+                        };
+                        self.position_analyzer.analyze_aave_position(user_address, &protocol_info).await?
                     }
-                    crate::strategies::liquidation::types::ProtocolType::Compound => {
-                        self.position_analyzer.analyze_compound_position(user_address, &protocol).await?
+                    crate::protocols::ProtocolType::CompoundV2 => {
+                        let protocol_info = crate::strategies::liquidation::types::LendingProtocolInfo {
+                            protocol_type: crate::strategies::liquidation::types::ProtocolType::Compound,
+                            lending_pool_address: Address::zero(),
+                            name: "Compound".to_string(),
+                            liquidation_fee: 500,
+                            min_health_factor: 1.0,
+                            price_oracle_address: Some(Address::zero()),
+                            supported_assets: vec![],
+                        };
+                        self.position_analyzer.analyze_compound_position(user_address, &protocol_info).await?
                     }
-                    crate::strategies::liquidation::types::ProtocolType::MakerDAO => {
-                        self.position_analyzer.analyze_maker_position(user_address, &protocol).await?
+                    crate::protocols::ProtocolType::MakerDAO => {
+                        let protocol_info = crate::strategies::liquidation::types::LendingProtocolInfo {
+                            protocol_type: crate::strategies::liquidation::types::ProtocolType::MakerDAO,
+                            lending_pool_address: Address::zero(),
+                            name: "MakerDAO".to_string(),
+                            liquidation_fee: 500,
+                            min_health_factor: 1.0,
+                            price_oracle_address: Some(Address::zero()),
+                            supported_assets: vec![],
+                        };
+                        self.position_analyzer.analyze_maker_position(user_address, &protocol_info).await?
+                    }
+                    crate::protocols::ProtocolType::CompoundV3 => {
+                        let protocol_info = crate::strategies::liquidation::types::LendingProtocolInfo {
+                            protocol_type: crate::strategies::liquidation::types::ProtocolType::Compound,
+                            lending_pool_address: Address::zero(),
+                            name: "CompoundV3".to_string(),
+                            liquidation_fee: 500,
+                            min_health_factor: 1.0,
+                            price_oracle_address: Some(Address::zero()),
+                            supported_assets: vec![],
+                        };
+                        self.position_analyzer.analyze_compound_position(user_address, &protocol_info).await?
                     }
                 };
 
@@ -233,7 +289,7 @@ impl IntegratedLiquidationManager {
     }
 
     /// 특정 프로토콜의 고위험 사용자 목록 가져오기
-    async fn get_high_risk_users_for_protocol(&self, _protocol: &LendingProtocolInfo) -> Result<Vec<alloy::primitives::Address>> {
+    async fn get_high_risk_users_for_protocol(&self, _protocol: &LendingProtocolInfo) -> Result<Vec<Address>> {
         // 실제로는 다음 방법으로 가져와야 함:
         // 1. 이벤트 로그에서 최근 거래한 사용자들
         // 2. 서브그래프 API (The Graph)
@@ -291,7 +347,7 @@ impl IntegratedLiquidationManager {
         // 현재는 간단한 시뮬레이션 결과 반환
         let success = opportunity.success_probability > 0.5;
         let profit_realized = if success {
-            Some((opportunity.net_profit.to::<u128>() as f64) / 1e18)
+            Some((opportunity.net_profit.as_u128() as f64) / 1e18)
         } else {
             None
         };
@@ -299,11 +355,12 @@ impl IntegratedLiquidationManager {
         Ok(BundleExecutionResult {
             bundle_id: format!("liq_{:?}_{}", opportunity.target_user, target_block),
             success,
+            transaction_hash: if success { Some(ethers::types::H256::random()) } else { None },
+            execution_time_ms: 100, // 시뮬레이션 시간
             profit_realized,
-            gas_used: Some(opportunity.gas_cost.to::<u128>() as f64 / 1e18),
+            gas_used: Some((opportunity.gas_cost.as_u128() as f64 / 1e18) as u64),
             error_message: if !success { Some("Simulation failed".to_string()) } else { None },
             block_number: Some(target_block),
-            timestamp: chrono::Utc::now(),
         })
     }
     
@@ -396,29 +453,45 @@ impl IntegratedLiquidationManager {
     }
     
     /// 특정 사용자 청산 시도
-    pub async fn liquidate_user(&self, user_address: alloy::primitives::Address) -> Result<BundleExecutionResult> {
+    pub async fn liquidate_user(&self, user_address: Address) -> Result<BundleExecutionResult> {
         info!("🎯 Attempting to liquidate user: {}", user_address);
 
         // 프로토콜 스캐너에서 프로토콜 정보 가져오기
         let protocol_summary = self.protocol_scanner.lock().await.get_liquidation_summary().await?;
 
         // 모든 프로토콜에서 해당 사용자 분석
-        for protocol in protocol_summary.protocols {
-            let opportunity = match protocol.protocol_type {
-                crate::strategies::liquidation::types::ProtocolType::Aave => {
-                    self.position_analyzer.analyze_aave_position(user_address, &protocol).await?
+        for (protocol_type, protocol_data) in &protocol_summary.protocol_breakdown {
+            // LendingProtocolInfo 생성
+            let protocol_info = crate::strategies::liquidation::types::LendingProtocolInfo {
+                protocol_type: match protocol_type {
+                    crate::protocols::ProtocolType::Aave => crate::strategies::liquidation::types::ProtocolType::Aave,
+                    crate::protocols::ProtocolType::CompoundV2 => crate::strategies::liquidation::types::ProtocolType::Compound,
+                    crate::protocols::ProtocolType::MakerDAO => crate::strategies::liquidation::types::ProtocolType::MakerDAO,
+                    crate::protocols::ProtocolType::CompoundV3 => crate::strategies::liquidation::types::ProtocolType::Compound,
+                },
+                lending_pool_address: Address::zero(),
+                name: format!("{:?}", protocol_type),
+                liquidation_fee: 500,
+                min_health_factor: 1.0,
+                price_oracle_address: Some(Address::zero()),
+                supported_assets: vec![],
+            };
+            
+            let opportunity = match protocol_type {
+                crate::protocols::ProtocolType::Aave => {
+                    self.position_analyzer.analyze_aave_position(user_address, &protocol_info).await?
                 }
-                crate::strategies::liquidation::types::ProtocolType::Compound => {
-                    self.position_analyzer.analyze_compound_position(user_address, &protocol).await?
+                crate::protocols::ProtocolType::CompoundV2 | crate::protocols::ProtocolType::CompoundV3 => {
+                    self.position_analyzer.analyze_compound_position(user_address, &protocol_info).await?
                 }
-                crate::strategies::liquidation::types::ProtocolType::MakerDAO => {
-                    self.position_analyzer.analyze_maker_position(user_address, &protocol).await?
+                crate::protocols::ProtocolType::MakerDAO => {
+                    self.position_analyzer.analyze_maker_position(user_address, &protocol_info).await?
                 }
             };
 
             if let Some(opp) = opportunity {
                 info!("💰 Found liquidation opportunity for {}: ${:.2} profit",
-                      user_address, (opp.net_profit.to::<u128>() as f64) / 1e18);
+                      user_address, (opp.net_profit.as_u128() as f64) / 1e18);
 
                 // 현재 블록 번호 가져오기
                 let current_block = self.provider.get_block_number().await?.as_u64();
@@ -446,7 +519,7 @@ impl IntegratedLiquidationManager {
 
         // 총 잠재 수익 계산
         let total_potential_profit: f64 = opportunities.iter()
-            .map(|opp| (opp.net_profit.to::<u128>() as f64) / 1e18)
+            .map(|opp| (opp.net_profit.as_u128() as f64) / 1e18)
             .sum();
 
         // 프로토콜별 분류

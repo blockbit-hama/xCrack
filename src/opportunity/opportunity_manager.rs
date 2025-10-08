@@ -2,7 +2,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::RwLock;
 use tracing::{info, debug};
-use alloy::primitives::U256;
+use ethers::types::U256;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 

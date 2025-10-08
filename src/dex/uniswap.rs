@@ -1,6 +1,6 @@
 use anyhow::Result;
 use tracing::info;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use async_trait::async_trait;
 
 use super::{DexAggregator, SwapQuote, SwapParams, DexType, SwapSource};
@@ -71,8 +71,8 @@ impl UniswapV2Aggregator {
         
         let dummy_calldata = format!(
             "0x38ed1739{:064x}{:064x}{:064x}{:064x}{:064x}",
-            params.sell_amount.to::<u128>(),
-            params.sell_amount.to::<u128>() * 95 / 100, // minAmountOut
+            params.sell_amount.as_u128(),
+            params.sell_amount.as_u128() * 95 / 100, // minAmountOut
             0u128, // sell_token address placeholder
             0u128, // buy_token address placeholder
             chrono::Utc::now().timestamp() + 300 // deadline (5분 후)
@@ -180,8 +180,8 @@ impl UniswapV3Aggregator {
             500, // fee tier (0.05%)
             0u128, // recipient placeholder
             chrono::Utc::now().timestamp() + 300, // deadline
-            params.sell_amount.to::<u128>(),
-            params.sell_amount.to::<u128>() * 95 / 100, // amountOutMinimum
+            params.sell_amount.as_u128(),
+            params.sell_amount.as_u128() * 95 / 100, // amountOutMinimum
             0 // sqrtPriceLimitX96
         );
         
@@ -223,16 +223,16 @@ mod tests {
     
     #[tokio::test]
     async fn test_uniswap_v2_aggregator() {
-        let router = Address::ZERO;
-        let factory = Address::ZERO;
+        let router = Address::zero();
+        let factory = Address::zero();
         let aggregator = UniswapV2Aggregator::new(router, factory);
         assert!(aggregator.is_available());
     }
     
     #[tokio::test]
     async fn test_uniswap_v3_aggregator() {
-        let router = Address::ZERO;
-        let factory = Address::ZERO;
+        let router = Address::zero();
+        let factory = Address::zero();
         let aggregator = UniswapV3Aggregator::new(router, factory);
         assert!(aggregator.is_available());
     }

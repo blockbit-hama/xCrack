@@ -1,7 +1,7 @@
 use super::traits::*;
 use super::{UniswapV2Adapter, UniswapV3Adapter, SushiswapAdapter, ZeroExAdapter, OneInchAdapter};
 use anyhow::Result;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use std::collections::HashMap;
 use tracing::{debug, warn, info};
 
@@ -221,8 +221,8 @@ impl DexAdapterFactory {
         let mut differences = HashMap::new();
         for (name, quote) in &quotes {
             if name != best_adapter {
-                let diff = (best_quote.amount_out.to::<u128>() as f64 - quote.amount_out.to::<u128>() as f64)
-                    / quote.amount_out.to::<u128>() as f64 * 100.0;
+                let diff = (best_quote.amount_out.as_u128() as f64 - quote.amount_out.as_u128() as f64)
+                    / quote.amount_out.as_u128() as f64 * 100.0;
                 differences.insert(name.clone(), diff);
             }
         }

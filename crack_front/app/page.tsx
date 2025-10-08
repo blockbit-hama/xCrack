@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
 import { Chart } from "../components/ui/chart";
+import { Skeleton } from "../components/ui/skeleton";
 import { motion } from 'framer-motion';
 import { Activity, TrendingUp, DollarSign, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 
@@ -39,6 +40,7 @@ export default function Page() {
     },
     recommendations: []
   });
+  const [loading, setLoading] = useState(true);
 
   // 차트 데이터 생성
   const generateChartData = () => {
@@ -62,6 +64,7 @@ export default function Page() {
   // 데이터 로드
   useEffect(() => {
     const loadData = async () => {
+      setLoading(true);
       try {
         const [statusData, bundlesData, recentData, reportData] = await Promise.all([
           getStatus(),
@@ -76,6 +79,9 @@ export default function Page() {
         setReport(reportData);
       } catch (error) {
         console.error('데이터 로드 실패:', error);
+        // 에러가 발생해도 기본값으로 설정된 상태를 유지
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -89,6 +95,52 @@ export default function Page() {
   const successRate = status.success_rate * 100;
   const uptimeHours = Math.floor(status.uptime_seconds / 3600);
   const uptimeMinutes = Math.floor((status.uptime_seconds % 3600) / 60);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        {/* 헤더 스켈레톤 */}
+        <div className="border-b pb-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Skeleton className="h-8 w-64 mb-2" />
+              <Skeleton className="h-4 w-80" />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Skeleton className="w-3 h-3 rounded-full" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+          </div>
+        </div>
+
+        {/* 카드 스켈레톤 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-4" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-8 w-16 mb-2" />
+                <Skeleton className="h-3 w-24" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {/* 차트 스켈레톤 */}
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-6 w-32" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-64 w-full" />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

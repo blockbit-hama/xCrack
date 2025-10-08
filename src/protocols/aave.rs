@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, error};
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use ethers::{
     providers::{Provider, Ws, Middleware},
     contract::Contract,
@@ -201,7 +201,7 @@ impl AaveScanner {
                 
                 collateral_positions.push(CollateralPosition {
                     asset: Address::from_slice(&asset.0),
-                    amount: U256::from_limbs_slice(&current_atoken_balance.0),
+                    amount: crate::common::abi::u256_from_ethers_internal(current_atoken_balance.0),
                     usd_value: collateral_usd,
                     liquidation_threshold: current_liquidation_threshold.as_u128() as f64 / 1e4,
                     price_usd,
@@ -215,7 +215,7 @@ impl AaveScanner {
                 
                 debt_positions.push(DebtPosition {
                     asset: Address::from_slice(&asset.0),
-                    amount: U256::from_limbs_slice(&total_debt.0),
+                    amount: crate::common::abi::u256_from_ethers_internal(total_debt.0),
                     usd_value: debt_usd,
                     borrow_rate: 0.0, // TODO: Get from reserve data
                     price_usd,
@@ -223,7 +223,7 @@ impl AaveScanner {
                 
                 // Calculate max liquidatable amount (50% of debt for most assets)
                 let close_factor = 0.5;
-                let max_liquidatable = U256::from_limbs_slice(&(total_debt * EthersU256::from((close_factor * 1e18) as u128) / EthersU256::from(1e18 as u128)).0);
+                let max_liquidatable = total_debt * U256::from((close_factor * 1e18) as u128) / U256::from(1e18 as u128);
                 max_liquidatable_debt.insert(Address::from_slice(&asset.0), max_liquidatable);
                 
                 // Get liquidation bonus (typically 5-10%)
@@ -320,7 +320,7 @@ impl ProtocolScanner for AaveScanner {
     }
     
     async fn get_user_data(&self, user: Address) -> Result<Option<LiquidatableUser>> {
-        let h160_user = H160::from_slice(user.as_slice());
+        let h160_user = H160::from_slice(user.as_bytes());
         self.get_user_account_data_detailed(h160_user).await
     }
     

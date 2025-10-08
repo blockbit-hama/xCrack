@@ -7,12 +7,12 @@ use anyhow::Result;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{info, debug, error, warn};
 use ethers::providers::{Provider, Ws, Middleware, StreamExt};
-use ethers::types::{Transaction as EthersTransaction, BlockNumber, H256, Address as EthersAddress};
+use ethers::types::{Transaction as EthersTransaction, BlockNumber, H256, Address as EthersAddress, Address, U256};
 use serde::Serialize;
 
 use crate::config::Config;
 use crate::types::Transaction;
-use crate::utils::abi::ABICodec;
+use crate::ABICodec;
 
 /// 멤풀 트랜잭션 분류
 #[derive(Debug, Clone, PartialEq)]
@@ -509,25 +509,25 @@ impl MempoolMonitor {
         let timestamp = chrono::Utc::now();
         
         Ok(Transaction {
-            hash: alloy::primitives::B256::from_slice(&tx.hash.0),
-            from: alloy::primitives::Address::from_slice(&tx.from.0),
-            to: tx.to.map(|addr| alloy::primitives::Address::from_slice(&addr.0)),
+            hash: H256::from_slice(&tx.hash.0),
+            from: Address::from_slice(&tx.from.0),
+            to: tx.to.map(|addr| Address::from_slice(&addr.0)),
             value: {
                 let mut bytes = [0u8; 32];
                 tx.value.to_big_endian(&mut bytes);
-                alloy::primitives::U256::from_be_bytes(bytes)
+                U256::from_big_endian(&bytes)
             },
             gas_price: {
                 let gas_price = tx.gas_price.unwrap_or_default();
                 let mut bytes = [0u8; 32];
                 gas_price.to_big_endian(&mut bytes);
-                alloy::primitives::U256::from_be_bytes(bytes)
+                U256::from_big_endian(&bytes)
             },
             gas_limit: {
                 let gas = tx.gas;
                 let mut bytes = [0u8; 32];
                 gas.to_big_endian(&mut bytes);
-                alloy::primitives::U256::from_be_bytes(bytes)
+                U256::from_big_endian(&bytes)
             },
             data: tx.input.to_vec(),
             nonce: tx.nonce.as_u64(),

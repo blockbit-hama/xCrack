@@ -3,7 +3,7 @@ use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::Deserialize;
 use tracing::debug;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use async_trait::async_trait;
 
 use super::{DexAggregator, DexType, SwapQuote, SwapParams, SwapSource};
@@ -198,7 +198,7 @@ impl DexAggregator for ZeroXAggregator {
         } else {
             // Calculate min amount based on slippage tolerance
             let slippage_multiplier = 1.0 - params.slippage_tolerance;
-            let min_amount_f64 = buy_amount.to::<u128>() as f64 * slippage_multiplier;
+            let min_amount_f64 = buy_amount.as_u128() as f64 * slippage_multiplier;
             U256::from(min_amount_f64 as u128)
         };
         
@@ -262,7 +262,7 @@ impl DexAggregator for ZeroXAggregator {
     async fn get_liquidity(&self, _token: Address) -> Result<U256> {
         // 0x doesn't provide direct liquidity data
         // We could estimate based on recent quotes, but for now return 0
-        Ok(U256::ZERO)
+        Ok(U256::zero())
     }
     
     fn aggregator_type(&self) -> DexType {
@@ -282,7 +282,7 @@ impl DexAggregator for ZeroXAggregator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::primitives::Address;
+    use ethers::types::Address;
     
     #[tokio::test]
     async fn test_0x_quote() {

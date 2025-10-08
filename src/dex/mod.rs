@@ -6,7 +6,7 @@ pub mod uniswap;
 pub use ox_api::*;
 pub use oneinch_api::*;
 
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use serde::{Deserialize, Serialize};
 use async_trait::async_trait;
 

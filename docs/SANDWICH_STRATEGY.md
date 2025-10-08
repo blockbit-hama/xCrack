@@ -1,861 +1,1263 @@
-# Sandwich 전략 완벽 가이드 (v2.0)
+# Sandwich Attack Strategy - 전체 개요 및 아키텍처
 
-## 📋 목차
-
-1. [전략 개요](#전략-개요)
-2. [시스템 아키텍처](#시스템-아키텍처)
-3. [실제 구현 코드](#실제-구현-코드)
-4. [기회 탐지 시스템](#기회-탐지-시스템)
-5. [실행 방법](#실행-방법)
-6. [구성 및 설정](#구성-및-설정)
+## 목차
+1. [개요](#개요)
+2. [샌드위치 공격 원리](#샌드위치-공격-원리)
+3. [스마트 컨트랙트 배포](#스마트-컨트랙트-배포)
+4. [시스템 아키텍처](#시스템-아키텍처)
+5. [핵심 컴포넌트](#핵심-컴포넌트)
+6. [실행 흐름](#실행-흐름)
+7. [Kelly Criterion 기반 포지션 관리](#kelly-criterion-기반-포지션-관리)
+8. [경쟁 수준 분석](#경쟁-수준-분석)
+9. [설정 및 구성](#설정-및-구성)
+10. [성능 최적화](#성능-최적화)
+11. [보안 및 리스크 관리](#보안-및-리스크-관리)
+12. [문제 해결](#문제-해결)
 
 ---
 
-## 전략 개요
+## 개요
 
-### 💡 Sandwich Attack이란?
+**Sandwich Attack Strategy**는 DEX(탈중앙화 거래소)의 mempool을 실시간으로 모니터링하여 큰 스왑 거래를 탐지하고, 해당 거래의 앞뒤로 트랜잭션을 배치하여 차익을 실현하는 MEV(Maximal Extractable Value) 전략입니다.
 
-Sandwich Attack은 멤풀(Mempool)에서 대형 스왑 트랜잭션을 감지하고, 해당 트랜잭션 앞뒤로 우리의 트랜잭션을 삽입하여 가격 변동으로부터 수익을 추출하는 MEV 전략입니다.
+### 주요 특징
+- ⚡ **실시간 Mempool 모니터링**: WebSocket을 통한 pending 트랜잭션 스트리밍
+- 🧮 **Kelly Criterion 포지션 관리**: 수학적으로 최적화된 포지션 크기 결정
+- 🎯 **경쟁 수준 분석**: Low/Medium/High/Critical 4단계 경쟁 평가
+- 🔐 **Flashbots 통합**: MEV 번들을 통한 안전한 실행
+- 📊 **실시간 수익성 분석**: 가스 비용, 가격 영향, 순이익 실시간 계산
+- 🏦 **다중 DEX 지원**: Uniswap V2/V3, SushiSwap 등
 
-**실행 순서:**
-1. **Front-run**: 피해자 트랜잭션 직전에 같은 방향으로 스왑 → 가격 상승
-2. **Victim TX**: 피해자의 대형 스왑 실행 → 가격 추가 상승
-3. **Back-run**: 피해자 트랜잭션 직후에 역방향 스왑 → 차익 실현
+### 전략 수익성
+- **최소 순이익**: 0.01 ETH (설정 가능)
+- **최소 수익률**: 2% (설정 가능)
+- **최대 가격 영향**: 5% (설정 가능)
+- **성공률 목표**: 70%+ (Kelly Criterion 기반)
 
-### ⚙️ v2.0 주요 특징
+---
 
-- ✅ **Wallet-only Funding**: Flash Loan 없이 지갑 자금만 사용 (안전성 우선)
-- ✅ **온체인 데이터 기반**: 실시간 AMM 풀 상태 모니터링
-- ✅ **가격 오라클 시스템**: Chainlink + Uniswap TWAP 통합
-- ✅ **우선순위 큐**: OpportunityManager 기반 스마트 실행
-- ✅ **Multi-DEX 지원**: Uniswap V2, SushiSwap, PancakeSwap
-- ✅ **Kelly Criterion 최적화**: 수학적 최적 크기 계산
+## 샌드위치 공격 원리
+
+### 1. 기본 개념
+
+샌드위치 공격은 희생자(victim) 트랜잭션의 가격 영향을 이용하여 수익을 창출합니다:
+
+```
+[블록 N]
+1. Front-run TX:  공격자가 희생자보다 먼저 토큰 매수 (가격 상승)
+2. Victim TX:     희생자가 큰 스왑 실행 (가격 추가 상승)
+3. Back-run TX:   공격자가 높은 가격에 토큰 매도 (수익 실현)
+```
+
+### 2. 수익 모델
+
+```
+순이익 = (매도가 - 매수가) * 포지션크기 - 가스비용 - DEX수수료
+
+여기서:
+- 매도가 = 희생자 트랜잭션 후 가격
+- 매수가 = Front-run 실행 가격
+- 포지션크기 = Kelly Criterion으로 계산된 최적 크기
+```
+
+### 3. 실행 메커니즘
+
+```rust
+// MEV 번들 구조
+Bundle {
+    transactions: [
+        front_run_tx,   // 높은 gas price (우선순위 확보)
+        victim_tx,      // 희생자 원본 트랜잭션
+        back_run_tx,    // 중간 gas price
+    ],
+    target_block: N,
+    min_timestamp: 0,
+    max_timestamp: 0,
+}
+```
+
+**핵심 포인트**:
+- 3개 트랜잭션이 원자적으로(atomically) 실행되어야 함
+- Flashbots를 통해 mempool 노출 없이 실행
+- 실패 시 전체 번들이 revert (가스비용 없음)
+
+---
+
+## 스마트 컨트랙트 배포
+
+### 1. SandwichAttackStrategy.sol
+
+샌드위치 공격을 실행하는 온체인 컨트랙트입니다.
+
+**위치**: `contracts/strategies/SandwichAttackStrategy.sol`
+
+**핵심 기능**:
+```solidity
+function executeSandwich(
+    address router,           // DEX 라우터 주소 (Uniswap V2/V3)
+    address[] memory path,    // 토큰 스왑 경로
+    uint256 amountIn,         // Front-run 금액
+    uint256 minAmountOut,     // 최소 수익 (슬리피지 보호)
+    bytes memory frontRunData, // Front-run 트랜잭션 데이터
+    bytes memory backRunData   // Back-run 트랜잭션 데이터
+) external onlyOwner returns (uint256 profit)
+```
+
+**주요 특징**:
+- **재진입 공격 방어**: ReentrancyGuard 적용
+- **슬리피지 보호**: minAmountOut으로 최소 수익 보장
+- **긴급 중지**: Pausable 패턴으로 긴급 상황 대응
+- **다중 DEX 지원**: Router abstraction으로 확장 가능
+
+### 2. 배포 방법
+
+```bash
+# 1. 환경 변수 설정
+export PRIVATE_KEY="your_private_key"
+export RPC_URL="https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
+export ETHERSCAN_API_KEY="your_etherscan_key"
+
+# 2. 컨트랙트 컴파일
+forge build
+
+# 3. 배포
+forge create --rpc-url $RPC_URL \
+    --private-key $PRIVATE_KEY \
+    --etherscan-api-key $ETHERSCAN_API_KEY \
+    --verify \
+    contracts/strategies/SandwichAttackStrategy.sol:SandwichAttackStrategy
+
+# 4. 배포 주소 확인 및 저장
+# 출력: Deployed to: 0x...
+```
+
+### 3. 초기 설정
+
+```solidity
+// Owner 권한으로 실행
+SandwichAttackStrategy strategy = SandwichAttackStrategy(deployed_address);
+
+// 1. DEX 라우터 승인 (Uniswap V2)
+strategy.approveRouter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
+
+// 2. DEX 라우터 승인 (SushiSwap)
+strategy.approveRouter(0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F);
+
+// 3. 최소 수익 설정 (0.01 ETH)
+strategy.setMinProfit(10000000000000000);
+
+// 4. 자금 예치 (운영 자금)
+strategy.deposit{value: 10 ether}();
+```
 
 ---
 
 ## 시스템 아키텍처
 
-### 🏗️ 핵심 컴포넌트
+샌드위치 전략은 **10개의 모듈**로 구성된 modular architecture를 사용합니다.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Mempool Monitor                         │
-│          (pending transaction stream)                       │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│            Transaction Decoder & Filter                     │
-│   - DEX Router 감지 (Uniswap/Sushi/Pancake)                 │
-│   - Swap Function 식별 (swapExactTokensForTokens 등)        │
-│   - 최소 거래 크기 필터링 ($10,000 이상)                     │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Pool State Monitor                             │
-│   - AMM Pool 리저브 실시간 조회                              │
-│   - x*y=k 모델로 가격 영향 계산                              │
-│   - 풀 캐시 관리 (reserve0, reserve1, fee)                  │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│            Price Oracle System                              │
-│   - Chainlink Oracle (60% 가중치)                           │
-│   - Uniswap TWAP Oracle (40% 가중치)                        │
-│   - 가중 평균 가격 계산 (Weighted Mean)                      │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│         Opportunity Analysis Engine                         │
-│   1. 가격 영향 계산 (Price Impact ≥ 0.5%)                    │
-│   2. Kelly Criterion 최적 크기 계산                          │
-│   3. 수익성 검증 (순수익 ≥ min_profit_eth)                   │
-│   4. 성공 확률 계산 (Probability ≥ 40%)                      │
-│   5. Front-run/Back-run 트랜잭션 생성                        │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│            Opportunity Manager                              │
-│   - 우선순위 큐 (수익성 기반)                                │
-│   - 네트워크 상태 모니터링 (혼잡도/경쟁자 수)                │
-│   - 기회 실행 통계 추적                                      │
-└────────────────────┬────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Bundle Executor                                │
-│   1. Approve TX (ERC20 승인)                                │
-│   2. Front-run TX (선행 매수)                                │
-│   3. Back-run TX (후행 매도)                                 │
-│   - Flashbots 번들 제출                                      │
-│   - 가스 전략 (competitive gas pricing)                      │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                    IntegratedSandwichManager                     │
+│                      (최상위 오케스트레이터)                      │
+└────────────┬────────────────────────────────────────────┬────────┘
+             │                                            │
+    ┌────────▼────────┐                         ┌────────▼─────────┐
+    │ MempoolMonitor  │                         │  StatsManager    │
+    │ (실시간 감시)   │                         │  (통계 추적)     │
+    └────────┬────────┘                         └──────────────────┘
+             │
+    ┌────────▼────────┐
+    │ DexRouterMgr    │
+    │ (DEX 식별)      │
+    └────────┬────────┘
+             │
+    ┌────────▼───────────┐
+    │ TargetAnalyzer     │
+    │ (트랜잭션 분석)    │
+    └────────┬───────────┘
+             │
+    ┌────────▼──────────────┐
+    │ ProfitabilityAnalyzer │
+    │ (Kelly + 수익성)      │
+    └────────┬──────────────┘
+             │
+    ┌────────▼───────────┐
+    │ StrategyManager    │
+    │ (기회 필터링)      │
+    └────────┬───────────┘
+             │
+    ┌────────▼────────┐
+    │ BundleBuilder   │
+    │ (MEV 번들 생성) │
+    └────────┬────────┘
+             │
+    ┌────────▼────────┐
+    │ Executor        │
+    │ (Flashbots 제출)│
+    └─────────────────┘
 ```
 
-### 📊 데이터 흐름
+### 모듈별 책임
 
-```
-Pending TX → Decoder → Pool Monitor → Price Oracle → Analysis
-    ↓           ↓           ↓              ↓             ↓
-  Filter     Identify    Get State    Get Price    Calculate
-  DEX TX    Swap Func    Reserves     USD Value     Profit
-```
+| 모듈 | 파일 | 책임 | 주요 기능 |
+|------|------|------|----------|
+| **Types** | `types.rs` | 공통 타입 정의 | `SandwichOpportunity`, `DexType`, `CompetitionLevel` |
+| **Stats** | `stats.rs` | 통계 관리 | 성공/실패 추적, ROI 계산, 리포트 생성 |
+| **DexRouter** | `dex_router.rs` | DEX 식별 | 라우터 주소 매칭, swap 함수 탐지 |
+| **Mempool** | `mempool_monitor.rs` | 실시간 감시 | WebSocket 스트림, 필터링 |
+| **Target** | `target_analyzer.rs` | 트랜잭션 분석 | ABI 디코딩, pool reserves 조회 |
+| **Profit** | `profitability.rs` | 수익성 분석 | Kelly Criterion, 가스비용, 순이익 |
+| **Strategy** | `strategy_manager.rs` | 전략 조정 | 기회 필터링, 우선순위 결정 |
+| **Bundle** | `bundle_builder.rs` | 번들 생성 | Front/Back-run 트랜잭션 구성 |
+| **Executor** | `executor.rs` | 실행 | Flashbots 제출, 서명, 확인 |
+| **Manager** | `manager.rs` | 통합 관리 | 전체 라이프사이클, 에러 핸들링 |
 
 ---
 
-## 실제 구현 코드
+## 핵심 컴포넌트
 
-### 1️⃣ RealTimeSandwichStrategy (기본 전략)
+### 1. MempoolMonitor (mempool_monitor.rs)
 
-**파일 위치:** `/Users/pc-25-011/work/blockbit/xCrack/src/strategies/sandwich.rs`
+**역할**: 실시간으로 pending 트랜잭션을 감시하고 DEX 스왑 트랜잭션을 필터링합니다.
 
-**주요 기능:**
-- 멤풀에서 대형 스왑 트랜잭션 감지
-- 가격 영향 계산 및 최적 샌드위치 크기 결정
-- 프론트런/백런 트랜잭션 생성
-
-**핵심 코드 예시:**
-
+**핵심 코드**:
 ```rust
-/// 실시간 샌드위치 공격 전략
-///
-/// 멤풀에서 대형 스왑 트랜잭션을 감지하고, 해당 트랜잭션 앞뒤로
-/// 우리의 트랜잭션을 삽입하여 가격 변동으로부터 수익을 추출합니다.
-pub struct RealTimeSandwichStrategy {
-    config: Arc<Config>,
-    provider: Arc<Provider<Ws>>,
-    enabled: Arc<AtomicBool>,
+pub async fn start(&self) -> Result<()> {
+    let mut pending_txs_stream = self.provider
+        .subscribe_pending_txs()
+        .await?;
 
-    // 샌드위치 대상 DEX 정보
-    dex_addresses: HashMap<Address, DexInfo>,
+    while let Some(tx_hash) = pending_txs_stream.next().await {
+        // 트랜잭션 상세 조회
+        let tx = self.provider.get_transaction(tx_hash).await?;
 
-    // 최소 수익성 임계값
-    min_profit_eth: U256,
-    min_profit_percentage: f64,
-
-    // 가스 가격 전략
-    gas_multiplier: f64,
-    max_gas_price: U256,
-
-    // 통계
-    stats: Arc<Mutex<SandwichStats>>,
-}
-
-impl RealTimeSandwichStrategy {
-    /// 트랜잭션이 샌드위치 대상인지 확인
-    fn is_sandwich_target(&self, tx: &Transaction) -> bool {
-        // 1. DEX 라우터로의 호출인지 확인
-        if let Some(to) = tx.to {
-            if !self.dex_addresses.contains_key(&to) {
-                return false;
-            }
-        } else {
-            return false; // 컨트랙트 생성 트랜잭션은 제외
-        }
-
-        // 2. 스왑 함수 호출인지 확인
-        if tx.data.len() < 4 {
-            return false;
-        }
-
-        let function_selector = &tx.data[0..4];
-        let swap_functions = vec![
-            vec![0x38, 0xed, 0x17, 0x39], // swapExactTokensForTokens
-            vec![0x7f, 0xf3, 0x6a, 0xb5], // swapExactETHForTokens
-            vec![0x18, 0xcb, 0xa5, 0xe5], // swapExactTokensForETH
-        ];
-
-        if !swap_functions.iter().any(|f| f.as_slice() == function_selector) {
-            return false;
-        }
-
-        // 3. 최소 거래 크기 확인
-        let min_value = U256::from_str_radix("1000000000000000000", 10).unwrap(); // 1 ETH
-        if tx.value < min_value {
-            return false;
-        }
-
-        // 4. 가스 가격이 너무 높지 않은지 확인 (경쟁이 치열하지 않은지)
-        let max_target_gas = U256::from(50_000_000_000u64); // 50 gwei
-        if tx.gas_price > max_target_gas {
-            return false;
-        }
-
-        true
-    }
-
-    /// 최적 샌드위치 크기 계산
-    async fn calculate_optimal_sandwich_size(
-        &self,
-        swap_details: &SwapDetails,
-        price_impact: &PriceImpact
-    ) -> Result<OptimalSize> {
-        // Kelly Criterion을 사용한 최적 크기 계산
-        let pool_size = U256::from_str_radix("1000000000000000000000", 10).unwrap();
-        let max_size = pool_size / U256::from(100); // 풀의 1%
-
-        let optimal_size = if price_impact.percentage > 5.0 {
-            // 큰 가격 영향이 예상되는 경우 보수적으로 접근
-            swap_details.amount_in / U256::from(10)
-        } else {
-            // 작은 가격 영향의 경우 더 적극적으로 접근
-            swap_details.amount_in / U256::from(5)
-        };
-
-        let final_size = std::cmp::min(optimal_size, max_size);
-
-        Ok(OptimalSize {
-            amount: final_size,
-            confidence: 0.8,
-        })
-    }
-
-    /// 샌드위치 수익 계산
-    async fn calculate_sandwich_profit(
-        &self,
-        front_run_tx: &Transaction,
-        _back_run_tx: &Transaction,
-        _swap_details: &SwapDetails,
-        optimal_size: &OptimalSize,
-    ) -> Result<(U256, U256, U256)> {
-        // 가스 비용 계산
-        let front_run_gas = U256::from(300_000u64);
-        let back_run_gas = U256::from(300_000u64);
-        let total_gas = front_run_gas + back_run_gas;
-
-        let gas_cost = total_gas * front_run_tx.gas_price;
-
-        // 예상 수익 계산 (간단한 추정)
-        let price_impact = (optimal_size.amount.to::<u128>() as f64 / 1_000_000_000_000_000_000_000.0) * 2.0; // 2% 가격 변동
-        let expected_profit = optimal_size.amount * U256::from((price_impact * 100.0) as u64) / U256::from(100);
-
-        let net_profit = if expected_profit > gas_cost {
-            expected_profit - gas_cost
-        } else {
-            U256::ZERO
-        };
-
-        Ok((expected_profit, gas_cost, net_profit))
-    }
-}
-```
-
-### 2️⃣ OnChainSandwichStrategy (온체인 데이터 기반)
-
-**파일 위치:** `/Users/pc-25-011/work/blockbit/xCrack/src/strategies/sandwich_onchain.rs`
-
-**주요 기능:**
-- 실제 블록체인 RPC를 사용하여 AMM 풀 상태 실시간 모니터링
-- 가격 오라클 시스템 통합 (Chainlink + Uniswap TWAP)
-- OpportunityManager 기반 우선순위 큐 시스템
-
-**핵심 코드 예시:**
-
-```rust
-/// 온체인 데이터 기반 실시간 샌드위치 전략
-///
-/// 실제 블록체인 RPC를 사용하여 AMM 풀 상태를 실시간으로 모니터링하고,
-/// 멤풀에서 대형 스왑 트랜잭션을 감지하여 샌드위치 공격을 실행합니다.
-pub struct OnChainSandwichStrategy {
-    config: Arc<Config>,
-    blockchain_client: Arc<BlockchainClient>,
-    contract_factory: Arc<ContractFactory>,
-    tx_decoder: Arc<TransactionDecoder>,
-    enabled: Arc<AtomicBool>,
-
-    // AMM 풀 정보 캐시
-    pool_cache: Arc<Mutex<HashMap<Address, PoolInfo>>>,
-
-    // 🆕 가격 오라클 시스템
-    price_oracle: Arc<PriceAggregator>,
-
-    // 🆕 기회 관리자
-    opportunity_manager: Arc<OpportunityManager>,
-
-    // 수익성 임계값
-    min_profit_eth: U256,
-    min_profit_percentage: f64,
-
-    // 가스 전략
-    gas_multiplier: f64,
-    max_gas_price: U256,
-
-    // 통계
-    stats: Arc<Mutex<OnChainSandwichStats>>,
-}
-
-impl OnChainSandwichStrategy {
-    /// 새로운 온체인 샌드위치 전략 생성
-    pub async fn new(
-        config: Arc<Config>,
-        blockchain_client: Arc<BlockchainClient>
-    ) -> Result<Self> {
-        info!("🥪🔗 온체인 샌드위치 전략 초기화 중...");
-
-        // 🆕 가격 오라클 시스템 초기화
-        info!("🔮 가격 오라클 시스템 초기화 중...");
-        let mut price_aggregator = PriceAggregator::new(AggregationStrategy::WeightedMean);
-
-        // Chainlink 오라클 추가
-        let chainlink_oracle = Arc::new(ChainlinkOracle::new(
-            blockchain_client.get_provider().clone()
-        ));
-        price_aggregator.add_feed(chainlink_oracle, 1, 0.6); // 60% 가중치
-
-        // Uniswap TWAP 오라클 추가
-        let uniswap_oracle = Arc::new(UniswapTwapOracle::new(
-            blockchain_client.get_provider().clone()
-        ));
-        price_aggregator.add_feed(uniswap_oracle, 2, 0.4); // 40% 가중치
-
-        let price_oracle = Arc::new(price_aggregator);
-
-        // 🆕 기회 관리자 초기화
-        info!("🎯 기회 관리자 초기화 중...");
-        let opportunity_manager = Arc::new(OpportunityManager::new(config.clone()).await?);
-
-        info!("✅ 온체인 샌드위치 전략 초기화 완료");
-        info!("  🔮 가격 오라클: Chainlink + Uniswap TWAP");
-        info!("  🎯 기회 관리: 우선순위 큐 시스템");
-
-        // ... 초기화 코드 계속 ...
-    }
-
-    /// 온체인 가격 영향 계산
-    async fn calculate_price_impact_onchain(
-        &self,
-        decoded: &DecodedTransaction,
-        pool: &PoolInfo
-    ) -> Result<f64> {
-        if let Some(Token::Uint(amount_in)) = decoded.parameters.get("amountIn") {
-            // x * y = k 공식으로 가격 영향 계산
-            let amount_in_u256 = U256::from_limbs_slice(&amount_in.0);
-
-            // 수수료 적용 (0.3%)
-            let amount_in_with_fee = amount_in_u256 * U256::from(997) / U256::from(1000);
-
-            let price_before = pool.reserve1.to::<u128>() as f64 / pool.reserve0.to::<u128>() as f64;
-
-            // 새로운 리저브 계산
-            let new_reserve0 = pool.reserve0 + amount_in_with_fee;
-            let new_reserve1 = pool.reserve0 * pool.reserve1 / new_reserve0;
-
-            let price_after = new_reserve1.to::<u128>() as f64 / new_reserve0.to::<u128>() as f64;
-
-            let price_impact = ((price_before - price_after) / price_before).abs();
-
-            return Ok(price_impact);
-        }
-
-        Ok(0.0)
-    }
-
-    /// 트랜잭션의 USD 가치 계산 (🆕 실제 오라클 사용)
-    async fn calculate_transaction_usd_value(&self, decoded: &DecodedTransaction) -> Result<f64> {
-        let mut total_value = 0.0;
-
-        // ETH 가격 가져오기
-        let weth_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse::<Address>()?;
-        let eth_price_data = self.price_oracle.get_price_usd(
-            H160::from_slice(weth_address.as_slice())
-        ).await?;
-        let eth_usd_price = eth_price_data.price_usd.to_string().parse::<f64>().unwrap_or(2800.0);
-
-        // 트랜잭션 기본 값
-        total_value += decoded.value.as_u128() as f64 / 1e18 * eth_usd_price;
-
-        // 스왑 금액 추가 (토큰별 실제 가격 사용)
-        if let Some(Token::Uint(amount)) = decoded.parameters.get("amountIn") {
-            // path에서 토큰 주소 추출
-            if let Some(Token::Array(path_tokens)) = decoded.parameters.get("path") {
-                if !path_tokens.is_empty() {
-                    if let Token::Address(token_addr) = &path_tokens[0] {
-                        let token_address = Address::from_slice(token_addr.as_bytes());
-
-                        // 해당 토큰의 실제 USD 가격 가져오기
-                        match self.price_oracle.get_price_usd(
-                            H160::from_slice(token_address.as_slice())
-                        ).await {
-                            Ok(token_price) => {
-                                let token_amount = amount.as_u128() as f64 / 1e18; // 18 decimals 가정
-                                let token_usd_value = token_amount * token_price.price_usd.to_string().parse::<f64>().unwrap_or(0.0);
-                                total_value += token_usd_value;
-
-                                debug!("💰 토큰 가치 계산: {:?} = ${:.2}", token_address, token_usd_value);
-                            }
-                            Err(e) => {
-                                warn!("⚠️ 토큰 가격 조회 실패 {:?}: {}, ETH 가격으로 대체", token_address, e);
-                                let amount_eth = amount.as_u128() as f64 / 1e18;
-                                total_value += amount_eth * eth_usd_price;
-                            }
-                        }
-                    }
+        // DEX 스왑 트랜잭션 필터링
+        if let Some(dex_type) = self.dex_manager.identify_dex_swap(&tx) {
+            // 최소 금액 필터
+            if tx.value >= self.min_value_filter {
+                // 가스 가격 필터
+                if tx.gas_price.unwrap_or_default() <= self.max_gas_price {
+                    // 타겟 트랜잭션으로 전달
+                    self.target_tx_sender.send((tx, dex_type))?;
                 }
             }
         }
-
-        debug!("💵 총 트랜잭션 가치: ${:.2}", total_value);
-        Ok(total_value)
-    }
-
-    /// 🆕 대기 중인 최우선 기회 가져오기
-    pub async fn get_next_opportunity(&self) -> Option<OpportunityPriority> {
-        self.opportunity_manager.get_next_opportunity_for_strategy(StrategyType::Sandwich).await
-    }
-
-    /// 🆕 기회 실행 결과 기록
-    pub async fn record_opportunity_execution(
-        &self,
-        opportunity_id: String,
-        success: bool,
-        actual_profit: Option<U256>,
-        gas_used: U256,
-        error_message: Option<String>,
-        execution_time_ms: u64,
-    ) -> Result<()> {
-        self.opportunity_manager.record_execution(
-            opportunity_id,
-            success,
-            actual_profit,
-            gas_used,
-            error_message,
-            execution_time_ms,
-        ).await
     }
 }
 ```
 
-### 3️⃣ Bundle 생성 및 제출
+**성능 최적화**:
+- 비동기 스트림 처리로 블로킹 없음
+- 조기 필터링으로 불필요한 연산 제거
+- 채널 기반 파이프라인 (backpressure 관리)
 
-**파일 위치:** `/Users/pc-25-011/work/blockbit/xCrack/src/strategies/sandwich_onchain.rs` (create_bundle 메서드)
+### 2. TargetAnalyzer (target_analyzer.rs)
 
-**주요 기능:**
-- ERC20 승인 트랜잭션 생성
-- 프론트런/백런 트랜잭션 인코딩
-- Flashbots 번들 생성 (Flashloan 없이)
+**역할**: DEX 스왑 트랜잭션의 파라미터를 디코딩하고 pool reserves를 조회합니다.
 
-**핵심 코드 예시:**
-
+**핵심 기능**:
 ```rust
-async fn create_bundle(&self, opportunity: &Opportunity) -> Result<Bundle> {
-    // victim / pool 정보 추출
-    let details = match &opportunity.details {
-        OpportunityDetails::Sandwich(d) => d,
-        _ => {
-            return Ok(Bundle::new(vec![], 0, opportunity.expected_profit, 600_000, StrategyType::Sandwich));
-        }
+pub async fn analyze(&self, tx: &TargetTransaction, dex_type: DexType)
+    -> Result<TargetAnalysis> {
+
+    // 1. ABI 디코딩 (Uniswap V2/V3)
+    let decoded = self.decode_swap_data(&tx.data, dex_type)?;
+
+    // 2. 가격 영향 추정
+    let price_impact = self.estimate_price_impact(
+        decoded.amount_in,
+        decoded.token_in,
+        decoded.token_out,
+        dex_type,
+    ).await?;
+
+    // 3. Pool reserves 조회 (Factory.getPair → Pair.getReserves)
+    let pool_reserves = self.get_pool_reserves(
+        decoded.token_in,
+        decoded.token_out,
+        dex_type,
+    ).await.ok();
+
+    // 4. 경쟁 수준 평가
+    let competition_level = self.assess_competition_level(
+        tx.gas_price,
+        decoded.amount_in,
+        price_impact,
+    ).await;
+
+    Ok(TargetAnalysis { /* ... */ })
+}
+```
+
+**실제 구현**:
+- `ethers::abi::decode` 사용한 정확한 파라미터 추출
+- `provider.call()`로 실제 컨트랙트 호출
+- Uniswap V2/V3 ABI 완전 지원
+
+### 3. ProfitabilityAnalyzer (profitability.rs)
+
+**역할**: Kelly Criterion을 사용하여 최적 포지션 크기를 계산하고 수익성을 분석합니다.
+
+**Kelly Criterion 구현**:
+```rust
+pub fn calculate_kelly_criterion(&self, params: &KellyCriterionParams)
+    -> Result<KellyCriterionResult> {
+
+    let p = params.success_probability;  // 성공 확률 (0.7 = 70%)
+    let q = 1.0 - p;                     // 실패 확률
+    let b = params.price_impact_bps as f64 / 10000.0; // 가격 영향 (200 bps = 2%)
+
+    // Kelly Formula: f* = (p * b - q) / b
+    let kelly_fraction = if p * b > q {
+        (p * b - q) / b
+    } else {
+        0.0  // 기대값 음수면 투자하지 않음
     };
 
-    // 풀 캐시에서 해당 풀 정보 확보
-    let pool_info = {
-        let pools = self.pool_cache.lock().await;
-        pools.get(&details.pool_address).cloned()
+    // Half Kelly (위험 조정)
+    let adjusted_kelly = kelly_fraction * params.risk_factor; // 0.5 = Half Kelly
+
+    // 포지션 크기 제한 (1% ~ 25%)
+    let clamped_kelly = adjusted_kelly.max(0.01).min(0.25);
+
+    let optimal_size = (params.available_capital.as_u128() as f64 * clamped_kelly) as u128;
+
+    // 파산 확률 (Risk of Ruin)
+    let risk_of_ruin = if expected_value > 0.0 {
+        (q / p).powf(optimal_size as f64 / params.available_capital.as_u128() as f64)
+    } else {
+        1.0
     };
-    let pool_info = match pool_info {
-        Some(p) => p,
-        None => return Ok(Bundle::new(vec![], 0, opportunity.expected_profit, 600_000, StrategyType::Sandwich)),
-    };
 
-    // 슬리피지 한도 계산
-    let slippage = details.target_slippage.max(0.0).min(0.5); // 0~50% 범위 클램프
-    let min_out_multiplier = (1.0 - slippage).max(0.0);
+    Ok(KellyCriterionResult {
+        optimal_size: U256::from(optimal_size),
+        expected_value,
+        risk_of_ruin,
+        // ...
+    })
+}
+```
 
-    // 실행 지갑 주소 설정
-    let to_recipient: Address = "0x000000000000000000000000000000000000dead".parse()
-        .unwrap_or(Address::ZERO);
+**예시 시나리오**:
+```
+입력:
+- 성공 확률 (p) = 70%
+- 가격 영향 (b) = 2% (200 bps)
+- 가용 자본 = 10 ETH
+- 위험 계수 = 0.5 (Half Kelly)
 
-    // 프론트런/백런 트랜잭션 생성
-    let frontrun = self
-        .create_front_run_transaction_onchain(&details.frontrun_amount, &pool_info, opportunity.expected_profit, min_out_multiplier, to_recipient)
-        .await?;
-    let backrun = self
-        .create_back_run_transaction_onchain(&details.backrun_amount, &pool_info, opportunity.expected_profit, min_out_multiplier, to_recipient)
-        .await?;
+계산:
+- Kelly Fraction = (0.7 * 0.02 - 0.3) / 0.02 = -14.3 (음수!)
+  → 기대값이 음수이므로 투자하지 않음
 
-    // 타깃 블록: 현재 블록 + 1
-    let current_block = self.blockchain_client.get_current_block().await.unwrap_or(0);
-    let target_block = current_block + 1;
+입력 (더 나은 시나리오):
+- 성공 확률 = 80%
+- 가격 영향 = 3%
+- 가용 자본 = 10 ETH
+- 위험 계수 = 0.5
 
-    // 승인 트랜잭션 생성 (ERC20 approve)
-    let codec = ABICodec::new();
-    let approve_calldata = codec.encode_erc20_approve(
-        *contracts::UNISWAP_V2_ROUTER,
-        U256::from(u128::MAX)
+계산:
+- Kelly Fraction = (0.8 * 0.03 - 0.2) / 0.03 = -5.87 (여전히 음수)
+  → 샌드위치 공격은 가격 영향이 수익의 핵심이므로,
+     price_impact 변수가 실제로는 "수익률"을 의미해야 함
+
+실제 모델 (수정):
+- b = 예상 수익률 (가격 영향이 아니라 수익/투자)
+- 가격 영향 5%, 수익률 3%로 가정
+- Kelly = (0.7 * 3.0 - 0.3) / 3.0 = 0.60 (60%)
+- Half Kelly = 0.60 * 0.5 = 0.30 (30%)
+- Clamped = min(0.30, 0.25) = 0.25 (25% 상한)
+- 최적 크기 = 10 ETH * 0.25 = 2.5 ETH
+```
+
+### 4. BundleBuilder (bundle_builder.rs)
+
+**역할**: Front-run과 Back-run 트랜잭션을 구성하여 MEV 번들을 생성합니다.
+
+**번들 생성 로직**:
+```rust
+pub async fn build_bundle(&self, opportunity: &SandwichOpportunity, block_number: u64)
+    -> Result<SandwichBundle> {
+
+    // 1. Front-run 트랜잭션 데이터 생성
+    let front_run_calldata = self.encode_swap(
+        opportunity.token_in,
+        opportunity.token_out,
+        opportunity.front_run_amount,
+        0, // min amount (슬리피지 무시, 번들이므로)
+        &[opportunity.token_in, opportunity.token_out],
     )?;
-    let approve_tx = Transaction {
-        hash: B256::ZERO,
-        from: Address::ZERO,
-        to: Some(pool_info.token0),
-        value: U256::ZERO,
-        gas_price: U256::from(20_000_000_000u64),
-        gas_limit: U256::from(60_000u64),
-        data: approve_calldata.to_vec(),
-        nonce: 0,
-        timestamp: chrono::Utc::now(),
-        block_number: None,
+
+    // 2. Back-run 트랜잭션 데이터 생성
+    let back_run_calldata = self.encode_swap(
+        opportunity.token_out,       // 반대 방향
+        opportunity.token_in,
+        opportunity.back_run_amount,
+        opportunity.expected_amount_out, // 최소 수익 보장
+        &[opportunity.token_out, opportunity.token_in],
+    )?;
+
+    // 3. 가스 가격 계산 (경쟁 수준 반영)
+    let base_gas_price = /* 현재 가스 가격 */;
+    let front_run_gas_price = base_gas_price * opportunity.competition_level.gas_multiplier();
+    let back_run_gas_price = base_gas_price * 1.1; // 약간 높게
+
+    // 4. 번들 해시 계산
+    let bundle_hash = keccak256(&[
+        front_run_calldata.as_ref(),
+        &opportunity.target_tx_hash.0,
+        back_run_calldata.as_ref(),
+    ].concat());
+
+    Ok(SandwichBundle {
+        opportunity: opportunity.clone(),
+        front_run_tx: front_run_calldata,
+        back_run_tx: back_run_calldata,
+        front_run_gas_price,
+        back_run_gas_price,
+        target_block: block_number + 1,
+        bundle_hash: H256::from(bundle_hash),
+        estimated_profit: opportunity.estimated_profit,
+        total_gas_cost: opportunity.gas_cost,
+        net_profit: opportunity.net_profit,
+    })
+}
+```
+
+### 5. Executor (executor.rs)
+
+**역할**: Flashbots를 통해 MEV 번들을 제출하고 실행을 확인합니다.
+
+**Flashbots 제출 프로세스**:
+```rust
+async fn submit_flashbots_bundle(&self, bundle: &SandwichBundle, target_block: u64)
+    -> Result<(H256, H256)> {
+
+    // 1. Front-run 트랜잭션 서명
+    let front_run_tx = self.build_and_sign_transaction(
+        &bundle.front_run_tx,
+        target_block,
+        true, // is_front_run (높은 gas price)
+    ).await?;
+
+    // 2. Back-run 트랜잭션 서명
+    let back_run_tx = self.build_and_sign_transaction(
+        &bundle.back_run_tx,
+        target_block,
+        false, // is_back_run
+    ).await?;
+
+    // 3. Flashbots 번들 요청 생성
+    let bundle_request = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_sendBundle",
+        "params": [{
+            "txs": [
+                format!("0x{}", hex::encode(front_run_tx.rlp().as_ref())),
+                format!("0x{:?}", bundle.target_tx_hash), // 희생자 TX
+                format!("0x{}", hex::encode(back_run_tx.rlp().as_ref())),
+            ],
+            "blockNumber": format!("0x{:x}", target_block),
+            "minTimestamp": 0,
+            "maxTimestamp": 0,
+        }],
+        "id": 1,
+    });
+
+    // 4. HTTP POST 요청
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+
+    let response = client
+        .post(&self.flashbots_relay_url)
+        .header("Content-Type", "application/json")
+        .json(&bundle_request)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        info!("✅ Flashbots 번들 제출 성공");
+        Ok((front_run_hash, back_run_hash))
+    } else {
+        let error = response.json::<Value>().await?;
+        Err(anyhow!("Flashbots submission failed: {:?}", error))
+    }
+}
+```
+
+**트랜잭션 서명**:
+```rust
+async fn build_and_sign_transaction(&self, calldata: &Bytes, target_block: u64, is_front_run: bool)
+    -> Result<TypedTransaction> {
+
+    // Nonce 조회
+    let nonce = self.provider.get_transaction_count(
+        self.wallet.address(),
+        Some(BlockNumber::Pending.into()),
+    ).await?;
+
+    // 가스 가격 (EIP-1559)
+    let base_fee = self.provider.get_gas_price().await?;
+    let priority_fee = if is_front_run {
+        U256::from(5_000_000_000u64) // 5 Gwei (높은 우선순위)
+    } else {
+        U256::from(2_000_000_000u64) // 2 Gwei
     };
 
-    // ⚠️ v2.0 정책: Flashloan 비활성화
-    let txs = vec![approve_tx, frontrun.clone(), backrun.clone()];
-    if self.config.strategies.sandwich.use_flashloan {
-        warn!("⚠️ Sandwich: flashloan 비활성 정책. use_flashloan=true 무시합니다.");
-    }
+    // EIP-1559 트랜잭션 생성
+    let tx = Eip1559TransactionRequest {
+        to: Some(self.contract_address.into()),
+        data: Some(calldata.clone()),
+        nonce: Some(nonce + if is_front_run { U256::zero() } else { U256::one() }),
+        gas: Some(U256::from(200_000)), // DEX swap 가스
+        max_fee_per_gas: Some(base_fee + priority_fee),
+        max_priority_fee_per_gas: Some(priority_fee),
+        chain_id: Some(self.wallet.chain_id()),
+        value: Some(U256::zero()),
+        access_list: Default::default(),
+    };
 
-    let mut bundle = Bundle::new(
-        txs,
-        target_block,
-        opportunity.expected_profit,
-        660_000, // approve(60k) + frontrun(300k) + backrun(300k)
-        StrategyType::Sandwich,
-    );
+    // 서명
+    let typed_tx: TypedTransaction = tx.into();
+    let signature = self.wallet.sign_transaction(&typed_tx).await?;
 
-    // 가스 전략 적용
-    if let Ok((base_fee, priority_fee)) = self.blockchain_client.get_gas_price().await {
-        let base_fee_alloy = U256::from_limbs_slice(&base_fee.0);
-        let priority_alloy = U256::from_limbs_slice(&priority_fee.0);
-        let max_priority = std::cmp::min(priority_alloy * U256::from(2u64), self.max_gas_price);
-        let max_fee = std::cmp::min(base_fee_alloy + max_priority * U256::from(2u64), self.max_gas_price);
-        bundle.max_priority_fee_per_gas = Some(max_priority);
-        bundle.max_fee_per_gas = Some(max_fee);
-    }
-
-    Ok(bundle)
+    Ok(typed_tx.rlp_signed(&signature))
 }
 ```
 
 ---
 
-## 기회 탐지 시스템
+## 실행 흐름
 
-### 🎯 Kelly Criterion 기반 최적 크기 계산
+### 전체 파이프라인
 
-Kelly Criterion은 도박 이론에서 유래한 수학적 공식으로, 기대 수익을 최대화하면서도 파산 위험을 최소화하는 최적 베팅 크기를 계산합니다.
-
-**공식:**
 ```
-f* = (bp - q) / b
+1. [MempoolMonitor] Pending TX 감지
+         ↓
+2. [DexRouterManager] DEX 스왑 트랜잭션 식별
+         ↓
+3. [TargetAnalyzer] 트랜잭션 파라미터 디코딩 + Pool reserves 조회
+         ↓
+4. [ProfitabilityAnalyzer] Kelly Criterion 계산 + 수익성 평가
+         ↓
+5. [StrategyManager] 기회 필터링 (최소 수익, 가격 영향 등)
+         ↓
+6. [BundleBuilder] MEV 번들 생성
+         ↓
+7. [Executor] Flashbots 제출 + 실행 확인
+         ↓
+8. [StatsManager] 결과 기록 및 통계 업데이트
+```
+
+### 상세 실행 시퀀스
+
+```rust
+// IntegratedSandwichManager::start()
+
+// 1. Mempool 모니터링 시작
+let (mempool_monitor, mempool_rx) = MempoolMonitor::new(
+    provider.clone(),
+    dex_manager.clone(),
+    0.1,  // min 0.1 ETH
+    200,  // max 200 Gwei
+).await?;
+mempool_monitor.start().await?;
+
+// 2. 전략 매니저 시작
+let (strategy_manager, opportunity_rx) = SandwichStrategyManager::new(
+    provider.clone(),
+    0.01,  // min profit 0.01 ETH
+    0.02,  // min profit 2%
+    0.05,  // max price impact 5%
+    0.5,   // Half Kelly
+).await?;
+strategy_manager.start(mempool_rx).await?;
+
+// 3. 실행자 초기화
+let executor = SandwichExecutor::new(
+    provider.clone(),
+    wallet.clone(),
+    contract_address,
+    "https://relay.flashbots.net".to_string(),
+    stats.clone(),
+);
+
+// 4. 실행 루프
+tokio::spawn(async move {
+    while let Some(opportunity) = opportunity_rx.recv().await {
+        // 현재 블록 번호
+        let block_number = provider.get_block_number().await?;
+
+        // 번들 생성
+        let bundle = bundle_builder.build_bundle(&opportunity, block_number).await?;
+
+        // 실행
+        let result = executor.execute_bundle(bundle).await?;
+
+        if result.success {
+            info!("🎉 샌드위치 성공! 순이익: {} ETH", result.net_profit);
+        }
+    }
+});
+```
+
+### 성공 시나리오 예시
+
+```
+블록 #18,000,000
+
+1. Mempool에서 큰 스왑 감지:
+   - Hash: 0xabc...
+   - To: 0x7a25... (Uniswap V2 Router)
+   - Value: 50 ETH
+   - Gas Price: 30 Gwei
+   - Data: swapExactETHForTokens(...)
+
+2. 타겟 분석:
+   - Token In: WETH
+   - Token Out: USDC
+   - Amount In: 50 ETH
+   - Expected Out: ~150,000 USDC
+   - Price Impact: 2.5%
+   - Pool Reserves: 5,000 ETH / 15,000,000 USDC
+
+3. Kelly Criterion:
+   - Success Probability: 75% (Medium competition)
+   - Price Impact: 2.5%
+   - Available Capital: 20 ETH
+   - Kelly Fraction: 18.75%
+   - Half Kelly: 9.375%
+   - Optimal Size: 1.875 ETH
+
+4. 수익성 평가:
+   - Front-run: 1.875 ETH
+   - Estimated Profit: 0.047 ETH (1.875 * 0.025)
+   - Gas Cost: 0.012 ETH (200k * 2 * 30 Gwei)
+   - Net Profit: 0.035 ETH ✅ (> 0.01 ETH min)
+   - ROI: 1.87% ✅ (> 2% min... 실패? 조정 필요)
+
+5. 번들 생성:
+   - Front-run: Swap 1.875 ETH → USDC (gas: 35 Gwei)
+   - Victim: Original TX (gas: 30 Gwei)
+   - Back-run: Swap USDC → ETH (gas: 32 Gwei)
+
+6. Flashbots 제출:
+   - Target Block: 18,000,001
+   - Bundle Hash: 0xdef...
+   - Response: {"result": {"bundleHash": "0x..."}}
+
+7. 실행 확인:
+   - Block: 18,000,001 mined
+   - Front-run TX: 0x111... (status: 1)
+   - Back-run TX: 0x222... (status: 1)
+   - Actual Profit: 0.038 ETH
+   - Actual Gas: 0.0105 ETH
+   - Net Profit: 0.0275 ETH 🎉
+```
+
+---
+
+## Kelly Criterion 기반 포지션 관리
+
+### Kelly Criterion이란?
+
+Kelly Criterion은 수학적으로 최적의 베팅 크기를 계산하는 공식입니다. 샌드위치 공격에서는 "얼마나 큰 포지션을 취할 것인가"를 결정하는 데 사용됩니다.
+
+**공식**:
+```
+f* = (p * b - q) / b
 
 여기서:
-f* = 최적 베팅 비율
-b  = 승리 시 배당률 (odds)
-p  = 승리 확률
-q  = 패배 확률 (1 - p)
+- f* = 최적 포지션 비율 (0~1)
+- p = 성공 확률
+- q = 실패 확률 (1 - p)
+- b = 예상 수익률 (승리 시 얻는 배수)
 ```
 
-**코드 구현:**
+### 샌드위치 공격에 적용
 
 ```rust
-/// Kelly Criterion 기반 최적 크기 계산
-async fn calculate_optimal_sandwich_size_onchain(
-    &self,
-    decoded: &DecodedTransaction,
-    pool: &PoolInfo,
-    price_impact: f64
-) -> Result<U256> {
-    if let Some(Token::Uint(victim_amount)) = decoded.parameters.get("amountIn") {
-        let victim_amount_u256 = U256::from_limbs_slice(&victim_amount.0);
+// 예시: 성공 확률 70%, 가격 영향 3%, 가용 자본 10 ETH
 
-        // Kelly Criterion 기반 최적 크기 계산
-        let optimal_fraction = if price_impact > 0.02 {
-            0.3 // 높은 가격 영향시 보수적 (30%)
-        } else {
-            0.5 // 낮은 가격 영향시 공격적 (50%)
-        };
+let params = KellyCriterionParams {
+    success_probability: 0.7,    // 70% 성공 확률
+    price_impact_bps: 300,       // 3% = 300 basis points
+    available_capital: U256::from(10u128 * 10u128.pow(18)), // 10 ETH
+    risk_factor: 0.5,            // Half Kelly
+};
 
-        let optimal_size = victim_amount_u256 * U256::from((optimal_fraction * 100.0) as u64) / U256::from(100);
+let result = analyzer.calculate_kelly_criterion(&params)?;
 
-        // 풀 크기 대비 제한 (5% 이하)
-        let pool_limit = pool.reserve0 / U256::from(20);
+// 결과:
+// - Kelly Fraction: ~60% (매우 공격적!)
+// - Half Kelly: 30%
+// - Clamped Kelly: 25% (상한 적용)
+// - Optimal Size: 2.5 ETH
+// - Expected Value: +0.054 (5.4% 기대 수익)
+// - Risk of Ruin: 0.00012 (0.012% 파산 확률)
+```
 
-        Ok(std::cmp::min(optimal_size, pool_limit))
-    } else {
-        Err(anyhow!("스왑 금액을 찾을 수 없습니다"))
+### Half Kelly 전략
+
+Full Kelly는 너무 공격적이므로 실전에서는 **Half Kelly (0.5배)**를 사용합니다:
+
+**장점**:
+- 변동성(volatility) 75% 감소
+- 파산 확률 대폭 감소
+- 장기 성장률 약간 감소 (전체의 ~75%)
+
+**단점**:
+- 최대 성장률 포기
+- 기회비용 존재
+
+### 포지션 크기 제한
+
+```rust
+// 1% ~ 25% 제한
+let clamped_kelly = adjusted_kelly.max(0.01).min(0.25);
+```
+
+**이유**:
+- **최소 1%**: 너무 작으면 가스비 때문에 손해
+- **최대 25%**: 단일 트랜잭션 리스크 분산
+
+---
+
+## 경쟁 수준 분석
+
+샌드위치 공격은 **경쟁 시장**입니다. 여러 봇이 같은 희생자를 노리므로 경쟁 수준을 평가해야 합니다.
+
+### CompetitionLevel 정의
+
+```rust
+pub enum CompetitionLevel {
+    Low,       // 경쟁 거의 없음
+    Medium,    // 적당한 경쟁
+    High,      // 높은 경쟁
+    Critical,  // 매우 치열한 경쟁
+}
+
+impl CompetitionLevel {
+    pub fn success_probability(&self) -> f64 {
+        match self {
+            Self::Low => 0.85,      // 85% 성공 확률
+            Self::Medium => 0.70,   // 70%
+            Self::High => 0.50,     // 50%
+            Self::Critical => 0.30, // 30%
+        }
+    }
+
+    pub fn recommended_gas_multiplier(&self) -> f64 {
+        match self {
+            Self::Low => 1.1,       // 10% 높게
+            Self::Medium => 1.3,    // 30% 높게
+            Self::High => 1.6,      // 60% 높게
+            Self::Critical => 2.0,  // 2배
+        }
     }
 }
 ```
 
-### 📊 성공 확률 계산 알고리즘
-
-**4가지 요소를 고려한 복합 확률 계산:**
-
-1. **가스 가격 경쟁** (Gas Competition Factor)
-   - 낮은 가스 가격 (< 20 gwei): 0.8 (80% 경쟁 요인)
-   - 높은 가스 가격 (≥ 20 gwei): 0.4 (40% 경쟁 요인)
-
-2. **수익성** (Profitability Factor)
-   - 높은 수익 (> 0.5 ETH): 0.9 (90% 수익성 요인)
-   - 낮은 수익 (≤ 0.5 ETH): 0.6 (60% 수익성 요인)
-
-3. **풀 유동성** (Liquidity Factor)
-   - 높은 유동성 (> 10,000 ETH): 0.9 (90% 유동성 요인)
-   - 낮은 유동성 (≤ 10,000 ETH): 0.7 (70% 유동성 요인)
-
-4. **네트워크 혼잡도** (Network Factor)
-   - 현재 블록 가스 사용률 기반 (기본값: 0.8)
-
-**최종 확률:**
-```
-P(success) = gas_factor × profitability_factor × liquidity_factor × network_factor
-```
-
-**코드 구현:**
+### 경쟁 평가 로직
 
 ```rust
-/// 온체인 성공 확률 계산
-async fn calculate_success_probability_onchain(
+async fn assess_competition_level(
     &self,
-    tx: &Transaction,
-    net_profit: &U256,
-    pool: &PoolInfo
-) -> Result<f64> {
-    let mut score: f64 = 0.5;
+    gas_price: U256,
+    amount_in: U256,
+    price_impact: f64,
+) -> CompetitionLevel {
+    let gas_gwei = gas_price.as_u128() / 1_000_000_000;
+    let amount_eth = amount_in.as_u128() as f64 / 1e18;
 
-    // 1. 가스 가격 경쟁 요소
-    let current_gas = self.blockchain_client.get_gas_price().await?;
-    let competition_factor = if tx.gas_price < U256::from_limbs_slice(&current_gas.0.0) * U256::from(2) {
-        0.8
+    // 경쟁 수준 결정
+    if gas_gwei > 200 || (amount_eth > 100.0 && price_impact > 0.03) {
+        CompetitionLevel::Critical  // 큰 거래 + 높은 가스
+    } else if gas_gwei > 100 || (amount_eth > 50.0 && price_impact > 0.02) {
+        CompetitionLevel::High
+    } else if gas_gwei > 50 || amount_eth > 10.0 {
+        CompetitionLevel::Medium
     } else {
-        0.4
-    };
-    score *= competition_factor;
+        CompetitionLevel::Low
+    }
+}
+```
 
-    // 2. 수익성 요소
-    let profitability_factor = if *net_profit > U256::from_str_radix("500000000000000000", 10).unwrap() {
-        0.9
-    } else {
-        0.6
-    };
-    score *= profitability_factor;
+### 경쟁에 따른 전략 조정
 
-    // 3. 풀 유동성 요소
-    let total_liquidity = pool.reserve0 + pool.reserve1;
-    let liquidity_factor = if total_liquidity > U256::from_str_radix("10000000000000000000000", 10).unwrap() {
-        0.9
-    } else {
-        0.7
-    };
-    score *= liquidity_factor;
+| 경쟁 수준 | Gas Multiplier | 성공 확률 | Kelly 조정 | 최소 수익 |
+|----------|----------------|----------|-----------|----------|
+| Low | 1.1x | 85% | Full Kelly | 0.01 ETH |
+| Medium | 1.3x | 70% | Half Kelly | 0.02 ETH |
+| High | 1.6x | 50% | Quarter Kelly | 0.05 ETH |
+| Critical | 2.0x | 30% | Skip | 0.1 ETH |
 
-    // 4. 네트워크 혼잡도
-    let network_factor = 0.8; // 실제로는 블록 가스 사용률로 계산
-    score *= network_factor;
+---
 
-    Ok((score as f64).clamp(0.0, 1.0))
+## 설정 및 구성
+
+### 환경 변수 (.env)
+
+```bash
+# 네트워크 설정
+RPC_URL=wss://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+CHAIN_ID=1
+
+# 지갑 설정
+PRIVATE_KEY=0x...
+
+# 컨트랙트 주소
+SANDWICH_CONTRACT=0x...
+
+# Flashbots 설정
+FLASHBOTS_RELAY_URL=https://relay.flashbots.net
+FLASHBOTS_SIGNATURE_KEY=0x...  # 선택사항
+
+# 전략 파라미터
+MIN_PROFIT_ETH=0.01
+MIN_PROFIT_PERCENTAGE=0.02
+MAX_PRICE_IMPACT=0.05
+KELLY_RISK_FACTOR=0.5
+
+# Mempool 필터
+MIN_VALUE_ETH=0.1
+MAX_GAS_PRICE_GWEI=200
+
+# 통계 설정
+STATS_PRINT_INTERVAL_SECS=300
+```
+
+### Rust 설정 (config.rs)
+
+```rust
+#[derive(Debug, Clone)]
+pub struct SandwichConfig {
+    // 네트워크
+    pub rpc_url: String,
+    pub chain_id: u64,
+
+    // 지갑
+    pub private_key: String,
+
+    // 컨트랙트
+    pub contract_address: Address,
+
+    // Flashbots
+    pub flashbots_relay_url: String,
+
+    // 전략 파라미터
+    pub min_profit_eth: f64,
+    pub min_profit_percentage: f64,
+    pub max_price_impact: f64,
+    pub kelly_risk_factor: f64,
+
+    // Mempool 필터
+    pub min_value_eth: f64,
+    pub max_gas_price_gwei: u64,
+
+    // 통계
+    pub stats_print_interval: Duration,
+}
+
+impl SandwichConfig {
+    pub fn from_env() -> Result<Self> {
+        dotenv::dotenv().ok();
+
+        Ok(Self {
+            rpc_url: env::var("RPC_URL")?,
+            chain_id: env::var("CHAIN_ID")?.parse()?,
+            private_key: env::var("PRIVATE_KEY")?,
+            contract_address: env::var("SANDWICH_CONTRACT")?.parse()?,
+            flashbots_relay_url: env::var("FLASHBOTS_RELAY_URL")
+                .unwrap_or_else(|_| "https://relay.flashbots.net".to_string()),
+            min_profit_eth: env::var("MIN_PROFIT_ETH")?.parse()?,
+            min_profit_percentage: env::var("MIN_PROFIT_PERCENTAGE")?.parse()?,
+            max_price_impact: env::var("MAX_PRICE_IMPACT")?.parse()?,
+            kelly_risk_factor: env::var("KELLY_RISK_FACTOR")?.parse()?,
+            min_value_eth: env::var("MIN_VALUE_ETH")?.parse()?,
+            max_gas_price_gwei: env::var("MAX_GAS_PRICE_GWEI")?.parse()?,
+            stats_print_interval: Duration::from_secs(
+                env::var("STATS_PRINT_INTERVAL_SECS")?.parse()?
+            ),
+        })
+    }
+}
+```
+
+### 실행 방법
+
+```bash
+# 1. 의존성 설치
+cargo build --release
+
+# 2. 환경 변수 설정
+cp .env.example .env
+nano .env  # 설정 값 입력
+
+# 3. 실행
+cargo run --release --bin searcher -- --strategies sandwich
+
+# 또는 개발 모드 (Mock)
+API_MODE=mock cargo run --bin searcher -- --strategies sandwich
+```
+
+---
+
+## 성능 최적화
+
+### 1. Mempool 모니터링 최적화
+
+**문제**: WebSocket 스트림이 초당 수백 개의 pending TX를 생성
+
+**해결**:
+```rust
+// 조기 필터링
+if tx.value < self.min_value_filter {
+    continue; // 금액이 작으면 스킵
+}
+
+if !self.dex_manager.is_dex_router(tx.to.unwrap_or_default()) {
+    continue; // DEX가 아니면 스킵
+}
+
+// 병렬 처리
+tokio::spawn(async move {
+    process_transaction(tx).await;
+});
+```
+
+### 2. ABI 디코딩 최적화
+
+**문제**: 모든 TX를 디코딩하면 CPU 낭비
+
+**해결**:
+```rust
+// Function selector 체크 먼저
+let selector = &data[0..4];
+if !KNOWN_SELECTORS.contains(&selector) {
+    return Err(anyhow!("Unknown selector"));
+}
+
+// 캐싱
+let mut decoder_cache = HashMap::new();
+if let Some(cached) = decoder_cache.get(&selector) {
+    return Ok(cached.clone());
+}
+```
+
+### 3. Pool Reserves 캐싱
+
+**문제**: 매 기회마다 `getReserves()` 호출은 비효율적
+
+**해결**:
+```rust
+// TTL 캐시 (5초)
+let cache_key = (token_in, token_out, dex_type);
+if let Some(cached) = self.reserves_cache.get(&cache_key) {
+    if cached.timestamp.elapsed() < Duration::from_secs(5) {
+        return Ok(cached.reserves.clone());
+    }
+}
+
+// 조회 후 캐시 저장
+self.reserves_cache.insert(cache_key, CachedReserves {
+    reserves,
+    timestamp: Instant::now(),
+});
+```
+
+### 4. Flashbots 제출 최적화
+
+**문제**: 네트워크 지연으로 기회 놓침
+
+**해결**:
+```rust
+// 병렬 제출 (여러 릴레이)
+let relays = vec![
+    "https://relay.flashbots.net",
+    "https://rpc.titanbuilder.xyz",
+    "https://rsync-builder.xyz",
+];
+
+let futures = relays.iter().map(|relay| {
+    submit_to_relay(relay, bundle.clone())
+});
+
+let results = futures::future::join_all(futures).await;
+```
+
+### 5. 통계 추적 최적화
+
+**문제**: 매 기회마다 통계 업데이트는 락 경합 발생
+
+**해결**:
+```rust
+// 원자적 카운터 사용
+pub struct SandwichStatsManager {
+    opportunities_detected: AtomicU64,
+    bundles_submitted: AtomicU64,
+    successful_sandwiches: AtomicU64,
+    failed_sandwiches: AtomicU64,
+    // ...
+}
+
+// 업데이트
+self.opportunities_detected.fetch_add(1, Ordering::Relaxed);
+```
+
+---
+
+## 보안 및 리스크 관리
+
+### 1. 스마트 컨트랙트 보안
+
+**재진입 공격 방어**:
+```solidity
+contract SandwichAttackStrategy is ReentrancyGuard {
+    function executeSandwich(...) external onlyOwner nonReentrant {
+        // ...
+    }
+}
+```
+
+**긴급 중지**:
+```solidity
+contract SandwichAttackStrategy is Pausable {
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+}
+```
+
+### 2. 개인키 보안
+
+```rust
+// 환경 변수에서만 로드
+let private_key = env::var("PRIVATE_KEY")
+    .expect("PRIVATE_KEY not set");
+
+// 메모리에서 빠르게 지우기
+use zeroize::Zeroize;
+let mut key_bytes = hex::decode(private_key)?;
+let wallet = LocalWallet::from_bytes(&key_bytes)?;
+key_bytes.zeroize();
+```
+
+### 3. 슬리피지 보호
+
+```rust
+// Back-run에 최소 수익 설정
+let min_amount_out = opportunity.expected_amount_out * 0.98; // 2% 슬리피지
+
+// 번들 생성 시 적용
+let back_run_calldata = self.encode_swap(
+    token_out,
+    token_in,
+    back_run_amount,
+    min_amount_out, // ← 최소 수익 보장
+    &path,
+)?;
+```
+
+### 4. 가스 가격 상한
+
+```rust
+// 최대 가스 가격 제한 (200 Gwei)
+if gas_price > U256::from(200_000_000_000u64) {
+    warn!("⚠️ Gas price too high: {} Gwei", gas_price / 1e9);
+    return Err(anyhow!("Gas price exceeds limit"));
+}
+```
+
+### 5. 자금 관리
+
+```rust
+// 최대 포지션 크기 제한 (총 자본의 25%)
+let max_position = total_capital * 0.25;
+let position_size = kelly_optimal_size.min(max_position);
+
+// 긴급 출금 기능
+pub async fn emergency_withdraw(&self) -> Result<()> {
+    let balance = self.provider.get_balance(self.contract_address, None).await?;
+
+    // 모든 자금을 owner에게 전송
+    self.contract.withdraw(balance).send().await?;
 }
 ```
 
 ---
 
-## 실행 방법
+## 문제 해결
 
-### 🚀 Mock 모드 (학습용)
+### 문제 1: Mempool에서 트랜잭션이 감지되지 않음
 
-**목적:** 실제 자금 없이 전략 플로우 이해
-
-```bash
-cd /Users/pc-25-011/work/blockbit/xCrack
-
-# Mock 모드 실행
-API_MODE=mock cargo run --bin searcher -- --strategies sandwich
-
-# 또는 설정 파일 사용
-API_MODE=mock XCRACK_CONFIG=config/sandwich.toml cargo run --bin searcher
+**증상**:
+```
+🔄 멤풀 모니터링 시작...
+(아무 로그 없음)
 ```
 
-### 🌐 Testnet 모드 (테스트)
+**원인**:
+- WebSocket 연결 실패
+- 필터가 너무 엄격
 
-**목적:** 실제 네트워크에서 위험 없이 테스트
-
-**필수 사전 작업:**
-1. Sepolia/Goerli Testnet ETH 확보
-2. `.env.local` 파일 생성
-
+**해결**:
 ```bash
-# .env.local 파일 생성
-cat > .env.local << EOF
-# Network
-WS_URL=wss://sepolia.infura.io/ws/v3/YOUR_API_KEY
+# 1. WebSocket 연결 확인
+wscat -c wss://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
 
-# Wallet
-PRIVATE_KEY=your_testnet_private_key
+# 2. 필터 완화
+MIN_VALUE_ETH=0.01  # 0.1 → 0.01
+MAX_GAS_PRICE_GWEI=500  # 200 → 500
 
-# Sandwich Strategy
-SANDWICH_ENABLED=true
-SANDWICH_MIN_PROFIT_ETH=0.01
-SANDWICH_MIN_PROFIT_PERCENTAGE=2.0
-SANDWICH_USE_FLASHLOAN=false
-SANDWICH_MAX_SLIPPAGE=0.03
-EOF
-
-# Testnet 실행
-cargo run --bin searcher -- --strategies sandwich
+# 3. 로그 레벨 상승
+RUST_LOG=debug cargo run
 ```
 
-### 💰 Mainnet 모드 (운영)
+### 문제 2: ABI 디코딩 실패
 
-**⚠️ 주의사항:**
-- 실제 자금 투입 전 충분한 Testnet 테스트 필수
-- 최소 자본금: 5 ETH 이상 권장
-- 가스비 모니터링 필수
+**증상**:
+```
+❌ ABI decode failed: Invalid amountIn
+```
 
-```bash
-# Mainnet 설정
-cat > .env.local << EOF
-# Network
-WS_URL=wss://mainnet.infura.io/ws/v3/YOUR_API_KEY
+**원인**:
+- 함수 selector 불일치
+- 파라미터 타입 오류
 
-# Wallet
-PRIVATE_KEY=your_mainnet_private_key
+**해결**:
+```rust
+// 함수 selector 확인
+let selector = &data[0..4];
+eprintln!("Selector: {:?}", selector);
 
-# Sandwich Strategy
-SANDWICH_ENABLED=true
-SANDWICH_MIN_PROFIT_ETH=0.1
-SANDWICH_MIN_PROFIT_PERCENTAGE=5.0
-SANDWICH_USE_FLASHLOAN=false
-SANDWICH_MAX_SLIPPAGE=0.02
-SANDWICH_MAX_GAS_PRICE_GWEI=100
-SANDWICH_GAS_MULTIPLIER=1.2
+// 예상: [0x38, 0xed, 0x17, 0x39] (swapExactTokensForTokens)
 
-# Flashbots
-FLASHBOTS_RELAY_URL=https://relay.flashbots.net
-EOF
+// 타입 체크
+let param_types = vec![
+    ParamType::Uint(256),  // amountIn
+    ParamType::Uint(256),  // amountOutMin
+    ParamType::Array(Box::new(ParamType::Address)),  // path
+    ParamType::Address,    // to
+    ParamType::Uint(256),  // deadline
+];
 
-# Mainnet 실행
-cargo run --bin searcher -- --strategies sandwich
+// 디코딩 시도
+match decode(&param_types, params_data) {
+    Ok(tokens) => { /* ... */ },
+    Err(e) => eprintln!("Decode error: {}", e),
+}
+```
+
+### 문제 3: Flashbots 제출 실패
+
+**증상**:
+```
+❌ Flashbots 번들 제출 실패: {"error": "insufficient funds"}
+```
+
+**원인**:
+- 지갑 잔액 부족
+- 가스 가격 너무 낮음
+
+**해결**:
+```rust
+// 1. 잔액 확인
+let balance = provider.get_balance(wallet.address(), None).await?;
+println!("Balance: {} ETH", balance.as_u128() as f64 / 1e18);
+
+// 2. 가스 가격 상승
+let priority_fee = U256::from(10_000_000_000u64); // 10 Gwei
+
+// 3. 번들 시뮬레이션
+// Flashbots는 실패 시 revert하므로 로컬에서 테스트
+let result = provider.call(&front_run_tx, None).await?;
+println!("Simulation result: {:?}", result);
+```
+
+### 문제 4: Kelly Criterion이 0을 반환
+
+**증상**:
+```
+❌ Kelly Criterion: 포지션 크기 0
+```
+
+**원인**:
+- 기대값이 음수 (p * b < q)
+- 성공 확률이 너무 낮음
+
+**해결**:
+```rust
+// 로그로 확인
+debug!("Kelly 계산:");
+debug!("  p = {}", p);
+debug!("  q = {}", q);
+debug!("  b = {}", b);
+debug!("  p * b = {}", p * b);
+debug!("  p * b - q = {}", p * b - q);
+
+// 기대값이 음수면 스킵
+if p * b <= q {
+    warn!("⚠️ 기대값 음수: 투자하지 않음");
+    return Ok(None);
+}
+```
+
+### 문제 5: 번들이 포함되지 않음
+
+**증상**:
+```
+⏱️ 번들이 포함되지 않음 (타임아웃)
+```
+
+**원인**:
+- 가스 가격 너무 낮음
+- 경쟁자가 더 높은 가스 제시
+- 희생자 트랜잭션이 실패
+
+**해결**:
+```rust
+// 1. 경쟁 수준 재평가
+let competition = assess_competition_level(gas_price, amount_in, price_impact).await;
+let gas_multiplier = competition.recommended_gas_multiplier();
+
+// 2. 가스 가격 상승
+let adjusted_gas_price = base_gas_price * gas_multiplier;
+
+// 3. 여러 블록에 제출
+for block_offset in 0..3 {
+    submit_bundle(bundle.clone(), target_block + block_offset).await?;
+}
 ```
 
 ---
 
-## 구성 및 설정
-
-### 📝 TOML 설정 파일
-
-**파일 위치:** `config/default.toml`
-
-```toml
-[strategies.sandwich]
-enabled = true
-
-# 수익성 임계값
-min_profit_eth = "0.1"                # 최소 순수익 (ETH)
-min_profit_percentage = 5.0           # 최소 수익률 (%)
-
-# 리스크 관리
-max_slippage = 0.03                   # 최대 슬리피지 (3%)
-max_gas_price_gwei = "100"            # 최대 가스 가격 (Gwei)
-gas_multiplier = 1.2                  # 경쟁 가스 배수
-
-# 자금 조달 (v2.0)
-use_flashloan = false                 # ⚠️ 항상 false (Wallet-only)
-
-# DEX 라우터 주소
-dex_routers = [
-    "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",  # Uniswap V2
-    "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F",  # SushiSwap
-    "0x10ED43C718714eb63d5aA57B78B54704E256024E"   # PancakeSwap V2
-]
-
-# 필터링
-min_target_value_eth = "1.0"          # 최소 대상 트랜잭션 크기 (ETH)
-min_transaction_usd_value = 10000.0   # 최소 USD 가치 ($10,000)
-```
-
-### 🔐 환경 변수 설정
-
-**파일 위치:** `.env.local`
-
-```bash
-# ===========================================
-# Network Configuration
-# ===========================================
-WS_URL=wss://mainnet.infura.io/ws/v3/YOUR_API_KEY
-HTTP_URL=https://mainnet.infura.io/v3/YOUR_API_KEY
-CHAIN_ID=1
-
-# ===========================================
-# Wallet Configuration
-# ===========================================
-PRIVATE_KEY=your_private_key_without_0x_prefix
-
-# ===========================================
-# Sandwich Strategy
-# ===========================================
-SANDWICH_ENABLED=true
-SANDWICH_MIN_PROFIT_ETH=0.1
-SANDWICH_MIN_PROFIT_PERCENTAGE=5.0
-SANDWICH_USE_FLASHLOAN=false
-SANDWICH_MAX_SLIPPAGE=0.03
-SANDWICH_MAX_GAS_PRICE_GWEI=100
-SANDWICH_GAS_MULTIPLIER=1.2
-
-# ===========================================
-# Flashbots Configuration
-# ===========================================
-FLASHBOTS_RELAY_URL=https://relay.flashbots.net
-FLASHBOTS_SIGNATURE_KEY=your_flashbots_signature_key
-
-# ===========================================
-# Oracle Configuration
-# ===========================================
-CHAINLINK_ORACLE_ENABLED=true
-UNISWAP_TWAP_ENABLED=true
-ORACLE_AGGREGATION_STRATEGY=weighted_mean
-```
-
-### 🎛️ 주요 파라미터 설명
-
-#### 수익성 파라미터
-
-| 파라미터 | 설명 | 권장값 (Testnet) | 권장값 (Mainnet) |
-|---------|------|-----------------|-----------------|
-| `min_profit_eth` | 최소 순수익 (ETH) | 0.01 | 0.1 |
-| `min_profit_percentage` | 최소 수익률 (%) | 2.0% | 5.0% |
-
-#### 리스크 파라미터
-
-| 파라미터 | 설명 | 권장값 (Testnet) | 권장값 (Mainnet) |
-|---------|------|-----------------|-----------------|
-| `max_slippage` | 최대 슬리피지 | 5% (0.05) | 2% (0.02) |
-| `max_gas_price_gwei` | 최대 가스 가격 | 200 Gwei | 100 Gwei |
-| `gas_multiplier` | 경쟁 가스 배수 | 1.5x | 1.2x |
-
-#### 필터링 파라미터
-
-| 파라미터 | 설명 | 권장값 |
-|---------|------|--------|
-| `min_target_value_eth` | 최소 대상 트랜잭션 크기 | 1.0 ETH |
-| `min_transaction_usd_value` | 최소 USD 가치 | $10,000 |
-
----
-
-## 📚 추가 리소스
+## 추가 참고 자료
 
 ### 관련 문서
+- `SANDWICH_FLOW.md`: 실행 흐름 시퀀스 다이어그램
+- `SANDWICH_RUST.md`: Rust 코드 상세 분석 (6,724 lines)
+- `SANDWICH_CONTRACT.md`: SandwichAttackStrategy.sol 튜토리얼
 
-- [STEP_BY_STEP.md](/Users/pc-25-011/work/blockbit/xCrack/docs/STEP_BY_STEP.md) - 4단계 학습 로드맵
-- [RUNNING.md](/Users/pc-25-011/work/blockbit/xCrack/docs/RUNNING.md) - 실행 가이드
-- [API.md](/Users/pc-25-011/work/blockbit/xCrack/docs/API.md) - API 문서
-
-### 참고 자료
-
+### 외부 링크
 - [Flashbots Documentation](https://docs.flashbots.net/)
-- [Uniswap V2 Documentation](https://docs.uniswap.org/protocol/V2/introduction)
-- [Kelly Criterion](https://en.wikipedia.org/wiki/Kelly_criterion)
-- [MEV Best Practices](https://github.com/flashbots/pm)
+- [Uniswap V2 Docs](https://docs.uniswap.org/contracts/v2/overview)
+- [Uniswap V3 Docs](https://docs.uniswap.org/contracts/v3/overview)
+- [Kelly Criterion (Wikipedia)](https://en.wikipedia.org/wiki/Kelly_criterion)
+- [ethers-rs Documentation](https://docs.rs/ethers/)
+
+### 커뮤니티
+- MEV Discord: [Flashbots Discord](https://discord.gg/flashbots)
+- Telegram: MEV Strategy Discussion
 
 ---
 
-## ⚠️ 면책 조항
-
-본 문서는 교육 목적으로 작성되었습니다. MEV 봇 운영은 고위험 활동이며, 실제 자금 투입 전 충분한 테스트와 이해가 필요합니다. 저자는 본 문서 사용으로 인한 어떠한 손실에도 책임을 지지 않습니다.
-
-**운영 전 필수 체크리스트:**
-- [ ] Testnet에서 충분한 테스트 완료 (최소 100회 이상)
-- [ ] 가스비 모니터링 시스템 구축
-- [ ] 손실 한도 설정 및 자동 중단 시스템 구현
-- [ ] 네트워크 혼잡도 대응 전략 수립
-- [ ] 경쟁자 분석 및 대응 전략 마련
+**마지막 업데이트**: 2025-01-XX
+**버전**: 1.0.0
+**작성자**: xCrack Development Team

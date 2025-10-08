@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getFlashloanDashboard, type FlashloanDashboard } from '@/lib/api';
+import { getFlashloanDashboard, type FlashloanDashboard } from '../../lib/api';
 
 export default function FlashloanPage() {
   const [dashboard, setDashboard] = useState<FlashloanDashboard | null>(null);

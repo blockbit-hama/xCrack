@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getMempoolStatus, getMempoolTransactions, MempoolStatus, MempoolTransaction } from '@/lib/api';
+import { getMempoolStatus, getMempoolTransactions, MempoolStatus, MempoolTransaction } from '../../lib/api';
 
 export default function MempoolPage() {
   const [status, setStatus] = useState<MempoolStatus | null>(null);

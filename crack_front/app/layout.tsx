@@ -53,76 +53,49 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   </Link>
                 </div>
 
-                {/* 전략 / 실행 */}
+                {/* 핵심 전략 */}
                 <div>
                   <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                    전략 / 실행
+                    핵심 전략
                   </h3>
                   <div className="space-y-1">
-                    <Link href="/strategies" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">⚡</span>
-                      <span>전략 관리</span>
-                    </Link>
                     <Link href="/liquidation" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">💥</span>
-                      <span>청산 v2.0</span>
-                      <Badge variant="info" className="text-xs">NEW</Badge>
+                      <span>청산</span>
+                      <Badge variant="success" className="text-xs">완성</Badge>
                     </Link>
                     <Link href="/micro-v2" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">🔄</span>
-                      <span>마이크로 아비트래지</span>
+                      <span>차익거래 1</span>
+                      <Badge variant="success" className="text-xs">완성</Badge>
+                    </Link>
+                    <Link href="/complex-arbitrage" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🌐</span>
+                      <span>차익거래 2</span>
+                      <Badge variant="success" className="text-xs">완성</Badge>
                     </Link>
                     <Link href="/sandwich" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">🥪</span>
                       <span>샌드위치</span>
                       <Badge variant="warning" className="text-xs">고위험</Badge>
                     </Link>
-                    <Link href="/flashloan" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">⚡</span>
-                      <span>플래시론</span>
-                    </Link>
-                    <Link href="/multi-asset" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">💎</span>
-                      <span>다중자산</span>
+                  </div>
+                </div>
+
+                {/* 모니터링 */}
+                <div>
+                  <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                    모니터링
+                  </h3>
+                  <div className="space-y-1">
+                    <Link href="/mempool" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                      <span className="text-lg">🌊</span>
+                      <span>멤풀</span>
                     </Link>
                     <Link href="/bundles" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">📦</span>
                       <span>번들</span>
                     </Link>
-                  </div>
-                </div>
-
-                {/* 온체인 / 데이터 */}
-                <div>
-                  <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                    온체인 / 데이터
-                  </h3>
-                  <div className="space-y-1">
-                    <Link href="/protocols" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">🏛️</span>
-                      <span>프로토콜</span>
-                    </Link>
-                    <Link href="/mempool" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">🌊</span>
-                      <span>멤풀</span>
-                    </Link>
-                    <Link href="/onchain" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">⛓️</span>
-                      <span>온체인</span>
-                    </Link>
-                    <Link href="/network" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">🌐</span>
-                      <span>네트워크</span>
-                    </Link>
-                  </div>
-                </div>
-
-                {/* 운영 / 모니터링 */}
-                <div>
-                  <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                    운영 / 모니터링
-                  </h3>
-                  <div className="space-y-1">
                     <Link href="/performance" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">📈</span>
                       <span>성능</span>
@@ -130,14 +103,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     <Link href="/alerts" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                       <span className="text-lg">🚨</span>
                       <span>알림</span>
-                    </Link>
-                    <Link href="/logs" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">📋</span>
-                      <span>로그</span>
-                    </Link>
-                    <Link href="/risk" className="flex items-center space-x-3 px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                      <span className="text-lg">⚠️</span>
-                      <span>리스크</span>
                     </Link>
                   </div>
                 </div>

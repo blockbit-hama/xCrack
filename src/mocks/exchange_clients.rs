@@ -10,7 +10,7 @@ use chrono::Utc;
 
 use crate::exchange::order_executor::{ExchangeClient, OrderRequest, OrderResponse, OrderType};
 use crate::types::{OrderStatus, PriceData};
-use alloy::primitives::U256;
+use ethers::types::U256;
 use crate::mocks::{MockConfig, get_mock_config};
 
 /// Mock DEX 클라이언트 구현
@@ -162,7 +162,7 @@ impl ExchangeClient for MockDexClient {
         
         info!("✅ DEX 주문 체결: {} - {:.6} {} @ ${:.2} (가스: ${:.4}, 지연: {}ms)", 
               self.exchange_name,
-              executed_quantity.to::<u64>() as f64 / 1e6, // 단위 조정
+              executed_quantity.as_u64() as f64 / 1e6, // 단위 조정
               order.symbol.split('/').next().unwrap_or(""),
               executed_price.to_f64().unwrap_or(0.0),
               gas_fee_eth.to_f64().unwrap_or(0.0) * 2000.0, // ETH to USD (대략)
@@ -365,7 +365,7 @@ impl ExchangeClient for MockCexClient {
         
         info!("✅ CEX 주문 체결: {} - {:.6} {} @ ${:.2} (수수료: {:.1}%, 지연: {}ms)", 
               self.exchange_name,
-              executed_quantity.to::<u64>() as f64 / 1e6,
+              executed_quantity.as_u64() as f64 / 1e6,
               order.symbol.split('/').next().unwrap_or(""),
               executed_price.to_f64().unwrap_or(0.0),
               fee_rate * 100.0,

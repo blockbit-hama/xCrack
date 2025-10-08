@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::types::{PriceData, OrderBookSnapshot, OrderBookLevel};
 use crate::strategies::MicroArbitrageStrategy;
 use crate::exchange::{ExchangeClient, ExchangeClientFactory};
-use alloy::primitives::U256;
+use ethers::types::U256;
 
 /// 실시간 스캔 스케줄러
 /// 

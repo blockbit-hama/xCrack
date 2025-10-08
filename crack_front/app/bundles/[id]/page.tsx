@@ -1,4 +1,4 @@
-import { getBundle } from '@/lib/api';
+import { getBundle } from '../../../lib/api';
 
 export const dynamic = 'force-dynamic';
 

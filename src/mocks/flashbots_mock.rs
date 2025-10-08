@@ -42,7 +42,7 @@ impl MockFlashbotsClient {
                 
                 debug!("🎭 [MOCK] 번들 시뮬레이션 성공: 수익 {} ETH", 
                        ethers::utils::format_ether({
-                           let ethers_profit = ethers::types::U256::from_big_endian(&simulation.net_profit.to_be_bytes::<32>());
+                           let ethers_profit = ethers::types::U256::from_big_endian(&crate::common::abi::u256_to_be_bytes(simulation.net_profit));
                            ethers_profit
                        }));
             }
@@ -93,22 +93,34 @@ impl MockFlashbotsClient {
         
         if success {
             // Generate realistic mock values
-            let gas_cost_ethers = U256::from(bundle.gas_estimate) * U256::from(self.mock_config.gas_price);
+            // Calculate total gas from transactions
+            let total_gas_ethers = bundle.total_gas_limit();
+            let gas_estimate_u64 = total_gas_ethers.as_u64();
+
+            let gas_cost_ethers = U256::from(gas_estimate_u64) * U256::from(self.mock_config.gas_price);
             let gas_cost = {
                 let mut bytes = [0u8; 32];
                 gas_cost_ethers.to_big_endian(&mut bytes);
-                alloy::primitives::U256::from_be_bytes(bytes)
+                U256::from_big_endian(&bytes)
             };
-            let net_profit = if bundle.expected_profit > gas_cost {
-                bundle.expected_profit - gas_cost
+
+            // Convert expected_profit to alloy U256 for comparison
+            let expected_profit_alloy = {
+                let mut bytes = [0u8; 32];
+                bundle.metadata.expected_profit.to_big_endian(&mut bytes);
+                U256::from_big_endian(&bytes)
+            };
+
+            let net_profit = if expected_profit_alloy > gas_cost {
+                expected_profit_alloy - gas_cost
             } else {
-                alloy::primitives::U256::ZERO
+                U256::zero()
             };
-            
+
             Ok(SimulationResult {
                 success: true,
-                profit: bundle.expected_profit,
-                gas_used: bundle.gas_estimate,
+                profit: expected_profit_alloy,
+                gas_used: gas_estimate_u64,
                 gas_cost,
                 net_profit,
                 price_impact: rand::random::<f64>() * 0.049 + 0.001, // 0.1% to 5%
@@ -130,10 +142,10 @@ impl MockFlashbotsClient {
             
             Ok(SimulationResult {
                 success: false,
-                profit: alloy::primitives::U256::ZERO,
+                profit: U256::zero(),
                 gas_used: 0,
-                gas_cost: alloy::primitives::U256::ZERO,
-                net_profit: alloy::primitives::U256::ZERO,
+                gas_cost: U256::zero(),
+                net_profit: U256::zero(),
                 price_impact: 0.0,
                 error_message: Some(error_msg),
                 traces: Some(vec!["🎭 [MOCK] Simulation failed".to_string()]),
@@ -152,7 +164,9 @@ impl MockFlashbotsClient {
         let status = if status_rand < 0.4 {
             BundleStatus::Pending
         } else if status_rand < 0.7 {
-            BundleStatus::Included
+            // Generate a mock block hash for Included status
+            let mock_block_hash = ethers::types::H256::random();
+            BundleStatus::Included(mock_block_hash)
         } else if status_rand < 0.9 {
             BundleStatus::Failed
         } else {

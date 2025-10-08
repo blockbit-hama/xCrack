@@ -171,14 +171,14 @@ async fn run_scan_mode(manager: IntegratedLiquidationManager) -> Result<()> {
         println!();
     }
     
-    if !summary.top_opportunities.is_empty() {
+    if !summary.active_opportunities == 0 {
         println!("💡 Top 5 Opportunities:");
-        for (i, opp) in summary.top_opportunities.iter().take(5).enumerate() {
-            println!("  {}. User: {} | Profit: ${:.2} | Health Factor: {:.4}",
+        for (i, opp) in summary.recent_executions.iter().take(5).enumerate() {
+            println!("  {}. Bundle ID: {} | Success: {} | Profit: ${:.2}",
                      i + 1,
-                     opp.user.address,
-                     opp.strategy.net_profit_usd,
-                     opp.user.account_data.health_factor);
+                     opp.bundle_id,
+                     opp.success,
+                     opp.profit_realized.unwrap_or(0.0));
         }
         println!();
     }
@@ -204,9 +204,9 @@ async fn run_analysis_mode(manager: IntegratedLiquidationManager) -> Result<()> 
     println!("===============================");
     
     println!("\n🎯 Strategy Performance:");
-    println!("  Total Opportunities: {}", strategy_stats.total_opportunities);
-    println!("  Average Profit Margin: {:.2}%", strategy_stats.avg_profit_margin);
-    println!("  Total Profit Potential: ${:.2}", strategy_stats.total_profit_potential);
+    println!("  Total Opportunities: {}", strategy_stats.total_opportunities_detected);
+    println!("  Average Profit Margin: {:.2}%", strategy_stats.average_profit_per_execution);
+    println!("  Total Profit Potential: ${:.2}", strategy_stats.total_profit_earned);
     
     println!("\n⚡ Execution Performance:");
     println!("  Total Bundles Submitted: {}", execution_stats.total_bundles_submitted);
@@ -251,7 +251,7 @@ async fn run_test_mode(manager: IntegratedLiquidationManager) -> Result<()> {
     // 3. 전략 엔진 테스트
     println!("3. Testing strategy engine...");
     let strategy_stats = manager.get_strategy_stats().await?;
-    println!("   ✅ Strategy engine working - {} opportunities detected", strategy_stats.total_opportunities);
+    println!("   ✅ Strategy engine working - {} opportunities detected", strategy_stats.total_opportunities_detected);
     
     // 4. 실행 엔진 테스트 (드라이런)
     println!("4. Testing execution engine (dry run)...");

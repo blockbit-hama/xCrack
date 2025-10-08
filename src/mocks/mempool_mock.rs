@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{info, debug, warn};
-use alloy::primitives::{Address, B256 as H256, U256};
 use rand::Rng;
+use ethers::types::{Address, U256, H256};
 
 use crate::config::Config;
 use crate::types::Transaction;

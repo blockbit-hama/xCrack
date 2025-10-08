@@ -1,6 +1,6 @@
 use super::traits::*;
 use anyhow::Result;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -142,16 +142,20 @@ impl ZeroExAdapter {
         }
         
         Ok(Quote {
+            dex_type: DexType::ZeroEx,
             token_in,
             token_out,
             amount_in,
             amount_out,
             amount_out_min,
+            price_impact_bps: 0,
             price_impact,
             gas_estimate,
             valid_for: 60, // 0x 견적은 보통 1분 유효
             timestamp: chrono::Utc::now().timestamp() as u64,
             metadata,
+            extra_data: HashMap::new(),
+            route_hash: vec![],
         })
     }
 }
@@ -218,7 +222,7 @@ impl DexAdapter for ZeroExAdapter {
         
         let value = quote.metadata.get("value")
             .and_then(|v| U256::from_str_radix(v, 10).ok())
-            .unwrap_or(U256::ZERO);
+            .unwrap_or(U256::zero());
         
         // allowance target 추출 (집계기 특성상 중요)
         let spender = quote.metadata.get("allowance_target")
@@ -231,6 +235,8 @@ impl DexAdapter for ZeroExAdapter {
             .map_err(|e| AdapterError::CalldataGenerationFailed { message: format!("Invalid calldata: {}", e) })?;
         
         Ok(CalldataBundle {
+            target: to_address,
+            calldata: calldata.clone(),
             to: to_address,
             spender,
             data: calldata,
@@ -242,7 +248,7 @@ impl DexAdapter for ZeroExAdapter {
     
     async fn validate_quote(&self, quote: &Quote) -> Result<bool, AdapterError> {
         // 견적 유효성 검증
-        if quote.amount_out == U256::ZERO {
+        if quote.amount_out == U256::zero() {
             return Ok(false);
         }
         
@@ -278,10 +284,12 @@ impl DexAdapter for ZeroExAdapter {
     async fn get_fee_info(&self, _token_in: Address, _token_out: Address) -> Result<FeeInfo, AdapterError> {
         // 0x는 프로토콜 수수료가 있음
         Ok(FeeInfo {
+            fee_bps: 0,
+            recipient: None,
+            fee_recipient: None,
             trading_fee_bps: 0, // 0x 자체 수수료는 없음
             platform_fee_bps: 0, // 프로토콜 수수료는 별도
             total_fee_bps: 0,
-            fee_recipient: None,
         })
     }
 }

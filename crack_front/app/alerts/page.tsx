@@ -11,7 +11,7 @@ import {
   AlertStats, 
   AlertSeverity,
   AlertCategory
-} from '@/lib/api';
+} from '../../lib/api';
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);

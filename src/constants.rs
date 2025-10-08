@@ -1,4 +1,4 @@
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use std::str::FromStr;
 
 // Gas limits
@@ -100,7 +100,7 @@ pub fn is_liquidation_function(selector: &str) -> bool {
 
 // Helper to format ETH amounts
 pub fn format_eth_amount(wei: U256) -> String {
-    let eth = wei.to::<u128>() as f64 / 1e18;
+    let eth = wei.as_u128() as f64 / 1e18;
     format!("{:.6} ETH", eth)
 }
 

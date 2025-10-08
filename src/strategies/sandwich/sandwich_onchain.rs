@@ -3,20 +3,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
 use tokio::sync::Mutex;
 use tracing::{info, debug, warn};
-use alloy::primitives::{Address, B256, U256};
+use ethers::types::{Address, H256, U256};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::config::Config;
 use crate::types::{Transaction, Opportunity, StrategyType, Bundle};
-use crate::common::Strategy;
+use crate::Strategy;
 use crate::blockchain::{
     BlockchainClient, ContractFactory, 
     TransactionDecoder
 };
 use crate::oracle::{PriceOracle, PriceAggregator, ChainlinkOracle, UniswapTwapOracle};
-use crate::common::abi::{ABICodec, contracts};
+use crate::{ABICodec, contracts};
 use crate::oracle::aggregator::AggregationStrategy;
 use crate::opportunity::{OpportunityManager, OpportunityPriority};
 
@@ -160,7 +160,7 @@ impl OnChainSandwichStrategy {
         let base_gas = U256::from(20_000_000_000u64); // 20 Gwei
         let congestion = if gas_price > base_gas {
             let excess = gas_price - base_gas;
-            let excess_ratio = excess.to::<u128>() as f64 / base_gas.to::<u128>() as f64;
+            let excess_ratio = excess.as_u128() as f64 / base_gas.as_u128() as f64;
             (excess_ratio / 10.0).min(1.0) // 최대 1.0으로 제한
         } else {
             0.0
@@ -265,9 +265,9 @@ impl OnChainSandwichStrategy {
                 transactions_analyzed: 0,
                 opportunities_found: 0,
                 successful_sandwiches: 0,
-                total_profit: U256::ZERO,
-                avg_profit_per_sandwich: U256::ZERO,
-                avg_gas_used: U256::ZERO,
+                total_profit: U256::zero(),
+                avg_profit_per_sandwich: U256::zero(),
+                avg_gas_used: U256::zero(),
                 last_analysis_time: None,
             })),
         };
@@ -315,7 +315,7 @@ impl OnChainSandwichStrategy {
     /// 풀 정보 로드
     async fn load_pool_info(&self, pool_address: Address, fee: u32) -> Result<PoolInfo> {
         // Address를 H160으로 변환
-        let h160_address = ethers::types::H160::from_slice(pool_address.as_slice());
+        let h160_address = ethers::types::H160::from_slice(pool_address.as_bytes());
         let pool_contract = self.contract_factory.create_amm_pool(h160_address)?;
         
         let token0 = pool_contract.token0().await?;
@@ -326,8 +326,8 @@ impl OnChainSandwichStrategy {
             address: pool_address,
             token0: Address::from_slice(token0.as_bytes()),
             token1: Address::from_slice(token1.as_bytes()),
-            reserve0: U256::from_limbs_slice(&reserve0.0),
-            reserve1: U256::from_limbs_slice(&reserve1.0),
+            reserve0: crate::u256_from_ethers_internal(reserve0.0),
+            reserve1: crate::u256_from_ethers_internal(reserve1.0),
             fee,
             last_updated: Instant::now(),
         })
@@ -375,7 +375,7 @@ impl OnChainSandwichStrategy {
         
         // ETH 가격 가져오기
         let weth_address = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse::<Address>()?;
-        let eth_price_data = self.price_oracle.get_price_usd(ethers::types::H160::from_slice(weth_address.as_slice())).await?;
+        let eth_price_data = self.price_oracle.get_price_usd(ethers::types::H160::from_slice(weth_address.as_bytes())).await?;
         let eth_usd_price = eth_price_data.price_usd.to_string().parse::<f64>().unwrap_or(2800.0);
         
         // 트랜잭션 기본 값
@@ -390,7 +390,7 @@ impl OnChainSandwichStrategy {
                         let token_address = Address::from_slice(token_addr.as_bytes());
                         
                         // 해당 토큰의 실제 USD 가격 가져오기
-                        match self.price_oracle.get_price_usd(ethers::types::H160::from_slice(token_address.as_slice())).await {
+                        match self.price_oracle.get_price_usd(ethers::types::H160::from_slice(token_address.as_bytes())).await {
                             Ok(token_price) => {
                                 let token_amount = amount.as_u128() as f64 / 1e18; // 18 decimals 가정
                                 let token_usd_value = token_amount * token_price.price_usd.to_string().parse::<f64>().unwrap_or(0.0);
@@ -454,7 +454,7 @@ impl OnChainSandwichStrategy {
             return Ok(None);
         }
         
-        let profit_percentage = (net_profit.to::<u128>() as f64 / optimal_size.to::<u128>() as f64) * 100.0;
+        let profit_percentage = (net_profit.as_u128() as f64 / optimal_size.as_u128() as f64) * 100.0;
         if profit_percentage < self.min_profit_percentage {
             return Ok(None);
         }
@@ -467,8 +467,8 @@ impl OnChainSandwichStrategy {
         }
         
         // 프론트런/백런 트랜잭션 생성
-        let front_run_tx = self.create_front_run_transaction_onchain(&optimal_size, &updated_pool, tx.gas_price, 0.99, Address::ZERO).await?;
-        let back_run_tx = self.create_back_run_transaction_onchain(&optimal_size, &updated_pool, tx.gas_price, 0.99, Address::ZERO).await?;
+        let front_run_tx = self.create_front_run_transaction_onchain(&optimal_size, &updated_pool, tx.gas_price, 0.99, Address::zero()).await?;
+        let back_run_tx = self.create_back_run_transaction_onchain(&optimal_size, &updated_pool, tx.gas_price, 0.99, Address::zero()).await?;
         
         info!("🎯 온체인 샌드위치 기회 발견!");
         info!("  💰 예상 수익: {} ETH", format_eth_amount(net_profit));
@@ -518,13 +518,13 @@ impl OnChainSandwichStrategy {
     
     /// 풀 상태 업데이트
     async fn update_pool_state(&self, pool: &PoolInfo) -> Result<PoolInfo> {
-        let h160_address = ethers::types::H160::from_slice(pool.address.as_slice());
+        let h160_address = ethers::types::H160::from_slice(pool.address.as_bytes());
         let pool_contract = self.contract_factory.create_amm_pool(h160_address)?;
         let (reserve0, reserve1, _) = pool_contract.get_reserves().await?;
         
         let mut updated_pool = pool.clone();
-        updated_pool.reserve0 = U256::from_limbs_slice(&reserve0.0);
-        updated_pool.reserve1 = U256::from_limbs_slice(&reserve1.0);
+        updated_pool.reserve0 = crate::u256_from_ethers_internal(reserve0.0);
+        updated_pool.reserve1 = crate::u256_from_ethers_internal(reserve1.0);
         updated_pool.last_updated = Instant::now();
         
         Ok(updated_pool)
@@ -538,18 +538,18 @@ impl OnChainSandwichStrategy {
     ) -> Result<f64> {
         if let Some(ethers::abi::Token::Uint(amount_in)) = decoded.parameters.get("amountIn") {
             // x * y = k 공식으로 가격 영향 계산
-            let amount_in_u256 = U256::from_limbs_slice(&amount_in.0);
+            let amount_in_u256 = crate::u256_from_ethers_internal(amount_in.0);
             
             // 수수료 적용 (0.3%)
             let amount_in_with_fee = amount_in_u256 * U256::from(997) / U256::from(1000);
             
-            let price_before = pool.reserve1.to::<u128>() as f64 / pool.reserve0.to::<u128>() as f64;
+            let price_before = pool.reserve1.as_u128() as f64 / pool.reserve0.as_u128() as f64;
             
             // 새로운 리저브 계산
             let new_reserve0 = pool.reserve0 + amount_in_with_fee;
             let new_reserve1 = pool.reserve0 * pool.reserve1 / new_reserve0;
             
-            let price_after = new_reserve1.to::<u128>() as f64 / new_reserve0.to::<u128>() as f64;
+            let price_after = new_reserve1.as_u128() as f64 / new_reserve0.as_u128() as f64;
             
             let price_impact = ((price_before - price_after) / price_before).abs();
             
@@ -567,7 +567,7 @@ impl OnChainSandwichStrategy {
         price_impact: f64
     ) -> Result<U256> {
         if let Some(ethers::abi::Token::Uint(victim_amount)) = decoded.parameters.get("amountIn") {
-            let victim_amount_u256 = U256::from_limbs_slice(&victim_amount.0);
+            let victim_amount_u256 = crate::u256_from_ethers_internal(victim_amount.0);
             
             // Kelly Criterion 기반 최적 크기 계산
             let optimal_fraction = if price_impact > 0.02 {
@@ -600,7 +600,7 @@ impl OnChainSandwichStrategy {
         
         // 예상 가스 사용량
         let gas_limit = U256::from(300_000 * 2); // 프론트런 + 백런
-        let gas_cost = gas_limit * U256::from_limbs_slice(&gas_price.0);
+        let gas_cost = gas_limit * crate::u256_from_ethers_internal(gas_price.0);
         
         // 예상 수익 계산 (가격 영향 기반)
         let profit_rate = price_impact * 0.7; // 70% 효율
@@ -609,7 +609,7 @@ impl OnChainSandwichStrategy {
         let net_profit = if expected_profit > gas_cost {
             expected_profit - gas_cost
         } else {
-            U256::ZERO
+            U256::zero()
         };
         
         Ok((expected_profit, gas_cost, net_profit))
@@ -626,7 +626,7 @@ impl OnChainSandwichStrategy {
         
         // 가스 가격 경쟁 요소
         let current_gas = self.blockchain_client.get_gas_price().await?;
-        let competition_factor = if tx.gas_price < U256::from_limbs_slice(&current_gas.0.0) * U256::from(2) {
+        let competition_factor = if tx.gas_price < crate::u256_from_ethers_internal(current_gas.0.0) * U256::from(2) {
             0.8
         } else {
             0.4
@@ -668,7 +668,7 @@ impl OnChainSandwichStrategy {
         to_recipient: Address
     ) -> Result<Transaction> {
         let competitive_gas = self.blockchain_client.calculate_competitive_gas_price(0.8).await?;
-        let competitive_gas_alloy = U256::from_limbs_slice(&competitive_gas.0);
+        let competitive_gas_alloy = crate::u256_from_ethers_internal(competitive_gas.0);
         let gas_price = std::cmp::min(competitive_gas_alloy, self.max_gas_price);
         // Encode Uniswap V2 swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline)
         let codec = ABICodec::new();
@@ -677,7 +677,7 @@ impl OnChainSandwichStrategy {
         let amount_in_with_fee = amount_in * U256::from(997u64) / U256::from(1000u64);
         let numerator = amount_in_with_fee * pool.reserve1;
         let denominator = pool.reserve0 + amount_in_with_fee;
-        let expected_out = if denominator > U256::ZERO { numerator / denominator } else { U256::ZERO };
+        let expected_out = if denominator > U256::zero() { numerator / denominator } else { U256::zero() };
         // Apply slippage tolerance from config (bps)
         let slippage_bps = (self.config.strategies.sandwich.max_slippage * 10_000.0).round() as u64;
         let amount_out_min = expected_out * U256::from(10_000u64 - slippage_bps) / U256::from(10_000u64);
@@ -693,11 +693,11 @@ impl OnChainSandwichStrategy {
         )?;
 
         Ok(Transaction {
-            hash: B256::ZERO,
-            from: alloy::primitives::Address::ZERO, // 실제 지갑 주소
+            hash: H256::zero(),
+            from: Address::zero(), // 실제 지갑 주소
             to: Some(*contracts::UNISWAP_V2_ROUTER), // Uniswap V2 Router
-            value: U256::ZERO,
-            gas_price: U256::from_be_bytes(gas_price.to_be_bytes::<32>()),
+            value: U256::zero(),
+            gas_price: U256::from_big_endian(&crate::u256_to_be_bytes(gas_price)),
             gas_limit: U256::from(300_000u64),
             data: calldata.to_vec(),
             nonce: 0,
@@ -716,7 +716,7 @@ impl OnChainSandwichStrategy {
         to_recipient: Address
     ) -> Result<Transaction> {
         let competitive_gas = self.blockchain_client.calculate_competitive_gas_price(0.7).await?;
-        let competitive_gas_alloy = U256::from_limbs_slice(&competitive_gas.0);
+        let competitive_gas_alloy = crate::u256_from_ethers_internal(competitive_gas.0);
         let gas_price = std::cmp::min(competitive_gas_alloy, self.max_gas_price);
 
         // Encode Uniswap V2 swapExactTokensForTokens (reverse path to unwind)
@@ -726,7 +726,7 @@ impl OnChainSandwichStrategy {
         let amount_in_with_fee = amount_in * U256::from(997u64) / U256::from(1000u64);
         let numerator = amount_in_with_fee * pool.reserve0;
         let denominator = pool.reserve1 + amount_in_with_fee;
-        let expected_out = if denominator > U256::ZERO { numerator / denominator } else { U256::ZERO };
+        let expected_out = if denominator > U256::zero() { numerator / denominator } else { U256::zero() };
         let slippage_bps = (self.config.strategies.sandwich.max_slippage * 10_000.0).round() as u64;
         let amount_out_min = expected_out * U256::from(10_000u64 - slippage_bps) / U256::from(10_000u64);
         let path = vec![pool.token1, pool.token0];
@@ -741,11 +741,11 @@ impl OnChainSandwichStrategy {
         )?;
 
         Ok(Transaction {
-            hash: B256::ZERO,
-            from: alloy::primitives::Address::ZERO,
+            hash: H256::zero(),
+            from: Address::zero(),
             to: Some(*contracts::UNISWAP_V2_ROUTER),
-            value: U256::ZERO,
-            gas_price: U256::from_be_bytes(gas_price.to_be_bytes::<32>()),
+            value: U256::zero(),
+            gas_price: U256::from_big_endian(&crate::u256_to_be_bytes(gas_price)),
             gas_limit: U256::from(300_000u64),
             data: calldata.to_vec(),
             nonce: 0,
@@ -771,16 +771,16 @@ impl OnChainSandwichStrategy {
     /// alloy Transaction을 ethers Transaction으로 변환
     fn convert_to_ethers_transaction(&self, tx: &Transaction) -> Result<ethers::types::Transaction> {
         Ok(ethers::types::Transaction {
-            hash: ethers::types::H256::from_slice(tx.hash.as_slice()),
+            hash: ethers::types::H256::from_slice(tx.hash.as_bytes()),
             nonce: ethers::types::U256::from(tx.nonce as u64),
             block_hash: tx.block_number.map(|_| ethers::types::H256::zero()),
             block_number: tx.block_number.map(|n| ethers::types::U64::from(n as u64)),
             transaction_index: None,
-            from: ethers::types::H160::from_slice(tx.from.as_slice()),
-            to: tx.to.map(|addr| ethers::types::H160::from_slice(addr.as_slice())),
-            value: ethers::types::U256::from_little_endian(&tx.value.to_le_bytes::<32>()),
-            gas_price: Some(ethers::types::U256::from_little_endian(&tx.gas_price.to_le_bytes::<32>())),
-            gas: ethers::types::U256::from_little_endian(&tx.gas_limit.to_le_bytes::<32>()),
+            from: ethers::types::H160::from_slice(tx.from.as_bytes()),
+            to: tx.to.map(|addr| ethers::types::H160::from_slice(addr.as_bytes())),
+            value: ethers::types::U256::from_little_endian(&crate::u256_to_le_bytes(tx.value)),
+            gas_price: Some(ethers::types::U256::from_little_endian(&crate::u256_to_le_bytes(tx.gas_price))),
+            gas: ethers::types::U256::from_little_endian(&crate::u256_to_le_bytes(tx.gas_limit)),
             input: ethers::types::Bytes::from(tx.data.clone()),
             v: ethers::types::U64::zero(),
             r: ethers::types::U256::zero(),
@@ -886,7 +886,7 @@ impl Strategy for OnChainSandwichStrategy {
         
         // 현재 가스 가격 검증
         let (base_fee, _) = self.blockchain_client.get_gas_price().await?;
-        let base_fee_alloy = U256::from_limbs_slice(&base_fee.0);
+        let base_fee_alloy = crate::u256_from_ethers_internal(base_fee.0);
         if base_fee_alloy > self.max_gas_price {
             return Ok(false);
         }
@@ -911,7 +911,10 @@ impl Strategy for OnChainSandwichStrategy {
         let details = match &opportunity.details {
             crate::types::OpportunityDetails::Sandwich(d) => d,
             _ => {
-                return Ok(Bundle::new(vec![], 0, opportunity.expected_profit, 600_000, StrategyType::Sandwich));
+                use crate::mev::bundle::BundleType;
+                let mut bundle = Bundle::new(vec![], 0, BundleType::Sandwich, crate::types::OpportunityType::Sandwich);
+                bundle.metadata.expected_profit = ethers::types::U256::from_big_endian(&crate::u256_to_be_bytes(opportunity.expected_profit));
+                return Ok(bundle);
             }
         };
 
@@ -922,7 +925,12 @@ impl Strategy for OnChainSandwichStrategy {
         };
         let pool_info = match pool_info {
             Some(p) => p,
-            None => return Ok(Bundle::new(vec![], 0, opportunity.expected_profit, 600_000, StrategyType::Sandwich)),
+            None => {
+                use crate::mev::bundle::BundleType;
+                let mut bundle = Bundle::new(vec![], 0, BundleType::Sandwich, crate::types::OpportunityType::Sandwich);
+                bundle.metadata.expected_profit = ethers::types::U256::from_big_endian(&crate::u256_to_be_bytes(opportunity.expected_profit));
+                return Ok(bundle);
+            }
         };
 
         // 슬리피지 한도 계산: target_slippage를 amountOutMin에 반영
@@ -934,7 +942,7 @@ impl Strategy for OnChainSandwichStrategy {
         // create_* 함수 내부에서 amountOutMin=0이므로, 여기서는 별도 경고만 남김. 추후 함수 시그니처 확장 필요.
 
         // 실행 지갑 주소(수신자) 설정: 운영 시 config에서 주입 권장
-        let to_recipient: Address = "0x000000000000000000000000000000000000dead".parse().unwrap_or(Address::ZERO);
+        let to_recipient: Address = "0x000000000000000000000000000000000000dead".parse().unwrap_or(Address::zero());
 
         let frontrun = self
             .create_front_run_transaction_onchain(&details.frontrun_amount, &pool_info, opportunity.expected_profit, min_out_multiplier, to_recipient)
@@ -955,10 +963,10 @@ impl Strategy for OnChainSandwichStrategy {
         let codec = ABICodec::new();
         let approve_calldata = codec.encode_erc20_approve(*contracts::UNISWAP_V2_ROUTER, U256::from(u128::MAX))?;
         let approve_tx = Transaction {
-            hash: B256::ZERO,
-            from: Address::ZERO,
+            hash: H256::zero(),
+            from: Address::zero(),
             to: Some(pool_info.token0),
-            value: U256::ZERO,
+            value: U256::zero(),
             gas_price: U256::from(20_000_000_000u64),
             gas_limit: U256::from(60_000u64),
             data: approve_calldata.to_vec(),
@@ -968,23 +976,55 @@ impl Strategy for OnChainSandwichStrategy {
         };
 
         // Flashloan 경로 제거: 정책상 샌드위치는 플래시론을 사용하지 않음
-        let txs = vec![approve_tx, frontrun.clone(), backrun.clone()];
+        let txs_custom = vec![approve_tx, frontrun.clone(), backrun.clone()];
         if self.config.strategies.sandwich.use_flashloan {
             warn!("⚠️ Sandwich: flashloan 비활성 정책. use_flashloan=true 무시합니다.");
         }
 
+        // Convert crate::types::Transaction to ethers::types::Transaction
+        let txs: Vec<ethers::types::Transaction> = txs_custom.iter().map(|tx| {
+            ethers::types::Transaction {
+                hash: tx.hash,
+                nonce: tx.nonce.into(),
+                block_hash: None,
+                block_number: tx.block_number.map(|n| n.into()),
+                transaction_index: None,
+                from: tx.from,
+                to: tx.to,
+                value: tx.value,
+                gas_price: Some(tx.gas_price),
+                gas: tx.gas_limit,
+                input: ethers::types::Bytes::from(tx.data.clone()),
+                v: 0.into(),
+                r: U256::zero(),
+                s: U256::zero(),
+                transaction_type: None,
+                access_list: None,
+                max_priority_fee_per_gas: None,
+                max_fee_per_gas: None,
+                chain_id: None,
+                other: Default::default(),
+            }
+        }).collect();
+
+        use crate::mev::bundle::BundleType;
         let mut bundle = Bundle::new(
             txs,
             target_block,
-            opportunity.expected_profit,
-            gas_estimate + 60_000,
-            StrategyType::Sandwich,
+            BundleType::Sandwich,
+            crate::types::OpportunityType::Sandwich,
         );
+
+        // 메타데이터 업데이트
+        bundle.metadata.expected_profit = {
+            let bytes = crate::u256_to_be_bytes(opportunity.expected_profit);
+            ethers::types::U256::from_big_endian(&bytes)
+        };
 
         // 가스 전략 적용(최대 수수료/우선수수료)
         if let Ok((base_fee, priority_fee)) = self.blockchain_client.get_gas_price().await {
-            let base_fee_alloy = U256::from_limbs_slice(&base_fee.0);
-            let priority_alloy = U256::from_limbs_slice(&priority_fee.0);
+            let base_fee_alloy = crate::u256_from_ethers_internal(base_fee.0);
+            let priority_alloy = crate::u256_from_ethers_internal(priority_fee.0);
             let max_priority = std::cmp::min(priority_alloy * U256::from(2u64), self.max_gas_price);
             let max_fee = std::cmp::min(base_fee_alloy + max_priority * U256::from(2u64), self.max_gas_price);
             bundle.max_priority_fee_per_gas = Some(max_priority);
@@ -1000,6 +1040,6 @@ impl Strategy for OnChainSandwichStrategy {
 
 /// ETH 금액 포맷팅 헬퍼
 fn format_eth_amount(wei: U256) -> String {
-    let eth = wei.to::<u128>() as f64 / 1e18;
+    let eth = wei.as_u128() as f64 / 1e18;
     format!("{:.6} ETH", eth)
 }

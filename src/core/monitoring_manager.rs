@@ -60,7 +60,7 @@ async fn metrics_handler(tracker: Arc<PerformanceTracker>) -> impl IntoResponse 
         opportunities_found: metrics.opportunities_found,
         bundles_submitted: metrics.bundles_submitted,
         bundles_included: metrics.bundles_included,
-        total_profit_eth: ethers::utils::format_ether(ethers::types::U256::from_big_endian(&metrics.total_profit.to_be_bytes::<32>())),
+        total_profit_eth: ethers::utils::format_ether(ethers::types::U256::from_big_endian(&crate::common::abi::u256_to_be_bytes(metrics.total_profit))),
         success_rate: metrics.success_rate,
         avg_analysis_time_ms: metrics.avg_analysis_time,
         avg_submission_time_ms: metrics.avg_submission_time,

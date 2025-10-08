@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import {
   getOnChainAnalytics,
   type OnChainAnalytics
-} from '@/lib/api';
+} from '../../lib/api';
 
 export default function OnChainPage() {
   const [analytics, setAnalytics] = useState<OnChainAnalytics | null>(null);

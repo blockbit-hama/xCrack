@@ -48,6 +48,9 @@ pub struct Config {
     pub blockchain: BlockchainConfig,
     pub strategies: StrategyConfig,
     pub flashbots: FlashbotsConfig,
+    // 동적 설정 저장소 (런타임에 변경 가능)
+    #[serde(skip)]
+    pub dynamic_config: std::sync::Arc<tokio::sync::RwLock<HashMap<String, serde_json::Value>>>,
     pub safety: SafetyConfig,
     pub monitoring: MonitoringConfig,
     pub performance: PerformanceConfig,
@@ -64,7 +67,8 @@ pub struct Config {
 pub struct StrategyConfig {
     pub sandwich: SandwichConfig,
     pub liquidation: LiquidationConfig,
-    pub micro_arbitrage: MicroArbitrageConfig,
+    pub cex_dex_arbitrage: CexDexArbitrageConfig,
+    pub complex_arbitrage: ComplexArbitrageConfig,
 }
 
 
@@ -101,7 +105,7 @@ pub struct LiquidationConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MicroArbitrageConfig {
+pub struct CexDexArbitrageConfig {
     pub enabled: bool,
     pub exchanges: Vec<ExchangeConfig>, // 모니터링할 거래소들
     pub trading_pairs: Vec<String>, // 거래할 토큰 페어들
@@ -138,6 +142,21 @@ pub struct MicroArbitrageConfig {
     /// 가스 버퍼 (플래시론용, 기본: 20%)
     #[serde(default = "default_gas_buffer_pct")]
     pub gas_buffer_pct: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComplexArbitrageConfig {
+    pub enabled: bool,
+    pub strategies: Vec<String>, // triangular, position_migration, complex
+    pub max_path_length: usize, // 최대 경로 길이
+    pub min_profit_percentage: f64, // 최소 수익률
+    pub min_profit_usd: String, // 최소 수익 달러 금액
+    pub max_position_size: String, // 최대 포지션 크기
+    pub max_concurrent_trades: usize, // 최대 동시 거래 수
+    pub execution_timeout_ms: u64, // 실행 타임아웃
+    pub flashloan_protocols: Vec<String>, // 사용할 플래시론 프로토콜
+    pub max_flashloan_fee_bps: u32, // 최대 플래시론 수수료
+    pub gas_buffer_pct: f64, // 가스 버퍼
 }
 
 
@@ -276,9 +295,36 @@ fn default_gas_buffer_pct() -> f64 {
 }
 
 impl Config {
+    /// 동적 설정 저장
+    pub async fn set_dynamic_config(&self, key: String, value: serde_json::Value) -> Result<()> {
+        let mut config = self.dynamic_config.write().await;
+        config.insert(key, value);
+        Ok(())
+    }
+
+    /// 동적 설정 조회
+    pub async fn get_dynamic_config(&self, key: &str) -> Option<serde_json::Value> {
+        let config = self.dynamic_config.read().await;
+        config.get(key).cloned()
+    }
+
+    /// 전략별 동적 설정 조회
+    pub async fn get_strategy_config(&self, strategy: &str) -> Option<serde_json::Value> {
+        self.get_dynamic_config(&format!("strategy_{}", strategy)).await
+    }
+
+    /// 전략별 동적 설정 저장
+    pub async fn set_strategy_config(&self, strategy: &str, config: serde_json::Value) -> Result<()> {
+        self.set_dynamic_config(format!("strategy_{}", strategy), config).await
+    }
+
     pub async fn load(path: &str) -> Result<Self> {
         let content = tokio::fs::read_to_string(path).await?;
-        let config: Config = toml::from_str(&content)?;
+        let mut config: Config = toml::from_str(&content)?;
+        
+        // 동적 설정 저장소 초기화
+        config.dynamic_config = std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        
         Ok(config)
     }
 
@@ -431,11 +477,11 @@ impl Config {
                     max_flashloan_fee_bps: 9, // 9 basis points (0.09%)
                     gas_buffer_pct: 20.0, // 20% 가스 버퍼
                 },
-                cross_chain_arbitrage: CrossChainArbitrageConfig {
-                    enabled: true,
-                    use_flashloan: false,
-                    flash_loan_amount: None,
-                },
+                // cross_chain_arbitrage: CrossChainArbitrageConfig {  // 크로스체인 제거됨
+                //     enabled: true,
+                //     use_flashloan: false,
+                //     flash_loan_amount: None,
+                // },
             },
             flashbots: FlashbotsConfig {
                 relay_url: "https://relay.flashbots.net".to_string(),

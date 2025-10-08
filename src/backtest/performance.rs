@@ -1,6 +1,6 @@
 /// Performance analysis for backtesting
 use crate::types::OrderExecutionResult;
-use alloy::primitives::U256;
+use ethers::types::U256;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -51,7 +51,7 @@ impl PerformanceAnalyzer {
         _initial_capital: f64,
     ) -> anyhow::Result<crate::types::PerformanceMetrics> {
         use crate::types::PerformanceMetrics;
-        use alloy::primitives::U256;
+        use ethers::types::U256;
         
         let total_trades = trades.len() as u64;
         let successful_trades = trades.iter().filter(|t| {
@@ -111,16 +111,16 @@ impl PerformanceAnalyzer {
         
         let total_profit = self.executions.iter()
             .map(|e| e.filled_amount)
-            .fold(U256::ZERO, |acc, x| acc + x);
+            .fold(U256::zero(), |acc, x| acc + x);
             
         let total_fees = self.executions.iter()
             .map(|e| e.fees)
-            .fold(U256::ZERO, |acc, x| acc + x);
+            .fold(U256::zero(), |acc, x| acc + x);
             
         let net_profit = if total_profit > total_fees {
             total_profit - total_fees
         } else {
-            U256::ZERO
+            U256::zero()
         };
         
         let success_rate = if total_trades > 0 {
@@ -156,13 +156,13 @@ impl PerformanceAnalyzer {
 
             let entry = map.entry(strategy_key).or_insert_with(|| StrategyPerformance {
                 trades: 0,
-                profit: U256::ZERO,
+                profit: U256::zero(),
                 success_rate: 0.0,
-                avg_profit_per_trade: U256::ZERO,
+                avg_profit_per_trade: U256::zero(),
             });
 
             entry.trades += 1;
-            let pnl = if exec.filled_amount > exec.fees { exec.filled_amount - exec.fees } else { U256::ZERO };
+            let pnl = if exec.filled_amount > exec.fees { exec.filled_amount - exec.fees } else { U256::zero() };
             entry.profit = entry.profit + pnl;
         }
 
@@ -200,12 +200,12 @@ impl PerformanceAnalyzer {
     
     /// Calculate maximum drawdown
     fn calculate_max_drawdown(&self) -> f64 {
-        let mut peak = self.starting_balance.to::<u128>() as f64;
+        let mut peak = self.starting_balance.as_u128() as f64;
         let mut max_drawdown = 0.0;
         let mut current_balance = peak;
         
         for execution in &self.executions {
-            let pnl = execution.filled_amount.to::<u128>() as f64 - execution.fees.to::<u128>() as f64;
+            let pnl = execution.filled_amount.as_u128() as f64 - execution.fees.as_u128() as f64;
             current_balance += pnl;
             
             if current_balance > peak {
@@ -229,8 +229,8 @@ impl PerformanceAnalyzer {
         
         let returns: Vec<f64> = self.executions.iter()
             .map(|e| {
-                let pnl = e.filled_amount.to::<u128>() as f64 - e.fees.to::<u128>() as f64;
-                pnl / self.starting_balance.to::<u128>() as f64
+                let pnl = e.filled_amount.as_u128() as f64 - e.fees.as_u128() as f64;
+                pnl / self.starting_balance.as_u128() as f64
             })
             .collect();
         

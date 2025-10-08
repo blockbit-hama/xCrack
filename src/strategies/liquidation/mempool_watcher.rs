@@ -1,8 +1,9 @@
 use std::sync::Arc;
 use anyhow::Result;
 use tracing::{info, debug, warn};
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use ethers::providers::{Provider, Ws};
+use ethers::middleware::Middleware;
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep, Duration};
 
@@ -186,16 +187,16 @@ impl LiquidationMempoolWatcher {
             // 청산 관련 트랜잭션 감지
             if let Some(to) = tx.to {
                 // Aave, Compound, MakerDAO 주소 확인
-                if self.is_lending_protocol_address(&to) {
+                if self.is_lending_protocol_address(&Address::from_slice(&to.as_bytes())) {
                     // 청산 함수 호출 감지
                     if self.is_liquidation_call(&tx.input) {
-                        self.process_competitor_liquidation(tx).await?;
+                        self.process_competitor_liquidation(tx.clone()).await?;
                     }
                 }
 
                 // 오라클 업데이트 감지
-                if self.is_oracle_address(&to) {
-                    self.process_oracle_update(tx).await?;
+                if self.is_oracle_address(&Address::from_slice(&to.as_bytes())) {
+                    self.process_oracle_update(tx.clone()).await?;
                 }
             }
 
@@ -254,10 +255,19 @@ impl LiquidationMempoolWatcher {
 
     /// 경쟁 청산 처리
     async fn process_competitor_liquidation(&self, tx: ethers::types::Transaction) -> Result<()> {
+        // Convert ethers types to alloy types
+        let user_address = Address::from_slice(tx.from.as_bytes());
+        let gas_price = tx.gas_price.unwrap_or_default();
+        let gas_price_alloy = {
+            let mut bytes = [0u8; 32];
+            gas_price.to_big_endian(&mut bytes);
+            U256::from_big_endian(&bytes)
+        };
+
         let signal = LiquidationSignal::CompetitorLiquidation {
-            user: tx.from,
+            user: user_address,
             protocol: ProtocolType::Aave, // TODO: 트랜잭션에서 프로토콜 파싱
-            competitor_gas_price: tx.gas_price.unwrap_or_default(),
+            competitor_gas_price: gas_price_alloy,
             our_advantage: false, // TODO: 우리 전략과 비교
             timestamp: chrono::Utc::now(),
         };
@@ -268,9 +278,9 @@ impl LiquidationMempoolWatcher {
     /// 오라클 업데이트 처리
     async fn process_oracle_update(&self, _tx: ethers::types::Transaction) -> Result<()> {
         let signal = LiquidationSignal::OracleUpdate {
-            asset: Address::ZERO, // TODO: 트랜잭션에서 자산 파싱
-            old_price: U256::ZERO,
-            new_price: U256::ZERO,
+            asset: Address::zero(), // TODO: 트랜잭션에서 자산 파싱
+            old_price: U256::zero(),
+            new_price: U256::zero(),
             affected_positions: vec![],
             urgency: LiquidationUrgency::Medium,
             timestamp: chrono::Utc::now(),
@@ -285,12 +295,26 @@ impl LiquidationMempoolWatcher {
             // 이전 가스 가격과 비교 (간단화)
             let base_gas_price = U256::from(20_000_000_000u64); // 20 gwei
 
-            if gas_price > base_gas_price * ethers::types::U256::from(2) {
+            if gas_price > ethers::types::U256::from(2) * ethers::types::U256::from(base_gas_price.as_u128()) {
                 let spike_percentage = ((gas_price.as_u128() as f64 / base_gas_price.as_u128() as f64) - 1.0) * 100.0;
 
+                // Convert ethers::U256 to U256
+                let old_gas_price_alloy = {
+                    let mut bytes = [0u8; 32];
+                    let bytes_slice = crate::common::abi::u256_to_be_bytes(base_gas_price);
+                    bytes.copy_from_slice(&bytes_slice);
+                    U256::from_big_endian(&bytes)
+                };
+                let new_gas_price_alloy = {
+                    let mut bytes = [0u8; 32];
+                    let gas_price_bytes = crate::common::abi::u256_to_be_bytes(gas_price);
+                    bytes.copy_from_slice(&gas_price_bytes);
+                    U256::from_big_endian(&bytes)
+                };
+
                 let signal = LiquidationSignal::GasPriceSpike {
-                    old_gas_price: base_gas_price,
-                    new_gas_price: gas_price,
+                    old_gas_price: old_gas_price_alloy,
+                    new_gas_price: new_gas_price_alloy,
                     spike_percentage,
                     timestamp: chrono::Utc::now(),
                 };

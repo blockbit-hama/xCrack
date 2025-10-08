@@ -3,24 +3,26 @@ use tokio::sync::Mutex;
 use std::collections::HashMap;
 use anyhow::Result;
 use tracing::info;
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use ethers::providers::{Provider, Ws};
 use serde::{Deserialize, Serialize};
 use tokio::time::{sleep, Duration};
 
 use crate::config::Config;
 use crate::protocols::{MultiProtocolScanner, LiquidatableUser, ProtocolType, UserAccountData};
+use crate::storage::Database;
 
 /// 청산 상태 인덱서 - 프로토콜 상태 지속적 모니터링
 pub struct LiquidationStateIndexer {
     config: Arc<Config>,
     provider: Arc<Provider<Ws>>,
     protocol_scanner: Arc<Mutex<MultiProtocolScanner>>,
-    
-    // 인덱싱된 상태
+    database: Option<Arc<Database>>, // Optional for backward compatibility
+
+    // 인덱싱된 상태 (메모리 캐시)
     indexed_positions: Arc<tokio::sync::RwLock<HashMap<Address, UserPosition>>>,
     liquidation_candidates: Arc<tokio::sync::RwLock<Vec<LiquidationCandidate>>>,
-    
+
     // 인덱싱 상태
     is_indexing: Arc<tokio::sync::RwLock<bool>>,
     last_index_time: Arc<tokio::sync::RwLock<Option<chrono::DateTime<chrono::Utc>>>>,
@@ -103,16 +105,29 @@ impl LiquidationStateIndexer {
         protocol_scanner: Arc<Mutex<MultiProtocolScanner>>,
     ) -> Result<Self> {
         info!("📊 Initializing Liquidation State Indexer...");
-        
+
+        // PostgreSQL 데이터베이스 연결 시도
+        let database = match Database::from_env().await {
+            Ok(db) => {
+                info!("✅ PostgreSQL database connected");
+                Some(Arc::new(db))
+            }
+            Err(e) => {
+                info!("⚠️  PostgreSQL not available: {}, using memory-only mode", e);
+                None
+            }
+        };
+
         let indexed_positions = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
         let liquidation_candidates = Arc::new(tokio::sync::RwLock::new(Vec::new()));
         let is_indexing = Arc::new(tokio::sync::RwLock::new(false));
         let last_index_time = Arc::new(tokio::sync::RwLock::new(None));
-        
+
         Ok(Self {
             config,
             provider,
             protocol_scanner,
+            database,
             indexed_positions,
             liquidation_candidates,
             is_indexing,
@@ -187,23 +202,30 @@ impl LiquidationStateIndexer {
         // 각 프로토콜의 사용자 포지션 인덱싱
         for (_protocol_type, users) in liquidatable_users {
             for user in users {
-                let position = self.build_user_position(user).await?;
-                
-                // 포지션 저장
+                let position = self.build_user_position(user.clone()).await?;
+
+                // 메모리 캐시에 저장
                 {
                     let mut positions = self.indexed_positions.write().await;
                     positions.insert(position.user, position.clone());
                 }
-                
+
+                // PostgreSQL 데이터베이스에 저장
+                if let Some(db) = &self.database {
+                    if let Err(e) = db.upsert_user(&user).await {
+                        tracing::warn!("Failed to save user to database: {}", e);
+                    }
+                }
+
                 total_users += 1;
                 if position.is_liquidatable {
                     liquidatable_count += 1;
                 }
             }
         }
-        
+
         info!("📊 Indexed {} total users, {} liquidatable", total_users, liquidatable_count);
-        
+
         Ok(())
     }
     
@@ -382,7 +404,7 @@ impl LiquidationStateIndexer {
     
     /// 우선순위 점수 계산
     fn calculate_priority_score(&self, position: &UserPosition, estimated_profit: U256) -> f64 {
-        let profit_score = estimated_profit.to::<u128>() as f64 / 1e18;
+        let profit_score = estimated_profit.as_u128() as f64 / 1e18;
         let urgency_score = match self.determine_urgency(position.health_factor) {
             LiquidationUrgency::Critical => 1.0,
             LiquidationUrgency::High => 0.8,

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use ethers::prelude::*;
 use ethers::types::H256;
-use alloy::primitives::U256 as AlloyU256;
+use U256 as U256;
 use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -160,7 +160,7 @@ impl FlashbotsClient {
                     return Err(anyhow!("번들 시뮬레이션 실패"));
                 }
                 
-                let net_profit_eth = simulation.net_profit.to::<u128>() as f64 / 1e18;
+                let net_profit_eth = simulation.net_profit.as_u128() as f64 / 1e18;
                 info!("✅ 번들 시뮬레이션 성공: 순 수익 {:.6} ETH", net_profit_eth);
             }
             Err(e) => {
@@ -284,10 +284,10 @@ impl FlashbotsClient {
         if let Some(error) = simulation_result.error {
             return Ok(SimulationResult {
                 success: false,
-                profit: AlloyU256::ZERO,
+                profit: U256::zero(),
                 gas_used: 0,
-                gas_cost: AlloyU256::ZERO,
-                net_profit: AlloyU256::ZERO,
+                gas_cost: U256::zero(),
+                net_profit: U256::zero(),
                 price_impact: 0.0,
                 error_message: Some(error),
                 traces: None,
@@ -301,27 +301,28 @@ impl FlashbotsClient {
         
         // 가스 비용 계산 (평균 가스 가격 사용)
         let avg_gas_price = if !bundle.transactions.is_empty() {
-            bundle.transactions.iter()
+            let total = bundle.transactions.iter()
                 .map(|tx| tx.gas_price)
-                .sum::<AlloyU256>() / AlloyU256::from(bundle.transactions.len())
+                .fold(U256::zero(), |acc, x| acc + x);
+            total / U256::from(bundle.transactions.len())
         } else {
-            AlloyU256::from(20_000_000_000u64) // 20 gwei default
+            U256::from(20_000_000_000u64) // 20 gwei default
         };
         
-        let gas_cost = AlloyU256::from(total_gas_used) * avg_gas_price;
-        
+        let gas_cost = U256::from(total_gas_used) * avg_gas_price;
+
         // 순 수익 계산
         let net_profit = if bundle.expected_profit > gas_cost {
             bundle.expected_profit - gas_cost
         } else {
-            AlloyU256::ZERO
+            U256::zero()
         };
         
         let success = simulation_result.result.iter()
             .all(|result| result.error.is_none());
         
         if success {
-            let net_profit_eth = net_profit.to::<u128>() as f64 / 1e18;
+            let net_profit_eth = net_profit.as_u128() as f64 / 1e18;
             info!("✅ 시뮬레이션 성공: 가스 {} gas, 순 수익 {:.6} ETH", 
                   total_gas_used, net_profit_eth);
         } else {
@@ -360,7 +361,7 @@ impl FlashbotsClient {
                     return Ok(false);
                 }
                 
-                let net_profit_eth = simulation.net_profit.to::<u128>() as f64 / 1e18;
+                let net_profit_eth = simulation.net_profit.as_u128() as f64 / 1e18;
                 debug!("✅ 번들 시뮬레이션 성공: 순 수익 {:.6} ETH", net_profit_eth);
             }
             Err(e) => {
@@ -410,14 +411,25 @@ impl FlashbotsClient {
     pub async fn simulate_bundle(&self, bundle: &Bundle) -> Result<SimulationResult> {
         // Simplified bundle simulation
         info!("🔬 Simulating bundle {}", bundle.id);
-        
+
+        // Calculate total gas estimate from transactions (ethers::types::U256)
+        let total_gas_ethers = bundle.total_gas_limit();
+        let gas_estimate_u64 = total_gas_ethers.as_u64();
+
+        // Convert expected_profit to alloy U256
+        let expected_profit_alloy = {
+            let mut bytes = [0u8; 32];
+            bundle.metadata.expected_profit.to_big_endian(&mut bytes);
+            U256::from_big_endian(&bytes)
+        };
+
         // Mock simulation result
         Ok(SimulationResult {
             success: true,
-            profit: bundle.expected_profit,
-            gas_used: bundle.gas_estimate,
-            gas_cost: AlloyU256::from(bundle.gas_estimate) * AlloyU256::from(20_000_000_000u64), // 20 gwei
-            net_profit: bundle.expected_profit,
+            profit: expected_profit_alloy,
+            gas_used: gas_estimate_u64,
+            gas_cost: U256::from(gas_estimate_u64) * U256::from(20_000_000_000u64), // 20 gwei
+            net_profit: expected_profit_alloy,
             price_impact: 0.02, // 2%
             error_message: None,
             traces: Some(vec!["Mock trace".to_string()]),

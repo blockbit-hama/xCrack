@@ -11,7 +11,7 @@ use chrono::Utc;
 
 use crate::config::Config;
 use crate::types::{PriceData, OrderBookSnapshot};
-use alloy::primitives::U256;
+use ethers::types::U256;
 use crate::strategies::MicroArbitrageStrategy;
 
 /// 가격 피드 관리자
@@ -351,7 +351,7 @@ impl PriceFeedManager {
             }
             prev_bid_price = Some(bid.price);
             
-            if bid.price <= Decimal::ZERO || bid.quantity <= U256::ZERO {
+            if bid.price <= Decimal::ZERO || bid.quantity <= U256::zero() {
                 return Ok(false);
             }
         }
@@ -365,7 +365,7 @@ impl PriceFeedManager {
             }
             prev_ask_price = Some(ask.price);
             
-            if ask.price <= Decimal::ZERO || ask.quantity <= U256::ZERO {
+            if ask.price <= Decimal::ZERO || ask.quantity <= U256::zero() {
                 return Ok(false);
             }
         }

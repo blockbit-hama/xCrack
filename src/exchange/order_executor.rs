@@ -15,7 +15,7 @@ use crate::config::{Config, ExchangeConfig, ExchangeType};
 use crate::types::{
     MicroArbitrageOpportunity, OrderExecutionResult, OrderSide, OrderStatus, PriceData,
 };
-use alloy::primitives::U256;
+use ethers::types::U256;
 // ethers 트레이트 메서드 사용을 위한 import
 use ethers::signers::Signer;
 use ethers::providers::Middleware;
@@ -275,9 +275,9 @@ impl OrderExecutor {
                 failed_executions: 0,
                 timed_out_executions: 0,
                 partial_executions: 0,
-                total_volume: U256::ZERO,
-                total_profit: U256::ZERO,
-                total_fees: U256::ZERO,
+                total_volume: U256::zero(),
+                total_profit: U256::zero(),
+                total_fees: U256::zero(),
                 avg_execution_time_ms: 0.0,
                 avg_latency_ms: 0.0,
                 success_rate: 0.0,
@@ -1014,12 +1014,12 @@ impl OrderExecutor {
             side: if has_buy_order { OrderSide::Buy } else { OrderSide::Sell },
             amount: opportunity.max_amount,
             price: if has_buy_order { opportunity.buy_price } else { opportunity.sell_price },
-            filled_amount: U256::ZERO,  // 부분 체결이므로 정확한 체결량은 알 수 없음
+            filled_amount: U256::zero(),  // 부분 체결이므로 정확한 체결량은 알 수 없음
             filled_price: Decimal::ZERO,
             status: OrderStatus::PartiallyFilled,
             execution_time: Utc::now(),
             latency_ms: 0,
-            fees: U256::ZERO,
+            fees: U256::zero(),
             strategy_key: Some("micro_arbitrage".to_string()),
         };
         
@@ -1058,7 +1058,7 @@ impl OrderExecutor {
     /// 부분 체결 위험도 평가
     async fn evaluate_partial_execution_risk(&self, opportunity: &MicroArbitrageOpportunity) -> RiskLevel {
         // USD 가치 계산 (예시: 1 ETH = $2000)
-        let position_value_usd = opportunity.max_amount.to::<u64>() * 2000 / 10u64.pow(18);
+        let position_value_usd = opportunity.max_amount.as_u64() * 2000 / 10u64.pow(18);
         
         // 위험도 판단 기준
         if position_value_usd > 10000 {

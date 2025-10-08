@@ -6,8 +6,8 @@
 // 전략 모듈들
 pub mod sandwich;
 pub mod liquidation;
-pub mod micro_arbitrage;
-pub mod multi_asset_arbitrage;
+pub mod cex_dex_arbitrage;
+pub mod complex_arbitrage;
 
 // 공통 유틸리티는 src/common에서 사용
 

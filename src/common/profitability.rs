@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use anyhow::Result;
 use tracing::{debug, info};
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
@@ -170,7 +170,7 @@ impl ProfitabilityCalculator {
         let recommended_liquidation_amount = best_strategy
             .as_ref()
             .map(|s| s.liquidation_amount)
-            .unwrap_or(U256::ZERO);
+            .unwrap_or(U256::zero());
         
         let risk_score = self.calculate_risk_score(user, &best_strategy);
         
@@ -210,7 +210,7 @@ impl ProfitabilityCalculator {
             user.protocol.clone(),
         )?;
         
-        let liquidation_amount_usd = (liquidation_amount.to::<u128>() as f64 / 1e18) * debt_price_usd;
+        let liquidation_amount_usd = (liquidation_amount.as_u128() as f64 / 1e18) * debt_price_usd;
         
         // 2. 예상 담보 획득량 계산 (Liquidation Bonus 적용)
         let liquidation_bonus = user.liquidation_bonus.get(&debt_asset).copied().unwrap_or(0.05); // 5% 기본
@@ -236,7 +236,7 @@ impl ProfitabilityCalculator {
         ).await?;
         
         // 5. 순이익 계산
-        let swap_output_usd = (swap_quote.buy_amount.to::<u128>() as f64 / 1e18) * debt_price_usd;
+        let swap_output_usd = (swap_quote.buy_amount.as_u128() as f64 / 1e18) * debt_price_usd;
         let net_profit_usd = swap_output_usd - liquidation_amount_usd - cost_breakdown.total_cost_usd;
         let profit_margin_percent = (net_profit_usd / liquidation_amount_usd) * 100.0;
         
@@ -266,7 +266,7 @@ impl ProfitabilityCalculator {
         debt_price_usd: f64,
         protocol: ProtocolType,
     ) -> Result<U256> {
-        let max_liquidatable_usd = (max_liquidatable.to::<u128>() as f64 / 1e18) * debt_price_usd;
+        let max_liquidatable_usd = (max_liquidatable.as_u128() as f64 / 1e18) * debt_price_usd;
         
         // 프로토콜별 최적 청산 전략
         let optimal_amount_usd = match protocol {

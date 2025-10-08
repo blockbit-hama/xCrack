@@ -8,7 +8,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::config::Config;
 use crate::types::PerformanceMetrics;
-use alloy::primitives::U256;
+use ethers::types::U256;
 
 pub struct PerformanceTracker {
     config: Arc<Config>,
@@ -106,8 +106,8 @@ impl PerformanceTracker {
             opportunities_found: 0,
             bundles_submitted: 0,
             bundles_included: 0,
-            total_profit: U256::ZERO,
-            total_gas_spent: U256::ZERO,
+            total_profit: U256::zero(),
+            total_gas_spent: U256::zero(),
             avg_analysis_time: 0.0,
             avg_submission_time: 0.0,
             success_rate: 0.0,
@@ -121,8 +121,8 @@ impl PerformanceTracker {
                 bundles_submitted: 0,
                 bundles_included: 0,
                 bundles_failed: 0,
-                total_profit: U256::ZERO,
-                total_gas_spent: U256::ZERO,
+                total_profit: U256::zero(),
+                total_gas_spent: U256::zero(),
                 avg_submission_time_ms: 0.0,
                 avg_inclusion_time_ms: 0.0,
                 success_rate: 0.0,
@@ -198,7 +198,7 @@ impl PerformanceTracker {
                 transactions_analyzed: 0,
                 opportunities_found: 0,
                 opportunities_executed: 0,
-                total_profit: U256::ZERO,
+                total_profit: U256::zero(),
                 avg_analysis_time_ms: 0.0,
                 success_rate: 0.0,
                 last_activity: 0,
@@ -394,7 +394,7 @@ impl PerformanceTracker {
                 opportunities_found: metrics.opportunities_found,
                 bundles_submitted: metrics.bundles_submitted,
                 bundles_included: metrics.bundles_included,
-                total_profit_eth: ethers::utils::format_ether(ethers::types::U256::from_big_endian(&metrics.total_profit.to_be_bytes::<32>())),
+                total_profit_eth: ethers::utils::format_ether(ethers::types::U256::from_big_endian(&crate::common::abi::u256_to_be_bytes(metrics.total_profit))),
                 success_rate: metrics.success_rate,
                 avg_analysis_time_ms: metrics.avg_analysis_time,
                 avg_submission_time_ms: metrics.avg_submission_time,
@@ -445,8 +445,8 @@ impl PerformanceTracker {
             opportunities_found: 0,
             bundles_submitted: 0,
             bundles_included: 0,
-            total_profit: U256::ZERO,
-            total_gas_spent: U256::ZERO,
+            total_profit: U256::zero(),
+            total_gas_spent: U256::zero(),
             avg_analysis_time: 0.0,
             avg_submission_time: 0.0,
             success_rate: 0.0,
@@ -460,8 +460,8 @@ impl PerformanceTracker {
                 bundles_submitted: 0,
                 bundles_included: 0,
                 bundles_failed: 0,
-                total_profit: U256::ZERO,
-                total_gas_spent: U256::ZERO,
+                total_profit: U256::zero(),
+                total_gas_spent: U256::zero(),
                 avg_submission_time_ms: 0.0,
                 avg_inclusion_time_ms: 0.0,
                 success_rate: 0.0,
@@ -551,7 +551,7 @@ mod tests {
         tracker.record_transaction_processed(50.0).await.unwrap();
         
         // 기회 발견 기록
-        tracker.record_opportunity_found("arbitrage", alloy::primitives::U256::from(1000000000000000000u128)).await.unwrap();
+        tracker.record_opportunity_found("arbitrage", U256::from(1000000000000000000u128)).await.unwrap();
         
         // 메트릭 조회
         let metrics = tracker.get_metrics().await;

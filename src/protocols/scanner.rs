@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use tracing::{info, debug, warn, error};
-use alloy::primitives::Address;
+use ethers::types::Address;
 use tokio::sync::RwLock;
 use tokio::time::{interval, Duration};
 use ethers::providers::{Provider, Ws};

@@ -3,9 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::{Result, anyhow};
 use tokio::sync::Mutex;
 use tracing::{info, debug};
-use alloy::{
-    primitives::{Address, B256, U256},
-};
+use ethers::types::{Address, H256, U256};
 use ethers::providers::{Provider, Ws, Middleware};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -13,11 +11,11 @@ use std::time::Instant;
 
 use crate::config::Config;
 use crate::types::{Transaction, Opportunity, StrategyType, Bundle};
-use crate::common::Strategy;
+use crate::Strategy;
 
 /// ETH 금액을 포맷팅하는 헬퍼 함수
 fn format_eth_amount(wei: U256) -> String {
-    let eth = wei.to::<u128>() as f64 / 1e18;
+    let eth = wei.as_u128() as f64 / 1e18;
     format!("{:.6} ETH", eth)
 }
 
@@ -154,8 +152,8 @@ impl RealTimeSandwichStrategy {
                 transactions_analyzed: 0,
                 opportunities_found: 0,
                 successful_sandwiches: 0,
-                total_profit: U256::ZERO,
-                avg_profit_per_sandwich: U256::ZERO,
+                total_profit: U256::zero(),
+                avg_profit_per_sandwich: U256::zero(),
                 last_analysis_time: None,
             })),
         })
@@ -252,7 +250,7 @@ impl RealTimeSandwichStrategy {
             return Ok(None);
         }
         
-        let profit_percentage = (net_profit.to::<u128>() as f64 / optimal_size.amount.to::<u128>() as f64) * 100.0;
+        let profit_percentage = (net_profit.as_u128() as f64 / optimal_size.amount.as_u128() as f64) * 100.0;
         if profit_percentage < self.min_profit_percentage {
             debug!("❌ 샌드위치 수익률이 너무 낮음: {:.2}%", profit_percentage);
             return Ok(None);
@@ -289,14 +287,14 @@ impl RealTimeSandwichStrategy {
         // 여기서는 간단한 예시로 구현
         
         let amount_in = tx.value;
-        let token_in = Address::ZERO; // ETH
+        let token_in = Address::zero(); // ETH
         let token_out = "0xA0b86a33E6417f8C681A1fFE6954e127c9cd8e46".parse()?; // USDC 토큰
         
         Ok(SwapDetails {
             token_in,
             token_out,
             amount_in,
-            amount_out_min: U256::ZERO, // 실제로는 파싱 필요
+            amount_out_min: U256::zero(), // 실제로는 파싱 필요
             path: vec![token_in, token_out],
             deadline: U256::from(chrono::Utc::now().timestamp() + 300), // 5분 후
         })
@@ -308,7 +306,7 @@ impl RealTimeSandwichStrategy {
         // 여기서는 간단한 추정치 사용
         
         let pool_size = U256::from_str_radix("1000000000000000000000", 10).unwrap(); // 1000 ETH
-        let impact = (swap_details.amount_in.to::<u128>() as f64 / pool_size.to::<u128>() as f64) * 100.0;
+        let impact = (swap_details.amount_in.as_u128() as f64 / pool_size.as_u128() as f64) * 100.0;
         
         Ok(PriceImpact {
             percentage: impact,
@@ -355,15 +353,15 @@ impl RealTimeSandwichStrategy {
         
         // 실제 구현에서는 ABI 인코딩을 사용
         // 여기서는 간단한 예시
-        data.extend_from_slice(&optimal_size.amount.to_be_bytes::<32>());
-        data.extend_from_slice(&swap_details.amount_out_min.to_be_bytes::<32>());
-        data.extend_from_slice(swap_details.path[0].as_slice());
-        data.extend_from_slice(swap_details.path[1].as_slice());
-        data.extend_from_slice(&swap_details.deadline.to_be_bytes::<32>());
+        data.extend_from_slice(&crate::u256_to_be_bytes(optimal_size.amount));
+        data.extend_from_slice(&crate::u256_to_be_bytes(swap_details.amount_out_min));
+        data.extend_from_slice(swap_details.path[0].as_bytes());
+        data.extend_from_slice(swap_details.path[1].as_bytes());
+        data.extend_from_slice(&crate::u256_to_be_bytes(swap_details.deadline));
         
         Ok(Transaction {
-            hash: B256::ZERO,
-            from: Address::ZERO, // 실제 구현에서는 지갑 주소
+            hash: H256::zero(),
+            from: Address::zero(), // 실제 구현에서는 지갑 주소
             to: Some(dex_info.router_address),
             value: optimal_size.amount,
             gas_price,
@@ -391,17 +389,17 @@ impl RealTimeSandwichStrategy {
         let mut data = dex_info.swap_function.clone();
         
         // 백런에서는 토큰을 다시 ETH로 스왑
-        data.extend_from_slice(&optimal_size.amount.to_be_bytes::<32>());
-        data.extend_from_slice(&U256::ZERO.to_be_bytes::<32>()); // 최소 출력량
-        data.extend_from_slice(swap_details.path[1].as_slice()); // 토큰
-        data.extend_from_slice(swap_details.path[0].as_slice()); // ETH
-        data.extend_from_slice(&swap_details.deadline.to_be_bytes::<32>());
+        data.extend_from_slice(&crate::u256_to_be_bytes(optimal_size.amount));
+        data.extend_from_slice(&crate::u256_to_be_bytes(U256::zero())); // 최소 출력량
+        data.extend_from_slice(swap_details.path[1].as_bytes()); // 토큰
+        data.extend_from_slice(swap_details.path[0].as_bytes()); // ETH
+        data.extend_from_slice(&crate::u256_to_be_bytes(swap_details.deadline));
         
         Ok(Transaction {
-            hash: B256::ZERO,
-            from: Address::ZERO, // 실제 구현에서는 지갑 주소
+            hash: H256::zero(),
+            from: Address::zero(), // 실제 구현에서는 지갑 주소
             to: Some(dex_info.router_address),
-            value: U256::ZERO,
+            value: U256::zero(),
             gas_price,
             gas_limit: U256::from(300_000u64),
             data,
@@ -427,13 +425,13 @@ impl RealTimeSandwichStrategy {
         let gas_cost = total_gas * front_run_tx.gas_price;
         
         // 예상 수익 계산 (간단한 추정)
-        let price_impact = (optimal_size.amount.to::<u128>() as f64 / 1_000_000_000_000_000_000_000.0) * 2.0; // 2% 가격 변동
+        let price_impact = (optimal_size.amount.as_u128() as f64 / 1_000_000_000_000_000_000_000.0) * 2.0; // 2% 가격 변동
         let expected_profit = optimal_size.amount * U256::from((price_impact * 100.0) as u64) / U256::from(100);
         
         let net_profit = if expected_profit > gas_cost {
             expected_profit - gas_cost
         } else {
-            U256::ZERO
+            U256::zero()
         };
         
         Ok((expected_profit, gas_cost, net_profit))
@@ -562,7 +560,7 @@ impl Strategy for RealTimeSandwichStrategy {
                     frontrun_amount: sandwich_opp.front_run_tx.value,
                     backrun_amount: sandwich_opp.back_run_tx.value,
                     target_slippage: 0.03, // 3% slippage
-                    pool_address: sandwich_opp.target_tx.to.unwrap_or(alloy::primitives::Address::ZERO),
+                    pool_address: sandwich_opp.target_tx.to.unwrap_or(Address::zero()),
                 }),
             );
             
@@ -587,12 +585,16 @@ impl Strategy for RealTimeSandwichStrategy {
         // 수익성 재검증 - convert alloy U256 to ethers U256 for comparison
         let opportunity_profit_ethers = {
             let mut bytes = [0u8; 32];
-            opportunity.expected_profit.to_be_bytes_vec().into_iter().zip(bytes.iter_mut().rev()).for_each(|(src, dst)| *dst = src);
+            let mut profit_bytes = [0u8; 32];
+            opportunity.expected_profit.to_big_endian(&mut profit_bytes);
+            profit_bytes.into_iter().zip(bytes.iter_mut().rev()).for_each(|(src, dst)| *dst = src);
             ethers::types::U256::from_big_endian(&bytes)
         };
         let min_profit_ethers = {
             let mut bytes = [0u8; 32];
-            self.min_profit_eth.to_be_bytes_vec().into_iter().zip(bytes.iter_mut().rev()).for_each(|(src, dst)| *dst = src);
+            let mut min_profit_bytes = [0u8; 32];
+            self.min_profit_eth.to_big_endian(&mut min_profit_bytes);
+            min_profit_bytes.into_iter().zip(bytes.iter_mut().rev()).for_each(|(src, dst)| *dst = src);
             ethers::types::U256::from_big_endian(&bytes)
         };
         if opportunity_profit_ethers < min_profit_ethers {
@@ -604,7 +606,9 @@ impl Strategy for RealTimeSandwichStrategy {
         // max_gas_price는 alloy U256이므로 ethers U256으로 변환
         let max_gas_ethers = {
             let mut bytes = [0u8; 32];
-            self.max_gas_price.to_be_bytes_vec().into_iter().zip(bytes.iter_mut().rev()).for_each(|(src, dst)| *dst = src);
+            let mut max_gas_bytes = [0u8; 32];
+            self.max_gas_price.to_big_endian(&mut max_gas_bytes);
+            max_gas_bytes.into_iter().zip(bytes.iter_mut().rev()).for_each(|(src, dst)| *dst = src);
             ethers::types::U256::from_big_endian(&bytes)
         };
         if current_gas_price > max_gas_ethers {
@@ -623,15 +627,21 @@ impl Strategy for RealTimeSandwichStrategy {
         // 샌드위치 공격은 MEV 번들이 필수 (정확한 순서 보장 필요)
         // 샌드위치 번들 생성
         // 실제 구현에서는 프론트런과 백런 트랜잭션을 포함한 번들 생성
-        
-        let bundle = Bundle::new(
+
+        use crate::mev::bundle::BundleType;
+        let mut bundle = Bundle::new(
             vec![], // 실제 트랜잭션들로 채워야 함
             0, // 실제 타겟 블록으로 설정
-            opportunity.expected_profit,
-            300_000, // 기본 가스 추정값
-            StrategyType::Sandwich,
+            BundleType::Sandwich,
+            crate::types::OpportunityType::Sandwich,
         );
-        
+
+        // 메타데이터 업데이트
+        bundle.metadata.expected_profit = {
+            let bytes = crate::u256_to_be_bytes(opportunity.expected_profit);
+            ethers::types::U256::from_big_endian(&bytes)
+        };
+
         Ok(bundle)
     }
 }
@@ -651,8 +661,8 @@ impl std::fmt::Debug for RealTimeSandwichStrategy {
 mod tests {
     use super::*;
     use crate::types::Transaction;
-    use alloy::primitives::{Address, U256};
-    use alloy::primitives::B256;
+    use ethers::types::{Address, U256};
+    use ethers::types::H256;
     use chrono::Utc;
 
     #[tokio::test]
@@ -673,8 +683,8 @@ mod tests {
         
         // 샌드위치 대상 트랜잭션
         let target_tx = Transaction {
-            hash: B256::ZERO,
-            from: Address::ZERO,
+            hash: H256::zero(),
+            from: Address::zero(),
             to: Some("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse().unwrap()), // Uniswap V2
             value: U256::from_str_radix("5000000000000000000", 10).unwrap(), // 5 ETH
             gas_price: U256::from(20_000_000_000u64), // 20 gwei

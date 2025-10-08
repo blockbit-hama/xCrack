@@ -9,8 +9,8 @@ pub mod boost;
 pub mod protection;
 pub mod analytics;
 
-pub use flashbots::{FlashbotsClient, BundleStatus};
-pub use bundle_executor::{MEVBundleExecutor, BundleExecutionResult, ExecutionStats};
+pub use flashbots::{FlashbotsClient, FlashbotsBundleStatus};
+pub use bundle_executor::{MEVBundleExecutor, BundleExecutionResult, ExecutionStats, BundleStatus};
 pub use bundle::{
     Bundle, BundleBuilder, PriorityLevel, LiquidationParams
 };

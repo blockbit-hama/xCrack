@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use rust_decimal::Decimal;
-use alloy::primitives::{Address, B256, U256};
+use ethers::types::{Address, H256, U256};
 use chrono::{DateTime, Utc};
 
 /// Transaction representation
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
-    pub hash: B256,
+    pub hash: H256,
     pub from: Address,
     pub to: Option<Address>,
     pub value: U256,
@@ -22,12 +22,12 @@ pub struct Transaction {
 impl Default for Transaction {
     fn default() -> Self {
         Self {
-            hash: B256::ZERO,
-            from: Address::ZERO,
+            hash: H256::zero(),
+            from: Address::zero(),
             to: None,
-            value: U256::ZERO,
-            gas_price: U256::ZERO,
-            gas_limit: U256::ZERO,
+            value: U256::zero(),
+            gas_price: U256::zero(),
+            gas_limit: U256::zero(),
             data: Vec::new(),
             nonce: 0,
             timestamp: DateTime::from_timestamp(0, 0).unwrap_or_else(|| Utc::now()),
@@ -41,8 +41,8 @@ impl Default for Transaction {
 pub enum StrategyType {
     Sandwich,
     Liquidation,
-    MicroArbitrage, // 초고속 거래소간 마이크로 아비트래지
-    MultiAssetArbitrage, // 다중자산 플래시론 아비트래지
+    CexDexArbitrage, // CEX/DEX 간 가격 차이 아비트리지
+    ComplexArbitrage, // 복잡한 다중자산 아비트리지
     // TODO: 향후 구현 예정
     // Frontrun,
     // Backrun,
@@ -53,8 +53,8 @@ impl std::fmt::Display for StrategyType {
         match self {
             StrategyType::Sandwich => write!(f, "Sandwich"),
             StrategyType::Liquidation => write!(f, "Liquidation"),
-            StrategyType::MicroArbitrage => write!(f, "MicroArbitrage"),
-            StrategyType::MultiAssetArbitrage => write!(f, "MultiAssetArbitrage"),
+            StrategyType::CexDexArbitrage => write!(f, "CEX/DEX Arbitrage"),
+            StrategyType::ComplexArbitrage => write!(f, "Complex Arbitrage"),
         }
     }
 }
@@ -116,7 +116,7 @@ impl Opportunity {
         if self.gas_estimate == 0 {
             return 0.0;
         }
-        self.expected_profit.to::<u128>() as f64 / self.gas_estimate as f64
+        self.expected_profit.as_u128() as f64 / self.gas_estimate as f64
     }
 }
 
@@ -251,7 +251,7 @@ pub struct MultiAssetArbitrageOpportunity {
 
 impl MultiAssetArbitrageOpportunity {
     pub fn is_valid(&self) -> bool {
-        Utc::now() < self.expires_at && self.expected_profit > U256::ZERO
+        Utc::now() < self.expires_at && self.expected_profit > U256::zero()
     }
 
     pub fn profitability_score(&self) -> f64 {
@@ -442,27 +442,17 @@ pub struct MicroArbitrageStats {
     pub pairs_monitored: u32,
 }
 
-/// Bundle representation
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-// Bundle 구조체는 mev::bundle에서 정의됨
+/// Bundle representation (mev::bundle에서 정의됨, 여기서 re-export)
+pub use crate::mev::Bundle;
 
-/// Bundle status
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum BundleStatus {
-    Created,
-    Queued,
-    Submitted,
-    Pending,
-    Included,
-    Failed,
-    Expired,
-}
+/// Bundle status (mev::bundle_executor에서 정의됨, 여기서 re-export)
+pub use crate::mev::BundleStatus;
 
 /// Bundle result
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BundleResult {
     pub bundle_id: String,
-    pub bundle_hash: B256,
+    pub bundle_hash: H256,
     pub status: BundleStatus,
     pub block_number: Option<u64>,
     pub actual_profit: Option<U256>,
@@ -772,7 +762,7 @@ impl Priority {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use alloy::primitives::{Address, B256, U256};
+    use ethers::types::{Address, H256, U256};
     use std::str::FromStr;
 
     #[test]

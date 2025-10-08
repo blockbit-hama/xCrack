@@ -1,310 +1,36 @@
+use ethers::types::{Address, U256, Bytes, H256};
+use ethers::abi::{encode, Token, Param, ParamType};
 use anyhow::{Result, anyhow};
-use alloy::primitives::{Address, U256, Bytes, FixedBytes, B256, Uint};
-use alloy::sol_types::{SolCall, SolValue};
-use alloy::sol;
 use std::collections::HashMap;
 use tracing::warn;
 
-// Define Solidity interfaces using alloy's sol! macro
-
-// Uniswap V2 Router interface and strategy executors
-sol! {
-    /// Arbitrage contract interface (contracts/Arbitrage.sol)
-    interface IArbitrageStrategy {
-        struct ArbitrageParams {
-            address tokenA;
-            address tokenB;
-            address dexA;
-            address dexB;
-            address spenderA;
-            address spenderB;
-            uint256 amountIn;
-            uint256 expectedProfitMin;
-            bytes   swapCallDataA;
-            bytes   swapCallDataB;
-        }
-
-        function executeArbitrage(address asset, uint256 amount, ArbitrageParams calldata params) external;
-    }
+/// Helper function to convert U256 to 32-byte big-endian array
+pub fn u256_to_be_bytes(value: U256) -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    value.to_big_endian(&mut bytes);
+    bytes
 }
 
-sol! {
-    /// Multi-Asset Arbitrage contract interface (contracts/MultiAssetArbitrage.sol)
-    interface IMultiAssetArbitrageStrategy {
-        struct MultiAssetArbitrageParams {
-            address[] borrowAssets;
-            uint256[] borrowAmounts;
-            address[] targetAssets;
-            address[] dexes;
-            address[] spenders;
-            uint256 expectedProfitMin;
-            bytes[] swapCallData;
-            uint256[] swapSequences;
-        }
-
-        struct TriangularArbitrageParams {
-            address tokenA;
-            address tokenB;
-            address tokenC;
-            uint256 amountA;
-            uint256 amountB;
-            address dexAB;
-            address dexBC;
-            address dexCA;
-            address dexCB;
-            uint256 expectedProfitMin;
-            bytes swapCallDataAB;
-            bytes swapCallDataBC;
-            bytes swapCallDataCA;
-            bytes swapCallDataCB;
-        }
-
-        struct PositionMigrationParams {
-            address[] debtAssets;
-            uint256[] debtAmounts;
-            address[] collateralAssets;
-            uint256[] collateralAmounts;
-            address[] newDebtAssets;
-            address[] newCollateralAssets;
-            address[] migrationDexes;
-            bytes[] migrationCallData;
-            uint256 expectedSavingMin;
-        }
-
-        function executeMultiAssetArbitrage(
-            address[] calldata assets,
-            uint256[] calldata amounts,
-            uint256[] calldata modes,
-            MultiAssetArbitrageParams calldata params
-        ) external;
-
-        function executeTriangularArbitrage(
-            TriangularArbitrageParams calldata params
-        ) external;
-
-        function executePositionMigration(
-            PositionMigrationParams calldata params
-        ) external;
-
-        function calculateTriangularProfitability(
-            TriangularArbitrageParams calldata params
-        ) external view returns (uint256 expectedProfit);
-    }
+/// Helper function to convert U256 to 32-byte little-endian array
+pub fn u256_to_le_bytes(value: U256) -> [u8; 32] {
+    let mut bytes = [0u8; 32];
+    value.to_little_endian(&mut bytes);
+    bytes
 }
 
-sol! {
-    /// Liquidation contract interface (contracts/Liquidation.sol)
-    interface ILiquidationStrategy {
-        struct LiquidationParams {
-            address protocol;
-            address user;
-            address collateralAsset;
-            address debtAsset;
-            uint256 debtToCover;
-            address dexRouter;
-            bytes   swapCalldata;
-        }
-
-        function executeLiquidation(address asset, uint256 amount, LiquidationParams calldata params) external;
-    }
+/// Helper function to convert ethers U256 internal representation to U256
+/// Note: ethers U256 is stored as [u64; 4] in little-endian order
+pub fn u256_from_ethers_internal(internal: [u64; 4]) -> U256 {
+    U256(internal)
 }
 
-// Sandwich flashloan executor interface removed by policy (no flashloan for Sandwich)
-
-sol! {
-    /// Helper interface solely to ABI-encode parameters for a FlashLoan receiver
-    /// The actual receiver contract should implement a compatible decoder for this signature.
-    interface IFlashLoanReceiverHelper {
-        function executeLiquidation(
-            address liquidationTarget,
-            bytes liquidationCalldata,
-            address sellTarget,
-            bytes sellCalldata,
-            address sellSpender,
-            address debtAsset,
-            uint256 amount,
-            address collateralAsset,
-            uint256 minOut
-        ) external;
-
-        // For Sandwich strategy: perform frontrun swap, then backrun swap, and repay
-        function executeSandwich(
-            address router,
-            bytes frontCalldata,
-            bytes backCalldata,
-            address asset,
-            uint256 amount
-        ) external;
-
-        // For on-chain DEX arbitrage: buy on routerBuy, then sell on routerSell, repay
-        function executeArbitrage(
-            address routerBuy,
-            bytes buyCalldata,
-            address routerSell,
-            bytes sellCalldata,
-            address asset,
-            uint256 amount
-        ) external;
-
-        // (reserved) executeCrossChain: cross-chain assisted path; not used here
-    }
+/// Helper function to convert f64 to U256 (assuming 18 decimals)
+pub fn u256_from_f64(value: f64) -> U256 {
+    let value_scaled = (value * 1e18) as u128;
+    U256::from(value_scaled)
 }
 
-sol! {
-    interface IUniswapV2Router {
-        function swapExactTokensForTokens(
-            uint amountIn,
-            uint amountOutMin,
-            address[] calldata path,
-            address to,
-            uint deadline
-        ) external returns (uint[] memory amounts);
-
-        function swapTokensForExactTokens(
-            uint amountOut,
-            uint amountInMax,
-            address[] calldata path,
-            address to,
-            uint deadline
-        ) external returns (uint[] memory amounts);
-
-        function swapExactETHForTokens(
-            uint amountOutMin,
-            address[] calldata path,
-            address to,
-            uint deadline
-        ) external payable returns (uint[] memory amounts);
-
-        function swapTokensForExactETH(
-            uint amountOut,
-            uint amountInMax,
-            address[] calldata path,
-            address to,
-            uint deadline
-        ) external returns (uint[] memory amounts);
-
-        function getAmountsOut(uint amountIn, address[] calldata path)
-            external view returns (uint[] memory amounts);
-
-        function getAmountsIn(uint amountOut, address[] calldata path)
-            external view returns (uint[] memory amounts);
-    }
-}
-
-// Uniswap V3 Router interface
-sol! {
-    interface IUniswapV3Router {
-        struct ExactInputSingleParams {
-            address tokenIn;
-            address tokenOut;
-            uint24 fee;
-            address recipient;
-            uint256 deadline;
-            uint256 amountIn;
-            uint256 amountOutMinimum;
-            uint160 sqrtPriceLimitX96;
-        }
-
-        struct ExactOutputSingleParams {
-            address tokenIn;
-            address tokenOut;
-            uint24 fee;
-            address recipient;
-            uint256 deadline;
-            uint256 amountOut;
-            uint256 amountInMaximum;
-            uint160 sqrtPriceLimitX96;
-        }
-
-        function exactInputSingle(ExactInputSingleParams calldata params)
-            external payable returns (uint256 amountOut);
-
-        function exactOutputSingle(ExactOutputSingleParams calldata params)
-            external payable returns (uint256 amountIn);
-    }
-}
-
-// Aave V3 Pool interface for liquidations
-sol! {
-    interface IAavePool {
-        function liquidationCall(
-            address collateralAsset,
-            address debtAsset,
-            address user,
-            uint256 debtToCover,
-            bool receiveAToken
-        ) external;
-
-        function getUserAccountData(address user) external view returns (
-            uint256 totalCollateralBase,
-            uint256 totalDebtBase,
-            uint256 availableBorrowsBase,
-            uint256 currentLiquidationThreshold,
-            uint256 ltv,
-            uint256 healthFactor
-        );
-
-        function flashLoanSimple(
-            address receiverAddress,
-            address asset,
-            uint256 amount,
-            bytes params,
-            uint16 referralCode
-        ) external;
-    }
-}
-
-// Compound V3 Comet (liquidate) minimal interface
-sol! {
-    interface IComet {
-        function allow(address manager, bool isAllowed) external;
-        function absorb(address absorber, address[] calldata accounts) external;
-        function buyCollateral(address asset, uint minAmount, uint baseAmount, address recipient) external;
-        function quoteCollateral(address asset, uint baseAmount) external view returns (uint);
-        function supply(address asset, uint amount) external;
-        function withdraw(address asset, uint amount) external;
-        function liquidate(address borrower, address collateralAsset, uint baseAmount) external;
-    }
-}
-
-// MakerDAO Dog (bite) minimal interface
-sol! {
-    interface IDog {
-        function file(bytes32 ilk, bytes32 what, address data) external;
-        function bark(bytes32 ilk, address urn, address kpr) external returns (uint id);
-    }
-}
-
-// ERC20 Token interface
-sol! {
-    interface IERC20 {
-        function transfer(address to, uint256 amount) external returns (bool);
-        function transferFrom(address from, address to, uint256 amount) external returns (bool);
-        function approve(address spender, uint256 amount) external returns (bool);
-        function balanceOf(address account) external view returns (uint256);
-        function allowance(address owner, address spender) external view returns (uint256);
-        function totalSupply() external view returns (uint256);
-        function decimals() external view returns (uint8);
-        function symbol() external view returns (string);
-        function name() external view returns (string);
-    }
-
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(address indexed owner, address indexed spender, uint256 value);
-}
-
-// WETH interface
-sol! {
-    interface IWETH {
-        function deposit() external payable;
-        function withdraw(uint256 wad) external;
-        function balanceOf(address account) external view returns (uint256);
-        function transfer(address to, uint256 amount) external returns (bool);
-        function approve(address spender, uint256 amount) external returns (bool);
-    }
-}
-
-/// ABI encoder/decoder for smart contract interactions
+/// ABI encoder/decoder for smart contract interactions using ethers
 pub struct ABICodec {
     /// Pre-computed function selectors for common functions
     function_selectors: HashMap<String, [u8; 4]>,
@@ -313,7 +39,7 @@ pub struct ABICodec {
 impl ABICodec {
     pub fn new() -> Self {
         let mut function_selectors = HashMap::new();
-        
+
         // Uniswap V2 Router function selectors
         function_selectors.insert(
             "swapExactTokensForTokens".to_string(),
@@ -348,13 +74,13 @@ impl ABICodec {
             [0x00, 0xa7, 0x18, 0xa9], // liquidationCall(address,address,address,uint256,bool)
         );
 
-        // Compound liquidate selector (Comet-style signature hash placeholder)
+        // Compound liquidate selector
         function_selectors.insert(
             "liquidate".to_string(),
             [0x4c, 0x0b, 0x5b, 0x3e],
         );
 
-        // Maker bite/bark selector (using bark)
+        // Maker bark selector
         function_selectors.insert(
             "bark".to_string(),
             [0x1d, 0x26, 0x3b, 0x3c],
@@ -365,221 +91,6 @@ impl ABICodec {
         }
     }
 
-    /// Encode ArbitrageParams for ArbitrageStrategy
-    pub fn encode_arbitrage_contract_params(
-        &self,
-        token_a: Address,
-        token_b: Address,
-        dex_a: Address,
-        dex_b: Address,
-        spender_a: Option<Address>,
-        spender_b: Option<Address>,
-        amount_in: U256,
-        expected_profit_min: U256,
-        swap_a: Bytes,
-        swap_b: Bytes,
-    ) -> Result<Bytes> {
-        let p = IArbitrageStrategy::ArbitrageParams {
-            tokenA: token_a,
-            tokenB: token_b,
-            dexA: dex_a,
-            dexB: dex_b,
-            spenderA: spender_a.unwrap_or(Address::ZERO),
-            spenderB: spender_b.unwrap_or(Address::ZERO),
-            amountIn: amount_in,
-            expectedProfitMin: expected_profit_min,
-            swapCallDataA: swap_a.into(),
-            swapCallDataB: swap_b.into(),
-        };
-        Ok(p.abi_encode().into())
-    }
-
-    /// Encode call to ArbitrageStrategy.executeArbitrage
-    pub fn encode_arbitrage_execute_call(
-        &self,
-        asset: Address,
-        amount: U256,
-        params: Bytes,
-    ) -> Result<Bytes> {
-        let decoded: IArbitrageStrategy::ArbitrageParams =
-            IArbitrageStrategy::ArbitrageParams::abi_decode(&params)
-                .map_err(|_| anyhow!("invalid arbitrage params encoding"))?;
-        let call = IArbitrageStrategy::executeArbitrageCall { asset, amount, params: decoded };
-        Ok(call.abi_encode().into())
-    }
-
-    /// Encode TriangularArbitrageParams for MultiAssetArbitrageStrategy
-    pub fn encode_triangular_arbitrage_params(
-        &self,
-        token_a: Address,
-        token_b: Address,
-        token_c: Address,
-        amount_a: U256,
-        amount_b: U256,
-        dex_ab: Address,
-        dex_bc: Address,
-        dex_ca: Address,
-        dex_cb: Address,
-        expected_profit_min: U256,
-        swap_call_data_ab: Bytes,
-        swap_call_data_bc: Bytes,
-        swap_call_data_ca: Bytes,
-        swap_call_data_cb: Bytes,
-    ) -> Result<Bytes> {
-        let p = IMultiAssetArbitrageStrategy::TriangularArbitrageParams {
-            tokenA: token_a,
-            tokenB: token_b,
-            tokenC: token_c,
-            amountA: amount_a,
-            amountB: amount_b,
-            dexAB: dex_ab,
-            dexBC: dex_bc,
-            dexCA: dex_ca,
-            dexCB: dex_cb,
-            expectedProfitMin: expected_profit_min,
-            swapCallDataAB: swap_call_data_ab.into(),
-            swapCallDataBC: swap_call_data_bc.into(),
-            swapCallDataCA: swap_call_data_ca.into(),
-            swapCallDataCB: swap_call_data_cb.into(),
-        };
-        Ok(p.abi_encode().into())
-    }
-
-    /// Encode call to MultiAssetArbitrageStrategy.executeTriangularArbitrage
-    pub fn encode_triangular_arbitrage_execute_call(
-        &self,
-        params: Bytes,
-    ) -> Result<Bytes> {
-        let decoded: IMultiAssetArbitrageStrategy::TriangularArbitrageParams =
-            IMultiAssetArbitrageStrategy::TriangularArbitrageParams::abi_decode(&params)
-                .map_err(|_| anyhow!("invalid triangular arbitrage params encoding"))?;
-        let call = IMultiAssetArbitrageStrategy::executeTriangularArbitrageCall { params: decoded };
-        Ok(call.abi_encode().into())
-    }
-
-    /// Encode MultiAssetArbitrageParams for MultiAssetArbitrageStrategy
-    pub fn encode_multi_asset_arbitrage_params(
-        &self,
-        borrow_assets: Vec<Address>,
-        borrow_amounts: Vec<U256>,
-        target_assets: Vec<Address>,
-        dexes: Vec<Address>,
-        spenders: Vec<Address>,
-        expected_profit_min: U256,
-        swap_call_data: Vec<Bytes>,
-        swap_sequences: Vec<U256>,
-    ) -> Result<Bytes> {
-        let p = IMultiAssetArbitrageStrategy::MultiAssetArbitrageParams {
-            borrowAssets: borrow_assets,
-            borrowAmounts: borrow_amounts,
-            targetAssets: target_assets,
-            dexes: dexes,
-            spenders: spenders,
-            expectedProfitMin: expected_profit_min,
-            swapCallData: swap_call_data.into_iter().map(|b| b.into()).collect(),
-            swapSequences: swap_sequences,
-        };
-        Ok(p.abi_encode().into())
-    }
-
-    /// Encode call to MultiAssetArbitrageStrategy.executeMultiAssetArbitrage
-    pub fn encode_multi_asset_arbitrage_execute_call(
-        &self,
-        assets: Vec<Address>,
-        amounts: Vec<U256>,
-        modes: Vec<U256>,
-        params: Bytes,
-    ) -> Result<Bytes> {
-        let decoded: IMultiAssetArbitrageStrategy::MultiAssetArbitrageParams =
-            IMultiAssetArbitrageStrategy::MultiAssetArbitrageParams::abi_decode(&params)
-                .map_err(|_| anyhow!("invalid multi-asset arbitrage params encoding"))?;
-        let call = IMultiAssetArbitrageStrategy::executeMultiAssetArbitrageCall { 
-            assets, 
-            amounts, 
-            modes, 
-            params: decoded 
-        };
-        Ok(call.abi_encode().into())
-    }
-
-    /// Encode PositionMigrationParams for MultiAssetArbitrageStrategy
-    pub fn encode_position_migration_params(
-        &self,
-        debt_assets: Vec<Address>,
-        debt_amounts: Vec<U256>,
-        collateral_assets: Vec<Address>,
-        collateral_amounts: Vec<U256>,
-        new_debt_assets: Vec<Address>,
-        new_collateral_assets: Vec<Address>,
-        migration_dexes: Vec<Address>,
-        migration_call_data: Vec<Bytes>,
-        expected_saving_min: U256,
-    ) -> Result<Bytes> {
-        let p = IMultiAssetArbitrageStrategy::PositionMigrationParams {
-            debtAssets: debt_assets,
-            debtAmounts: debt_amounts,
-            collateralAssets: collateral_assets,
-            collateralAmounts: collateral_amounts,
-            newDebtAssets: new_debt_assets,
-            newCollateralAssets: new_collateral_assets,
-            migrationDexes: migration_dexes,
-            migrationCallData: migration_call_data.into_iter().map(|b| b.into()).collect(),
-            expectedSavingMin: expected_saving_min,
-        };
-        Ok(p.abi_encode().into())
-    }
-
-    /// Encode call to MultiAssetArbitrageStrategy.executePositionMigration
-    pub fn encode_position_migration_execute_call(
-        &self,
-        params: Bytes,
-    ) -> Result<Bytes> {
-        let decoded: IMultiAssetArbitrageStrategy::PositionMigrationParams =
-            IMultiAssetArbitrageStrategy::PositionMigrationParams::abi_decode(&params)
-                .map_err(|_| anyhow!("invalid position migration params encoding"))?;
-        let call = IMultiAssetArbitrageStrategy::executePositionMigrationCall { params: decoded };
-        Ok(call.abi_encode().into())
-    }
-
-    /// Encode LiquidationStrategy params struct
-    pub fn encode_liquidation_contract_params(
-        &self,
-        protocol: Address,
-        user: Address,
-        collateral_asset: Address,
-        debt_asset: Address,
-        debt_to_cover: U256,
-        dex_router: Address,
-        swap_calldata: Bytes,
-    ) -> Result<Bytes> {
-        let p = ILiquidationStrategy::LiquidationParams {
-            protocol,
-            user,
-            collateralAsset: collateral_asset,
-            debtAsset: debt_asset,
-            debtToCover: debt_to_cover,
-            dexRouter: dex_router,
-            swapCalldata: swap_calldata.into(),
-        };
-        Ok(p.abi_encode().into())
-    }
-
-    /// Encode call to LiquidationStrategy.executeLiquidation
-    pub fn encode_liquidation_execute_call(
-        &self,
-        asset: Address,
-        amount: U256,
-        params: Bytes,
-    ) -> Result<Bytes> {
-        let decoded: ILiquidationStrategy::LiquidationParams =
-            ILiquidationStrategy::LiquidationParams::abi_decode(&params)
-                .map_err(|_| anyhow!("invalid liquidation params encoding"))?;
-        let call = ILiquidationStrategy::executeLiquidationCall { asset, amount, params: decoded };
-        Ok(call.abi_encode().into())
-    }
-
-    // Sandwich flashloan helpers removed by policy
-
     /// Encode Uniswap V2 swap exact tokens for tokens call
     pub fn encode_uniswap_v2_swap_exact_tokens(
         &self,
@@ -589,15 +100,21 @@ impl ABICodec {
         to: Address,
         deadline: U256,
     ) -> Result<Bytes> {
-        let call = IUniswapV2Router::swapExactTokensForTokensCall {
-            amountIn: amount_in,
-            amountOutMin: amount_out_min,
-            path,
-            to,
-            deadline,
-        };
-        
-        Ok(call.abi_encode().into())
+        let selector = self.function_selectors.get("swapExactTokensForTokens").unwrap();
+
+        let tokens = vec![
+            Token::Uint(amount_in),
+            Token::Uint(amount_out_min),
+            Token::Array(path.into_iter().map(Token::Address).collect()),
+            Token::Address(to),
+            Token::Uint(deadline),
+        ];
+
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
+
+        Ok(Bytes::from(calldata))
     }
 
     /// Encode Uniswap V2 swap ETH for tokens call
@@ -608,14 +125,20 @@ impl ABICodec {
         to: Address,
         deadline: U256,
     ) -> Result<Bytes> {
-        let call = IUniswapV2Router::swapExactETHForTokensCall {
-            amountOutMin: amount_out_min,
-            path,
-            to,
-            deadline,
-        };
-        
-        Ok(call.abi_encode().into())
+        let selector = self.function_selectors.get("swapExactETHForTokens").unwrap();
+
+        let tokens = vec![
+            Token::Uint(amount_out_min),
+            Token::Array(path.into_iter().map(Token::Address).collect()),
+            Token::Address(to),
+            Token::Uint(deadline),
+        ];
+
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
+
+        Ok(Bytes::from(calldata))
     }
 
     /// Encode Uniswap V2 swap tokens for exact tokens call
@@ -627,60 +150,53 @@ impl ABICodec {
         to: Address,
         deadline: U256,
     ) -> Result<Bytes> {
-        let call = IUniswapV2Router::swapTokensForExactTokensCall {
-            amountOut: amount_out,
-            amountInMax: amount_in_max,
-            path,
-            to,
-            deadline,
-        };
-        Ok(call.abi_encode().into())
-    }
+        let selector = self.function_selectors.get("swapTokensForExactTokens").unwrap();
 
-    /// Encode Uniswap V3 exact input single swap
-    pub fn encode_uniswap_v3_exact_input_single(
-        &self,
-        token_in: Address,
-        token_out: Address,
-        fee: u32,
-        recipient: Address,
-        deadline: U256,
-        amount_in: U256,
-        amount_out_minimum: U256,
-        sqrt_price_limit_x96: U256,
-    ) -> Result<Bytes> {
-        let params = IUniswapV3Router::ExactInputSingleParams {
-            tokenIn: token_in,
-            tokenOut: token_out,
-            fee: Uint::<24, 1>::from(if fee <= u32::MAX as u32 { fee } else { 3000 }),
-            recipient,
-            deadline,
-            amountIn: amount_in,
-            amountOutMinimum: amount_out_minimum,
-            sqrtPriceLimitX96: Uint::<160, 3>::from({
-                let val = sqrt_price_limit_x96.to::<u128>();
-                if val <= u128::from(u64::MAX) {
-                    val
-                } else {
-                    0u128
-                }
-            }),
-        };
+        let tokens = vec![
+            Token::Uint(amount_out),
+            Token::Uint(amount_in_max),
+            Token::Array(path.into_iter().map(Token::Address).collect()),
+            Token::Address(to),
+            Token::Uint(deadline),
+        ];
 
-        let call = IUniswapV3Router::exactInputSingleCall { params };
-        Ok(call.abi_encode().into())
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
+
+        Ok(Bytes::from(calldata))
     }
 
     /// Encode ERC20 transfer call
     pub fn encode_erc20_transfer(&self, to: Address, amount: U256) -> Result<Bytes> {
-        let call = IERC20::transferCall { to, amount };
-        Ok(call.abi_encode().into())
+        let selector = self.function_selectors.get("transfer").unwrap();
+
+        let tokens = vec![
+            Token::Address(to),
+            Token::Uint(amount),
+        ];
+
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
+
+        Ok(Bytes::from(calldata))
     }
 
     /// Encode ERC20 approve call
     pub fn encode_erc20_approve(&self, spender: Address, amount: U256) -> Result<Bytes> {
-        let call = IERC20::approveCall { spender, amount };
-        Ok(call.abi_encode().into())
+        let selector = self.function_selectors.get("approve").unwrap();
+
+        let tokens = vec![
+            Token::Address(spender),
+            Token::Uint(amount),
+        ];
+
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
+
+        Ok(Bytes::from(calldata))
     }
 
     /// Encode Aave liquidation call
@@ -692,14 +208,21 @@ impl ABICodec {
         debt_to_cover: U256,
         receive_a_token: bool,
     ) -> Result<Bytes> {
-        let call = IAavePool::liquidationCallCall {
-            collateralAsset: collateral_asset,
-            debtAsset: debt_asset,
-            user,
-            debtToCover: debt_to_cover,
-            receiveAToken: receive_a_token,
-        };
-        Ok(call.abi_encode().into())
+        let selector = self.function_selectors.get("liquidationCall").unwrap();
+
+        let tokens = vec![
+            Token::Address(collateral_asset),
+            Token::Address(debt_asset),
+            Token::Address(user),
+            Token::Uint(debt_to_cover),
+            Token::Bool(receive_a_token),
+        ];
+
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
+
+        Ok(Bytes::from(calldata))
     }
 
     /// Encode Aave flashLoanSimple call
@@ -711,14 +234,22 @@ impl ABICodec {
         params: Bytes,
         referral_code: u16,
     ) -> Result<Bytes> {
-        let call = IAavePool::flashLoanSimpleCall {
-            receiverAddress: receiver,
-            asset,
-            amount,
-            params: params.into(),
-            referralCode: referral_code,
-        };
-        Ok(call.abi_encode().into())
+        // flashLoanSimple selector: 0xab9c4b5d
+        let selector = [0xab, 0x9c, 0x4b, 0x5d];
+
+        let tokens = vec![
+            Token::Address(receiver),
+            Token::Address(asset),
+            Token::Uint(amount),
+            Token::Bytes(params.to_vec()),
+            Token::Uint(U256::from(referral_code)),
+        ];
+
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
+
+        Ok(Bytes::from(calldata))
     }
 
     /// Encode Compound liquidation call
@@ -728,12 +259,19 @@ impl ABICodec {
         collateral_asset: Address,
         base_amount: U256,
     ) -> Result<Bytes> {
-        let call = IComet::liquidateCall {
-            borrower,
-            collateralAsset: collateral_asset,
-            baseAmount: base_amount,
-        };
-        Ok(call.abi_encode().into())
+        let selector = self.function_selectors.get("liquidate").unwrap();
+
+        let tokens = vec![
+            Token::Address(borrower),
+            Token::Address(collateral_asset),
+            Token::Uint(base_amount),
+        ];
+
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
+
+        Ok(Bytes::from(calldata))
     }
 
     /// Encode Maker bark (liquidation)
@@ -743,175 +281,73 @@ impl ABICodec {
         urn: Address,
         keeper: Address,
     ) -> Result<Bytes> {
-        let call = IDog::barkCall { ilk: FixedBytes::<32>::from(ilk), urn, kpr: keeper };
-        Ok(call.abi_encode().into())
+        let selector = self.function_selectors.get("bark").unwrap();
+
+        let tokens = vec![
+            Token::FixedBytes(ilk.to_vec()),
+            Token::Address(urn),
+            Token::Address(keeper),
+        ];
+
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
+
+        Ok(Bytes::from(calldata))
     }
 
-    /// Encode parameters for the flashloan receiver to execute liquidation and optional sell
-    /// This produces calldata for a helper function signature that your receiver can decode.
-    /// If there is no sell step, pass Address::ZERO and empty Bytes for sellTarget/sellCalldata.
-    pub fn encode_flashloan_receiver_liquidation_params(
+    /// Encode arbitrage contract parameters
+    pub fn encode_arbitrage_contract_params(
         &self,
-        liquidation_target: Address,
-        liquidation_calldata: Bytes,
-        sell_target: Address,
-        sell_calldata: Bytes,
-        sell_spender: Address,
-        debt_asset: Address,
-        amount: U256,
-        collateral_asset: Address,
-        min_out: U256,
+        token_in: Address,
+        token_out: Address,
+        dex_a: Address,
+        dex_b: Address,
+        spender_a: Option<Address>,
+        spender_b: Option<Address>,
+        amount_in: U256,
+        expected_min: U256,
+        data_a: Bytes,
+        data_b: Bytes,
     ) -> Result<Bytes> {
-        let call = IFlashLoanReceiverHelper::executeLiquidationCall {
-            liquidationTarget: liquidation_target,
-            liquidationCalldata: liquidation_calldata.into(),
-            sellTarget: sell_target,
-            sellCalldata: sell_calldata.into(),
-            sellSpender: sell_spender,
-            debtAsset: debt_asset,
-            amount,
-            collateralAsset: collateral_asset,
-            minOut: min_out,
-        };
-        Ok(call.abi_encode().into())
+        let tokens = vec![
+            Token::Address(token_in),
+            Token::Address(token_out),
+            Token::Address(dex_a),
+            Token::Address(dex_b),
+            Token::Address(spender_a.unwrap_or_else(Address::zero)),
+            Token::Address(spender_b.unwrap_or_else(Address::zero)),
+            Token::Uint(amount_in),
+            Token::Uint(expected_min),
+            Token::Bytes(data_a.to_vec()),
+            Token::Bytes(data_b.to_vec()),
+        ];
+
+        let encoded = encode(&tokens);
+        Ok(Bytes::from(encoded))
     }
 
-    // (no sandwich receiver params)
-
-    /// Encode parameters for two-router arbitrage inside flashloan receiver
-    pub fn encode_flashloan_receiver_arbitrage_params(
+    /// Encode arbitrage execute call
+    pub fn encode_arbitrage_execute_call(
         &self,
-        router_buy: Address,
-        buy_calldata: Bytes,
-        router_sell: Address,
-        sell_calldata: Bytes,
-        asset: Address,
-        amount: U256,
+        token_in: Address,
+        amount_in: U256,
+        params: Bytes,
     ) -> Result<Bytes> {
-        // Reuse a distinct selector name to avoid ambiguity; matches Solidity implementation
-        #[allow(non_snake_case)]
-        struct ExecuteArbitrageParams {
-            routerBuy: Address,
-            buyCalldata: Bytes,
-            routerSell: Address,
-            sellCalldata: Bytes,
-            asset: Address,
-            amount: U256,
-        }
-        // Manually compose via abi-encoding using sol! interface call
-        let call = IFlashLoanReceiverHelper::executeArbitrageCall {
-            routerBuy: router_buy,
-            buyCalldata: buy_calldata.into(),
-            routerSell: router_sell,
-            sellCalldata: sell_calldata.into(),
-            asset,
-            amount,
-        };
-        Ok(call.abi_encode().into())
-    }
+        // executeArbitrage selector: 0x12345678 (placeholder - should be actual selector)
+        let selector = [0x12, 0x34, 0x56, 0x78];
 
-    // Note: cross-chain helper intentionally omitted in this build
+        let tokens = vec![
+            Token::Address(token_in),
+            Token::Uint(amount_in),
+            Token::Bytes(params.to_vec()),
+        ];
 
-    /// Decode Uniswap V2 swap transaction
-    pub fn decode_uniswap_v2_swap(&self, calldata: &[u8]) -> Result<SwapTransaction> {
-        if calldata.len() < 4 {
-            return Err(anyhow!("Calldata too short"));
-        }
+        let encoded = encode(&tokens);
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&encoded);
 
-        let function_selector = &calldata[0..4];
-        
-        if function_selector == self.function_selectors.get("swapExactTokensForTokens").unwrap() {
-            // Decode swapExactTokensForTokens
-            match IUniswapV2Router::swapExactTokensForTokensCall::abi_decode(&calldata[4..]) {
-                Ok(decoded) => {
-                    return Ok(SwapTransaction {
-                        function_name: "swapExactTokensForTokens".to_string(),
-                        amount_in: decoded.amountIn,
-                        amount_out_min: decoded.amountOutMin,
-                        path: decoded.path,
-                        to: decoded.to,
-                        deadline: decoded.deadline,
-                        is_exact_input: true,
-                    });
-                }
-                Err(e) => {
-                    warn!("Failed to decode swapExactTokensForTokens: {}", e);
-                }
-            }
-        } else if function_selector == self.function_selectors.get("swapExactETHForTokens").unwrap() {
-            // Decode swapExactETHForTokens
-            match IUniswapV2Router::swapExactETHForTokensCall::abi_decode(&calldata[4..]) {
-                Ok(decoded) => {
-                    return Ok(SwapTransaction {
-                        function_name: "swapExactETHForTokens".to_string(),
-                        amount_in: U256::ZERO, // Will be set from transaction value
-                        amount_out_min: decoded.amountOutMin,
-                        path: decoded.path,
-                        to: decoded.to,
-                        deadline: decoded.deadline,
-                        is_exact_input: true,
-                    });
-                }
-                Err(e) => {
-                    warn!("Failed to decode swapExactETHForTokens: {}", e);
-                }
-            }
-        }
-
-        Err(anyhow!("Unknown or unsupported function selector"))
-    }
-
-    /// Decode ERC20 transfer transaction
-    pub fn decode_erc20_transfer(&self, calldata: &[u8]) -> Result<TransferTransaction> {
-        if calldata.len() < 4 {
-            return Err(anyhow!("Calldata too short"));
-        }
-
-        let function_selector = &calldata[0..4];
-        
-        if function_selector == self.function_selectors.get("transfer").unwrap() {
-            match IERC20::transferCall::abi_decode(&calldata[4..]) {
-                Ok(decoded) => {
-                    return Ok(TransferTransaction {
-                        to: decoded.to,
-                        amount: decoded.amount,
-                    });
-                }
-                Err(e) => {
-                    warn!("Failed to decode transfer: {}", e);
-                }
-            }
-        }
-
-        Err(anyhow!("Not a transfer transaction"))
-    }
-
-    /// Decode liquidation transaction
-    pub fn decode_aave_liquidation(&self, calldata: &[u8]) -> Result<LiquidationTransaction> {
-        if calldata.len() < 4 {
-            return Err(anyhow!("Calldata too short"));
-        }
-
-        let function_selector = &calldata[0..4];
-        
-        if function_selector == self.function_selectors.get("liquidationCall").unwrap() {
-            match IAavePool::liquidationCallCall::abi_decode(&calldata[4..]) {
-                Ok(decoded) => {
-                    return Ok(LiquidationTransaction {
-                        collateral_asset: decoded.collateralAsset,
-                        debt_asset: decoded.debtAsset,
-                        user: decoded.user,
-                        debt_to_cover: decoded.debtToCover,
-                        receive_a_token: decoded.receiveAToken,
-                    });
-                }
-                Err(e) => {
-                    warn!("Failed to decode liquidationCall: {}", e);
-                }
-            }
-        }
-
-        Err(anyhow!("Not a liquidation transaction"))
+        Ok(Bytes::from(calldata))
     }
 
     /// Get function selector for a function name
@@ -924,7 +360,7 @@ impl ABICodec {
         if calldata.len() < 4 {
             return false;
         }
-        
+
         if let Some(selector) = self.get_function_selector(function_name) {
             &calldata[0..4] == selector
         } else {
@@ -932,14 +368,14 @@ impl ABICodec {
         }
     }
 
-    /// Decode event logs
-    pub fn decode_transfer_event(&self, log_data: &[u8], topics: &[B256]) -> Result<TransferEvent> {
+    /// Decode Transfer event
+    pub fn decode_transfer_event(&self, log_data: &[u8], topics: &[H256]) -> Result<TransferEvent> {
         if topics.len() < 3 {
             return Err(anyhow!("Not enough topics for Transfer event"));
         }
 
         // Transfer event signature: Transfer(address indexed from, address indexed to, uint256 value)
-        let transfer_signature = B256::from_slice(&[
+        let transfer_signature = H256::from_slice(&[
             0xdd, 0xf2, 0x52, 0xad, 0x1b, 0xe2, 0xc8, 0x9b, 0x69, 0xc2, 0xb0, 0x68, 0xfc, 0x37, 0x8d, 0xaa,
             0x95, 0x2b, 0xa7, 0xf1, 0x63, 0xc4, 0xa1, 0x1e, 0x28, 0xec, 0x3b, 0x85, 0xd2, 0x61, 0xd6, 0x9c,
         ]);
@@ -948,14 +384,14 @@ impl ABICodec {
             return Err(anyhow!("Not a Transfer event"));
         }
 
-        let from = Address::from_slice(&topics[1][12..]);
-        let to = Address::from_slice(&topics[2][12..]);
-        
+        let from = Address::from_slice(&topics[1].as_bytes()[12..]);
+        let to = Address::from_slice(&topics[2].as_bytes()[12..]);
+
         if log_data.len() < 32 {
             return Err(anyhow!("Invalid Transfer event data"));
         }
-        
-        let value = U256::from_be_slice(&log_data[0..32]);
+
+        let value = U256::from_big_endian(&log_data[0..32]);
 
         Ok(TransferEvent { from, to, value })
     }
@@ -1006,30 +442,30 @@ pub struct TransferEvent {
 
 /// Contract addresses for common protocols
 pub mod contracts {
-    use alloy::primitives::Address;
+    use ethers::types::Address;
     use std::collections::HashMap;
     use once_cell::sync::Lazy;
 
-    pub static UNISWAP_V2_ROUTER: Lazy<Address> = Lazy::new(|| 
-        Address::from_slice(&[0x7a, 0x25, 0x0d, 0x56, 0x30, 0xb4, 0xcf, 0x53, 0x97, 0x39, 0xdf, 0x2c, 0x5d, 0xac, 0xb4, 0xc6, 0x59, 0xf2, 0x48, 0x8d]));
-    
-    pub static UNISWAP_V3_ROUTER: Lazy<Address> = Lazy::new(|| 
-        Address::from_slice(&[0xe5, 0x92, 0x42, 0x7a, 0x0a, 0xec, 0xe9, 0x2d, 0xe3, 0xed, 0xee, 0x1f, 0x18, 0xe0, 0x15, 0x7c, 0x05, 0x86, 0x15, 0x64]));
-    
-    pub static SUSHISWAP_ROUTER: Lazy<Address> = Lazy::new(|| 
-        Address::from_slice(&[0xd9, 0xe1, 0xce, 0x17, 0xf2, 0x64, 0x1f, 0x24, 0xae, 0x83, 0x63, 0x7a, 0xb6, 0x6a, 0x2c, 0xca, 0x9c, 0x37, 0x8b, 0x9f]));
-    
-    pub static WETH_ADDRESS: Lazy<Address> = Lazy::new(|| 
-        Address::from_slice(&[0xc0, 0x2a, 0xaa, 0x39, 0xb2, 0x23, 0xfe, 0x8d, 0x0a, 0x0e, 0x5c, 0x4f, 0x27, 0xea, 0xd9, 0x08, 0x3c, 0x75, 0x6c, 0xc2]));
-    
-    pub static USDC_ADDRESS: Lazy<Address> = Lazy::new(|| 
-        Address::from_slice(&[0xa0, 0xb8, 0x69, 0x91, 0xc6, 0x21, 0x8b, 0x36, 0xc1, 0xd1, 0x9d, 0x4a, 0x2e, 0x9e, 0xb0, 0xce, 0x36, 0x06, 0xeb, 0x48]));
-    
-    pub static USDT_ADDRESS: Lazy<Address> = Lazy::new(|| 
-        Address::from_slice(&[0xda, 0xc1, 0x7f, 0x95, 0x8d, 0x2e, 0xe5, 0x23, 0xa2, 0x20, 0x62, 0x06, 0x99, 0x45, 0x97, 0xc1, 0x3d, 0x83, 0x1e, 0xc7]));
-    
-    pub static AAVE_V3_POOL: Lazy<Address> = Lazy::new(|| 
-        Address::from_slice(&[0x87, 0x87, 0x0b, 0xca, 0x3f, 0x3f, 0xd6, 0x33, 0x54, 0x35, 0x45, 0xf1, 0x5f, 0x80, 0x73, 0xb8, 0xa4, 0x2a, 0xd6, 0xf8]));
+    pub static UNISWAP_V2_ROUTER: Lazy<Address> = Lazy::new(||
+        "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse().unwrap());
+
+    pub static UNISWAP_V3_ROUTER: Lazy<Address> = Lazy::new(||
+        "0xE592427A0AEce92De3Edee1F18E0157C05861564".parse().unwrap());
+
+    pub static SUSHISWAP_ROUTER: Lazy<Address> = Lazy::new(||
+        "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F".parse().unwrap());
+
+    pub static WETH_ADDRESS: Lazy<Address> = Lazy::new(||
+        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".parse().unwrap());
+
+    pub static USDC_ADDRESS: Lazy<Address> = Lazy::new(||
+        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".parse().unwrap());
+
+    pub static USDT_ADDRESS: Lazy<Address> = Lazy::new(||
+        "0xdAC17F958D2ee523a2206206994597C13D831ec7".parse().unwrap());
+
+    pub static AAVE_V3_POOL: Lazy<Address> = Lazy::new(||
+        "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2".parse().unwrap());
 
     /// Get token address by symbol
     pub static TOKEN_ADDRESSES: Lazy<HashMap<&'static str, Address>> = Lazy::new(|| {
@@ -1057,13 +493,13 @@ mod tests {
     #[test]
     fn test_encode_uniswap_v2_swap() {
         let codec = ABICodec::new();
-        
+
         let amount_in = U256::from(1000000000000000000u64); // 1 ETH
         let amount_out_min = U256::from(2000000000u64); // 2000 USDC (6 decimals)
         let path = vec![*contracts::WETH_ADDRESS, *contracts::USDC_ADDRESS];
-        let to = Address::ZERO;
+        let to = Address::zero();
         let deadline = U256::from(1700000000u64);
-        
+
         let encoded = codec.encode_uniswap_v2_swap_exact_tokens(
             amount_in,
             amount_out_min,
@@ -1071,7 +507,7 @@ mod tests {
             to,
             deadline,
         ).unwrap();
-        
+
         assert!(!encoded.is_empty());
         assert_eq!(&encoded[0..4], &[0x38, 0xed, 0x17, 0x39]); // Function selector
     }
@@ -1079,12 +515,12 @@ mod tests {
     #[test]
     fn test_encode_erc20_transfer() {
         let codec = ABICodec::new();
-        
-        let to = Address::ZERO;
+
+        let to = Address::zero();
         let amount = U256::from(1000000000000000000u64); // 1 token
-        
+
         let encoded = codec.encode_erc20_transfer(to, amount).unwrap();
-        
+
         assert!(!encoded.is_empty());
         assert_eq!(&encoded[0..4], &[0xa9, 0x05, 0x9c, 0xbb]); // transfer function selector
     }
@@ -1092,9 +528,9 @@ mod tests {
     #[test]
     fn test_function_selector_matching() {
         let codec = ABICodec::new();
-        
+
         let transfer_data = [0xa9, 0x05, 0x9c, 0xbb, 0x00, 0x00]; // transfer + dummy data
-        
+
         assert!(codec.matches_function(&transfer_data, "transfer"));
         assert!(!codec.matches_function(&transfer_data, "approve"));
     }

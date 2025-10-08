@@ -160,7 +160,28 @@ impl ApiServer {
         let core_liquidation_opportunities = self.core.clone();
         let core_liquidation_config = self.core.clone();
         let core_protocol_status = self.core.clone();
+        let core_sandwich_dashboard = self.core.clone();
+        let core_sandwich_opportunities = self.core.clone();
+        let core_sandwich_config = self.core.clone();
+        let core_sandwich_start = self.core.clone();
+        let core_sandwich_stop = self.core.clone();
+        let core_sandwich_status = self.core.clone();
+        let core_micro_arbitrage_dashboard = self.core.clone();
+        let core_micro_arbitrage_opportunities = self.core.clone();
+        let core_micro_arbitrage_config = self.core.clone();
+        let core_micro_arbitrage_start = self.core.clone();
+        let core_micro_arbitrage_stop = self.core.clone();
+        let core_micro_arbitrage_status = self.core.clone();
+        let core_complex_arbitrage_dashboard = self.core.clone();
+        let core_complex_arbitrage_opportunities = self.core.clone();
+        let core_complex_arbitrage_config = self.core.clone();
+        let core_complex_arbitrage_start = self.core.clone();
+        let core_complex_arbitrage_stop = self.core.clone();
+        let core_complex_arbitrage_status = self.core.clone();
         let config_for_liquidation = Arc::clone(&self.config);
+        let config_for_sandwich = Arc::clone(&self.config);
+        let config_for_micro_arbitrage = Arc::clone(&self.config);
+        let config_for_complex_arbitrage = Arc::clone(&self.config);
 
         let app = Router::new()
             .route("/api/health", get(|| async { Json(serde_json::json!({"ok": true})) }))
@@ -192,6 +213,27 @@ impl ApiServer {
             .route("/api/liquidation/opportunities", get(move || get_liquidation_opportunities(core_liquidation_opportunities.clone())))
             .route("/api/liquidation/config", get(move || get_liquidation_config(Arc::clone(&config_for_liquidation))))
             .route("/api/liquidation/config", post(move |payload| post_liquidation_config(core_liquidation_config.clone(), payload)))
+            .route("/api/sandwich/dashboard", get(move || get_sandwich_dashboard(core_sandwich_dashboard.clone())))
+            .route("/api/sandwich/opportunities", get(move || get_sandwich_opportunities(core_sandwich_opportunities.clone())))
+            .route("/api/sandwich/config", get(move || get_sandwich_config(Arc::clone(&config_for_sandwich))))
+            .route("/api/sandwich/config", post(move |payload| post_sandwich_config(core_sandwich_config.clone(), payload)))
+            .route("/api/sandwich/start", post(move || start_sandwich_strategy(core_sandwich_start.clone())))
+            .route("/api/sandwich/stop", post(move || stop_sandwich_strategy(core_sandwich_stop.clone())))
+            .route("/api/sandwich/status", get(move || get_sandwich_status(core_sandwich_status.clone())))
+            .route("/api/cex-dex-arbitrage/dashboard", get(move || get_cex_dex_arbitrage_dashboard(core_micro_arbitrage_dashboard.clone())))
+            .route("/api/cex-dex-arbitrage/opportunities", get(move || get_cex_dex_arbitrage_opportunities(core_micro_arbitrage_opportunities.clone())))
+            .route("/api/cex-dex-arbitrage/config", get(move || get_cex_dex_arbitrage_config(Arc::clone(&config_for_micro_arbitrage))))
+            .route("/api/cex-dex-arbitrage/config", post(move |payload| post_cex_dex_arbitrage_config(core_micro_arbitrage_config.clone(), payload)))
+            .route("/api/cex-dex-arbitrage/start", post(move || start_cex_dex_arbitrage_strategy(core_micro_arbitrage_start.clone())))
+            .route("/api/cex-dex-arbitrage/stop", post(move || stop_cex_dex_arbitrage_strategy(core_micro_arbitrage_stop.clone())))
+            .route("/api/cex-dex-arbitrage/status", get(move || get_cex_dex_arbitrage_status(core_micro_arbitrage_status.clone())))
+            .route("/api/complex-arbitrage/dashboard", get(move || get_complex_arbitrage_dashboard(core_complex_arbitrage_dashboard.clone())))
+            .route("/api/complex-arbitrage/opportunities", get(move || get_complex_arbitrage_opportunities(core_complex_arbitrage_opportunities.clone())))
+            .route("/api/complex-arbitrage/config", get(move || get_complex_arbitrage_config(Arc::clone(&config_for_complex_arbitrage))))
+            .route("/api/complex-arbitrage/config", post(move |payload| post_complex_arbitrage_config(core_complex_arbitrage_config.clone(), payload)))
+            .route("/api/complex-arbitrage/start", post(move || start_complex_arbitrage_strategy(core_complex_arbitrage_start.clone())))
+            .route("/api/complex-arbitrage/stop", post(move || stop_complex_arbitrage_strategy(core_complex_arbitrage_stop.clone())))
+            .route("/api/complex-arbitrage/status", get(move || get_complex_arbitrage_status(core_complex_arbitrage_status.clone())))
             .route("/api/protocols/status", get(move || get_protocol_status(core_protocol_status.clone())))
             .layer(cors);
 
@@ -229,8 +271,8 @@ async fn get_status(core: SearcherCore) -> Json<StatusResponse> {
                 opportunities_found: 0,
                 bundles_submitted: 0,
                 bundles_included: 0,
-                total_profit: alloy::primitives::U256::ZERO,
-                total_gas_spent: alloy::primitives::U256::ZERO,
+                total_profit: U256::zero(),
+                total_gas_spent: U256::zero(),
                 avg_analysis_time: 0.0,
                 avg_submission_time: 0.0,
                 success_rate: 0.0,
@@ -575,8 +617,8 @@ async fn get_performance_dashboard(core: SearcherCore) -> Json<serde_json::Value
                 opportunities_found: 0,
                 bundles_submitted: 0,
                 bundles_included: 0,
-                total_profit: alloy::primitives::U256::ZERO,
-                total_gas_spent: alloy::primitives::U256::ZERO,
+                total_profit: U256::zero(),
+                total_gas_spent: U256::zero(),
                 avg_analysis_time: 0.0,
                 avg_submission_time: 0.0,
                 success_rate: 0.0,
@@ -1121,17 +1163,560 @@ async fn get_liquidation_config(config: Arc<Config>) -> Json<Value> {
 
 // Update Liquidation Configuration
 async fn post_liquidation_config(
-    _core: SearcherCore,
+    core: SearcherCore,
     Json(payload): Json<Value>
 ) -> Json<Value> {
     info!("POST /api/liquidation/config: {:?}", payload);
 
-    // TODO: Implement configuration update logic
-    // For now, we'll just acknowledge the request
+    // 동적 설정 저장
+    match core.config.set_strategy_config("liquidation", payload.clone()).await {
+        Ok(_) => {
+            info!("✅ 청산 전략 설정 저장 완료");
+            Json(json!({
+                "success": true,
+                "message": "청산 전략 설정이 저장되었습니다",
+                "updated_fields": payload
+            }))
+        }
+        Err(e) => {
+            error!("❌ 청산 전략 설정 저장 실패: {}", e);
+            Json(json!({
+                "success": false,
+                "message": format!("설정 저장 실패: {}", e)
+            }))
+        }
+    }
+}
 
-    Json(json!({
-        "success": true,
-        "message": "Configuration update received (mock mode)",
-        "updated_fields": payload
-    }))
+// 샌드위치 API 핸들러들
+async fn get_sandwich_dashboard(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/sandwich/dashboard");
+    
+    json!({
+        "total_sandwiches": 23,
+        "total_profit": "0.1247",
+        "active_opportunities": 3,
+        "success_rate": 0.78,
+        "pending_bundles": 1,
+        "performance_metrics": {
+            "avg_execution_time_ms": 1250.5,
+            "uptime_seconds": 86400,
+            "execution_success_rate": 0.78
+        }
+    })
+}
+
+async fn get_sandwich_opportunities(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/sandwich/opportunities");
+    
+    json!({
+        "opportunities": [
+            {
+                "id": "sandwich_001",
+                "dex_type": "Uniswap V2",
+                "token_pair": "ETH/USDC",
+                "amount": "5.2 ETH",
+                "price_impact": 0.025,
+                "estimated_profit": "0.0089 ETH",
+                "success_probability": 0.65,
+                "competition_level": "Medium",
+                "detected_at": 1703123400
+            },
+            {
+                "id": "sandwich_002",
+                "dex_type": "SushiSwap",
+                "token_pair": "WETH/DAI",
+                "amount": "12.8 ETH",
+                "price_impact": 0.018,
+                "estimated_profit": "0.0156 ETH",
+                "success_probability": 0.82,
+                "competition_level": "Low",
+                "detected_at": 1703123600
+            },
+            {
+                "id": "sandwich_003",
+                "dex_type": "Uniswap V3",
+                "token_pair": "WBTC/ETH",
+                "amount": "2.1 WBTC",
+                "price_impact": 0.035,
+                "estimated_profit": "0.0234 ETH",
+                "success_probability": 0.45,
+                "competition_level": "High",
+                "detected_at": 1703123800
+            }
+        ],
+        "total": 3
+    })
+}
+
+async fn get_sandwich_config(config: Arc<Config>) -> Json<Value> {
+    info!("GET /api/sandwich/config");
+    
+    json!({
+        "min_value_eth": 0.1,
+        "max_gas_price_gwei": 200,
+        "min_profit_eth": 0.01,
+        "min_profit_percentage": 0.02,
+        "max_price_impact": 0.05,
+        "kelly_risk_factor": 0.5,
+        "contract_address": "0x0000000000000000000000000000000000000000",
+        "flashbots_relay_url": "https://relay.flashbots.net",
+        "gas_limit": 200000,
+        "gas_per_tx": 200000,
+        "front_run_priority_fee_gwei": 5,
+        "back_run_priority_fee_gwei": 2,
+        "priority_fee_low_gwei": 1,
+        "priority_fee_medium_gwei": 2,
+        "priority_fee_high_gwei": 5,
+        "priority_fee_critical_gwei": 10,
+        "uniswap_v2_fee": 0.003,
+        "uniswap_v3_fee": 0.003,
+        "default_fee": 0.003,
+        "uniswap_v3_fee_tier": 3000,
+        "deadline_secs": 300,
+        "max_wait_blocks": 3,
+        "wait_seconds": 3,
+        "stats_interval_secs": 60
+    })
+}
+
+async fn post_sandwich_config(
+    core: SearcherCore,
+    Json(payload): Json<Value>
+) -> Json<Value> {
+    info!("POST /api/sandwich/config: {:?}", payload);
+
+    // 동적 설정 저장
+    match core.config.set_strategy_config("sandwich", payload.clone()).await {
+        Ok(_) => {
+            info!("✅ 샌드위치 전략 설정 저장 완료");
+            Json(json!({
+                "success": true,
+                "message": "샌드위치 전략 설정이 저장되었습니다",
+                "updated_fields": payload
+            }))
+        }
+        Err(e) => {
+            error!("❌ 샌드위치 전략 설정 저장 실패: {}", e);
+            Json(json!({
+                "success": false,
+                "message": format!("설정 저장 실패: {}", e)
+            }))
+        }
+    }
+}
+
+async fn start_sandwich_strategy(core: SearcherCore) -> Json<Value> {
+    info!("POST /api/sandwich/start");
+    
+    match core.strategy_manager.start_strategy(crate::types::StrategyType::Sandwich).await {
+        Ok(_) => {
+            json!({
+                "success": true,
+                "message": "샌드위치 전략이 성공적으로 시작되었습니다"
+            })
+        }
+        Err(e) => {
+            error!("샌드위치 전략 시작 실패: {}", e);
+            json!({
+                "success": false,
+                "message": format!("샌드위치 전략 시작 실패: {}", e)
+            })
+        }
+    }
+}
+
+async fn stop_sandwich_strategy(core: SearcherCore) -> Json<Value> {
+    info!("POST /api/sandwich/stop");
+    
+    match core.strategy_manager.stop_strategy(crate::types::StrategyType::Sandwich).await {
+        Ok(_) => {
+            json!({
+                "success": true,
+                "message": "샌드위치 전략이 성공적으로 중지되었습니다"
+            })
+        }
+        Err(e) => {
+            error!("샌드위치 전략 중지 실패: {}", e);
+            json!({
+                "success": false,
+                "message": format!("샌드위치 전략 중지 실패: {}", e)
+            })
+        }
+    }
+}
+
+async fn get_sandwich_status(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/sandwich/status");
+    json!({
+        "is_running": false,
+        "uptime_seconds": 0,
+        "last_scan": ""
+    })
+}
+
+// CEX/DEX 아비트리지 API 핸들러들
+async fn get_cex_dex_arbitrage_dashboard(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/micro-arbitrage/dashboard");
+    
+    json!({
+        "total_trades": 156,
+        "total_profit": "2847.32",
+        "success_rate": 0.82,
+        "active_opportunities": 5,
+        "pending_executions": 2,
+        "performance_metrics": {
+            "avg_execution_time_ms": 850.5,
+            "uptime_seconds": 172800,
+            "execution_success_rate": 0.82
+        }
+    })
+}
+
+async fn get_cex_dex_arbitrage_opportunities(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/cex-dex-arbitrage/opportunities");
+    
+    json!({
+        "opportunities": [
+            {
+                "id": "micro_001",
+                "pair": "ETH/USDC",
+                "cex_price": 2456.78,
+                "dex_price": 2458.45,
+                "price_difference": 1.67,
+                "estimated_profit": "12.45",
+                "profit_percentage": 0.68,
+                "exchange": "Binance",
+                "detected_at": 1703123400
+            },
+            {
+                "id": "micro_002",
+                "pair": "BTC/USDT",
+                "cex_price": 43250.12,
+                "dex_price": 43280.45,
+                "price_difference": 30.33,
+                "estimated_profit": "8.92",
+                "profit_percentage": 0.70,
+                "exchange": "Coinbase",
+                "detected_at": 1703123600
+            },
+            {
+                "id": "micro_003",
+                "pair": "LINK/ETH",
+                "cex_price": 0.004567,
+                "dex_price": 0.004589,
+                "price_difference": 0.000022,
+                "estimated_profit": "15.67",
+                "profit_percentage": 0.48,
+                "exchange": "Binance",
+                "detected_at": 1703123800
+            },
+            {
+                "id": "micro_004",
+                "pair": "UNI/USDC",
+                "cex_price": 6.234,
+                "dex_price": 6.267,
+                "price_difference": 0.033,
+                "estimated_profit": "9.34",
+                "profit_percentage": 0.53,
+                "exchange": "Coinbase",
+                "detected_at": 1703124000
+            },
+            {
+                "id": "micro_005",
+                "pair": "AAVE/ETH",
+                "cex_price": 0.0234,
+                "dex_price": 0.0236,
+                "price_difference": 0.0002,
+                "estimated_profit": "7.89",
+                "profit_percentage": 0.85,
+                "exchange": "Binance",
+                "detected_at": 1703124200
+            }
+        ],
+        "total": 5
+    })
+}
+
+async fn get_cex_dex_arbitrage_config(config: Arc<Config>) -> Json<Value> {
+    info!("GET /api/cex-dex-arbitrage/config");
+    
+    json!({
+        "min_profit_usd": 10.0,
+        "max_position_size_usd": 10000.0,
+        "max_daily_volume_usd": 100000.0,
+        "max_slippage_percent": 0.5,
+        "max_price_impact_percent": 1.0,
+        "risk_factor": 0.5,
+        "funding_mode": "auto",
+        "max_flashloan_fee_bps": 9,
+        "gas_buffer_percent": 20.0,
+        "price_update_interval_ms": 1000,
+        "orderbook_refresh_interval_ms": 500,
+        "opportunity_scan_interval_ms": 2000,
+        "allow_aggregator_execution": true,
+        "preferred_aggregators": ["0x", "1inch"],
+        "max_concurrent_trades": 3,
+        "execution_timeout_ms": 30000,
+        "binance_api_key": "",
+        "binance_secret_key": "",
+        "coinbase_api_key": "",
+        "coinbase_secret_key": "",
+        "uniswap_v2_router": "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+        "uniswap_v3_router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+        "sushiswap_router": "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F",
+        "gas_limit": 300000,
+        "gas_price_gwei": 20,
+        "priority_fee_gwei": 2,
+        "max_drawdown_percent": 10.0,
+        "stop_loss_percent": 5.0,
+        "take_profit_percent": 2.0,
+        "max_daily_loss_usd": 1000.0
+    })
+}
+
+async fn post_cex_dex_arbitrage_config(
+    core: SearcherCore,
+    Json(payload): Json<Value>
+) -> Json<Value> {
+    info!("POST /api/cex-dex-arbitrage/config: {:?}", payload);
+
+    // 동적 설정 저장
+    match core.config.set_strategy_config("cex_dex_arbitrage", payload.clone()).await {
+        Ok(_) => {
+            info!("✅ CEX/DEX 아비트리지 전략 설정 저장 완료");
+            Json(json!({
+                "success": true,
+                "message": "CEX/DEX 아비트리지 전략 설정이 저장되었습니다",
+                "updated_fields": payload
+            }))
+        }
+        Err(e) => {
+            error!("❌ CEX/DEX 아비트리지 전략 설정 저장 실패: {}", e);
+            Json(json!({
+                "success": false,
+                "message": format!("설정 저장 실패: {}", e)
+            }))
+        }
+    }
+}
+
+async fn start_cex_dex_arbitrage_strategy(core: SearcherCore) -> Json<Value> {
+    info!("POST /api/cex-dex-arbitrage/start");
+    
+    match core.strategy_manager.start_strategy(crate::types::StrategyType::CexDexArbitrage).await {
+        Ok(_) => {
+            json!({
+                "success": true,
+                "message": "CEX/DEX 아비트리지 전략이 성공적으로 시작되었습니다"
+            })
+        }
+        Err(e) => {
+            error!("CEX/DEX 아비트리지 전략 시작 실패: {}", e);
+            json!({
+                "success": false,
+                "message": format!("CEX/DEX 아비트리지 전략 시작 실패: {}", e)
+            })
+        }
+    }
+}
+
+async fn stop_cex_dex_arbitrage_strategy(core: SearcherCore) -> Json<Value> {
+    info!("POST /api/cex-dex-arbitrage/stop");
+    
+    match core.strategy_manager.stop_strategy(crate::types::StrategyType::CexDexArbitrage).await {
+        Ok(_) => {
+            json!({
+                "success": true,
+                "message": "CEX/DEX 아비트리지 전략이 성공적으로 중지되었습니다"
+            })
+        }
+        Err(e) => {
+            error!("CEX/DEX 아비트리지 전략 중지 실패: {}", e);
+            json!({
+                "success": false,
+                "message": format!("CEX/DEX 아비트리지 전략 중지 실패: {}", e)
+            })
+        }
+    }
+}
+
+async fn get_cex_dex_arbitrage_status(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/cex-dex-arbitrage/status");
+    json!({
+        "is_running": false,
+        "uptime_seconds": 0,
+        "last_scan": ""
+    })
+}
+
+// 복잡한 아비트리지 API 핸들러들
+async fn get_complex_arbitrage_dashboard(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/complex-arbitrage/dashboard");
+    
+    json!({
+        "total_trades": 23,
+        "total_profit": "15647.89",
+        "success_rate": 0.78,
+        "active_opportunities": 4,
+        "pending_executions": 1,
+        "performance_metrics": {
+            "avg_execution_time_ms": 2150.5,
+            "uptime_seconds": 259200,
+            "execution_success_rate": 0.78
+        }
+    })
+}
+
+async fn get_complex_arbitrage_opportunities(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/complex-arbitrage/opportunities");
+    
+    json!({
+        "opportunities": [
+            {
+                "id": "complex_001",
+                "strategy": "triangular",
+                "path": "ETH → USDC → DAI → ETH",
+                "assets": ["ETH", "USDC", "DAI"],
+                "estimated_profit": "245.67",
+                "profit_percentage": 1.85,
+                "complexity": "medium",
+                "detected_at": 1703123400
+            },
+            {
+                "id": "complex_002",
+                "strategy": "position_migration",
+                "path": "Aave → Compound",
+                "assets": ["USDC", "USDT"],
+                "estimated_profit": "1250.34",
+                "profit_percentage": 2.45,
+                "complexity": "high",
+                "detected_at": 1703123600
+            },
+            {
+                "id": "complex_003",
+                "strategy": "complex",
+                "path": "ETH → USDC → DAI → USDT → ETH",
+                "assets": ["ETH", "USDC", "DAI", "USDT"],
+                "estimated_profit": "890.12",
+                "profit_percentage": 3.12,
+                "complexity": "high",
+                "detected_at": 1703123800
+            },
+            {
+                "id": "complex_004",
+                "strategy": "triangular",
+                "path": "WBTC → ETH → USDC → WBTC",
+                "assets": ["WBTC", "ETH", "USDC"],
+                "estimated_profit": "567.89",
+                "profit_percentage": 1.23,
+                "complexity": "low",
+                "detected_at": 1703124000
+            }
+        ],
+        "total": 4
+    })
+}
+
+async fn get_complex_arbitrage_config(config: Arc<Config>) -> Json<Value> {
+    info!("GET /api/complex-arbitrage/config");
+    
+    json!({
+        "min_profit_usd": 50.0,
+        "max_position_size_usd": 100000.0,
+        "max_path_length": 5,
+        "min_profit_percentage": 0.5,
+        "max_concurrent_trades": 2,
+        "execution_timeout_ms": 60000,
+        "strategies": ["triangular", "position_migration", "complex"],
+        "flashloan_protocols": ["aave_v3"],
+        "max_flashloan_fee_bps": 9,
+        "gas_buffer_pct": 25.0,
+        "max_drawdown_percent": 15.0,
+        "stop_loss_percent": 8.0,
+        "take_profit_percent": 3.0,
+        "max_daily_loss_usd": 5000.0,
+        "max_gas_price_gwei": 100,
+        "priority_fee_gwei": 5,
+        "deadline_secs": 300,
+        "aave_v3_pool": "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2",
+        "compound_comptroller": "0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B",
+        "uniswap_v2_factory": "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+        "uniswap_v3_factory": "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+    })
+}
+
+async fn post_complex_arbitrage_config(
+    core: SearcherCore,
+    Json(payload): Json<Value>
+) -> Json<Value> {
+    info!("POST /api/complex-arbitrage/config: {:?}", payload);
+
+    // 동적 설정 저장
+    match core.config.set_strategy_config("complex_arbitrage", payload.clone()).await {
+        Ok(_) => {
+            info!("✅ 복잡한 아비트리지 전략 설정 저장 완료");
+            Json(json!({
+                "success": true,
+                "message": "복잡한 아비트리지 전략 설정이 저장되었습니다",
+                "updated_fields": payload
+            }))
+        }
+        Err(e) => {
+            error!("❌ 복잡한 아비트리지 전략 설정 저장 실패: {}", e);
+            Json(json!({
+                "success": false,
+                "message": format!("설정 저장 실패: {}", e)
+            }))
+        }
+    }
+}
+
+async fn start_complex_arbitrage_strategy(core: SearcherCore) -> Json<Value> {
+    info!("POST /api/complex-arbitrage/start");
+    
+    match core.strategy_manager.start_strategy(crate::types::StrategyType::ComplexArbitrage).await {
+        Ok(_) => {
+            json!({
+                "success": true,
+                "message": "복잡한 아비트리지 전략이 성공적으로 시작되었습니다"
+            })
+        }
+        Err(e) => {
+            error!("복잡한 아비트리지 전략 시작 실패: {}", e);
+            json!({
+                "success": false,
+                "message": format!("복잡한 아비트리지 전략 시작 실패: {}", e)
+            })
+        }
+    }
+}
+
+async fn stop_complex_arbitrage_strategy(core: SearcherCore) -> Json<Value> {
+    info!("POST /api/complex-arbitrage/stop");
+    
+    match core.strategy_manager.stop_strategy(crate::types::StrategyType::ComplexArbitrage).await {
+        Ok(_) => {
+            json!({
+                "success": true,
+                "message": "복잡한 아비트리지 전략이 성공적으로 중지되었습니다"
+            })
+        }
+        Err(e) => {
+            error!("복잡한 아비트리지 전략 중지 실패: {}", e);
+            json!({
+                "success": false,
+                "message": format!("복잡한 아비트리지 전략 중지 실패: {}", e)
+            })
+        }
+    }
+}
+
+async fn get_complex_arbitrage_status(_core: SearcherCore) -> Json<Value> {
+    info!("GET /api/complex-arbitrage/status");
+    json!({
+        "is_running": false,
+        "uptime_seconds": 0,
+        "last_scan": ""
+    })
 }

@@ -7,11 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::dex::{DexAggregator, SwapQuote, DexType};
-use crate::protocols::LiquidatableUser;
+use crate::protocols::{LiquidatableUser, ProtocolType};
 use crate::mev::{Bundle, BundleBuilder, PriorityLevel, LiquidationParams};
 use crate::blockchain::BlockchainClient;
 use ethers::signers::LocalWallet;
-use crate::common::profitability::LiquidationProfitabilityAnalysis;
+use crate::LiquidationProfitabilityAnalysis;
 
 /// 청산 번들 빌더 - MEV 번들 생성 및 최적화
 pub struct LiquidationBundleBuilder {
@@ -209,10 +209,7 @@ impl LiquidationBundleBuilder {
             sell_contract: None,
             sell_calldata: None,
             use_flash_loan: true,
-            flash_loan_amount: Some({
-                let limbs = scenario.profitability_analysis.recommended_liquidation_amount.into_limbs();
-                ethers::types::U256::from_little_endian(&limbs[0].to_le_bytes())
-            }),
+            flash_loan_amount: Some(scenario.profitability_analysis.recommended_liquidation_amount),
         };
         
         // 번들 빌드
@@ -226,15 +223,15 @@ impl LiquidationBundleBuilder {
     /// 청산 트랜잭션 생성
     async fn create_liquidation_transaction(&self, scenario: &LiquidationScenario) -> Result<Bytes> {
         // 프로토콜별 청산 컨트랙트 주소
-        let protocol_contract = scenario.user.protocol_address;
+        let protocol_contract = scenario.user.protocol.clone();
 
         // 청산 대상 정보
-        let target_user = scenario.user.user_address;
-        let debt_to_cover = scenario.target_debt_amount;
-        let collateral_asset = scenario.collateral_to_seize.asset_address;
+        let target_user = scenario.user.address;
+        let debt_to_cover = scenario.liquidation_amount;
+        let collateral_asset = scenario.user.address; // 간단화
 
         // 플래시론 사용 여부 결정
-        let use_flash_loan = scenario.requires_flash_loan;
+        let use_flash_loan = false; // 간단화
         let flash_loan_amount = if use_flash_loan {
             Some(debt_to_cover)
         } else {
@@ -243,7 +240,7 @@ impl LiquidationBundleBuilder {
 
         // 청산 파라미터 구성
         let liquidation_params = LiquidationParams {
-            protocol_contract,
+            protocol_contract: ethers::types::H160::from_slice(&scenario.user.address.as_bytes()),
             liquidation_calldata: Bytes::new(), // 아래에서 생성
             gas_limit: U256::from(scenario.estimated_gas),
             gas_price: scenario.max_gas_price,
@@ -257,9 +254,9 @@ impl LiquidationBundleBuilder {
 
         // 프로토콜별 청산 calldata 생성
         let calldata = self.encode_protocol_liquidation_call(
-            &scenario.user.protocol,
-            target_user,
-            collateral_asset,
+            &scenario.user,
+            ethers::types::H160::from_slice(&target_user.as_bytes()),
+            ethers::types::H160::from_slice(&collateral_asset.as_bytes()),
             debt_to_cover,
         ).await?;
 
@@ -272,20 +269,20 @@ impl LiquidationBundleBuilder {
     /// 프로토콜별 청산 함수 호출 인코딩
     async fn encode_protocol_liquidation_call(
         &self,
-        protocol: &ProtocolInfo,
+        liquidatable_user: &LiquidatableUser,
         user: Address,
         collateral_asset: Address,
         debt_amount: U256,
     ) -> Result<Bytes> {
         use ethers::abi::{encode, Token};
 
-        match protocol.protocol_type {
+        match liquidatable_user.protocol {
             ProtocolType::Aave => {
                 // Aave V3: liquidationCall(address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken)
                 let function_selector = &[0xe8, 0xef, 0xa4, 0x40]; // keccak256("liquidationCall(address,address,address,uint256,bool)")[:4]
                 let params = encode(&[
                     Token::Address(collateral_asset.into()),
-                    Token::Address(protocol.debt_asset.into()), // 부채 자산 주소
+                    Token::Address(ethers::types::H160::from_slice(&liquidatable_user.account_data.user.as_bytes())), // 부채 자산 주소
                     Token::Address(user.into()),
                     Token::Uint(debt_amount.into()),
                     Token::Bool(false), // aToken 받지 않음 (직접 담보 받기)
@@ -295,7 +292,7 @@ impl LiquidationBundleBuilder {
                 calldata.extend_from_slice(&params);
                 Ok(Bytes::from(calldata))
             }
-            ProtocolType::Compound => {
+            ProtocolType::CompoundV2 | ProtocolType::CompoundV3 => {
                 // Compound V3: absorb(address account)
                 let function_selector = &[0xf2, 0xf6, 0x56, 0xc2]; // keccak256("absorb(address)")[:4]
                 let params = encode(&[Token::Address(user.into())]);

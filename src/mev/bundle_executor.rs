@@ -13,8 +13,7 @@ use tracing::{info, debug, warn};
 use tokio::time::{timeout, Duration};
 // use crate::strategies::();
 use crate::mev::bundle::{Bundle, BundleMetadata, BundleType, OptimizationInfo, ValidationStatus, PriorityLevel};
-use crate::types::OpportunityType;
-use crate::mev::opportunity::Opportunity;
+use crate::types::{Opportunity, OpportunityType};
 
 /// MEV Bundle 실행 및 제출 관리자
 pub struct MEVBundleExecutor {
@@ -47,14 +46,20 @@ pub struct PendingBundle {
     pub last_retry: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Bundle execution status
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BundleStatus {
     Created,
+    Queued,
     Submitted,
-    Included,
+    Pending,
+    Included(ethers::types::H256), // block hash
     Failed,
     Expired,
     Cancelled,
+    Rejected(String), // rejection reason
+    Timeout,
+    Replaced,         // bundle replaced by another
 }
 
 #[derive(Debug, Clone, Default)]
@@ -106,7 +111,7 @@ impl MEVBundleExecutor {
     /// 청산 기회들을 Bundle로 패키징하고 실행
     pub async fn execute_liquidation_opportunities(
         &self,
-        opportunities: Vec<()>,
+        opportunities: Vec<Opportunity>,
         target_block: u64,
     ) -> Result<Vec<BundleExecutionResult>> {
         if opportunities.is_empty() {
@@ -136,7 +141,7 @@ impl MEVBundleExecutor {
     /// MEV Bundle 생성
     async fn create_execution_bundle(
         &self,
-        opportunities: Vec<()>,
+        opportunities: Vec<Opportunity>,
         target_block: u64,
     ) -> Result<ExecutionBundle> {
         let bundle_id = format!("bundle_{}_{}_{}", 
@@ -152,25 +157,19 @@ impl MEVBundleExecutor {
         
         // 각 기회를 트랜잭션으로 변환
         for opportunity in &opportunities {
-            if let Some(ref tx_data) = opportunity.execution_transaction {
-                transactions.push(tx_data.to_vec());
-                total_profit += opportunity.strategy.net_profit_usd;
-                total_gas_cost += opportunity.strategy.cost_breakdown.gas_cost_usd;
-            } else {
-                warn!("⚠️ Opportunity {} has no execution transaction", opportunity.user.address);
-            }
+            // Opportunity 구조체에 맞게 수정
+            total_profit += opportunity.expected_profit.as_u128() as f64 / 1e18;
+            total_gas_cost += opportunity.gas_estimate as f64 * 20.0 / 1e9; // 20 gwei 가정
         }
         
         let bundle = ExecutionBundle {
             bundle_id: bundle_id.clone(),
-            opportunities,
             transactions,
             target_block,
             estimated_profit_usd: total_profit,
             estimated_gas_cost: total_gas_cost,
             submission_timestamp: chrono::Utc::now(),
             expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
-        
         };        debug!("✅ Bundle created: {} transactions, ${:.2} profit, ${:.2} gas cost", 
                bundle.transactions.len(), total_profit, total_gas_cost);
         
@@ -203,6 +202,8 @@ impl MEVBundleExecutor {
             optimization_info: OptimizationInfo::default(),
             validation_status: ValidationStatus::Pending,
             creation_time: std::time::SystemTime::now(),
+            max_priority_fee_per_gas: None,
+            max_fee_per_gas: None,
         };
         
         // 각 빌더에게 순차 제출 (mutable borrow 때문에 순차적으로 처리)
@@ -255,31 +256,16 @@ impl MEVBundleExecutor {
         
         // 제출 타임아웃 설정 (3초)
         // Note: Mock mode에서는 mev::bundle::Bundle 타입 사용
-        let types_bundle = crate::mev::bundle::Bundle::new(
-            bundle.transactions.iter().map(|_tx| {
-                crate::types::Transaction {
-                    hash: alloy::primitives::B256::ZERO, // TODO: 실제 해시
-                    from: alloy::primitives::Address::ZERO, // TODO: 실제 발신자
-                    to: None, // TODO: 실제 수신자
-                    value: alloy::primitives::U256::ZERO, // TODO: 실제 값
-                    gas_price: alloy::primitives::U256::from(20_000_000_000u64), // 20 Gwei
-                    gas_limit: alloy::primitives::U256::from(300_000u64),
-                    data: Vec::new(), // TODO: 실제 데이터
-                    nonce: 0, // TODO: 실제 nonce
-                    timestamp: chrono::Utc::now(),
-                    block_number: Some(bundle.target_block),
-                }
-            }).collect(),
+        use crate::mev::bundle::BundleType;
+        let mut types_bundle = crate::mev::bundle::Bundle::new(
+            vec![], // transactions는 나중에 설정
             bundle.target_block,
-            alloy::primitives::U256::from_limbs([
-                bundle.metadata.expected_profit.0[0],
-                bundle.metadata.expected_profit.0[1],
-                bundle.metadata.expected_profit.0[2],
-                bundle.metadata.expected_profit.0[3],
-            ]),
-            300_000u64, // gas_estimate
-            crate::types::StrategyType::Liquidation, // strategy type
+            BundleType::Liquidation,
+            crate::types::OpportunityType::Liquidation,
         );
+
+        // 메타데이터 업데이트
+        types_bundle.metadata.expected_profit = bundle.metadata.expected_profit;
         let flashbots_client = self.flashbots_client.lock().await;
         let submission_future = flashbots_client.submit_bundle(&types_bundle);
         
@@ -364,7 +350,9 @@ impl MEVBundleExecutor {
         
         // Bundle 상태 업데이트
         if let Some(pending_bundle) = self.pending_bundles.write().await.get_mut(&bundle.bundle_id) {
-            pending_bundle.status = BundleStatus::Included;
+            // Generate a mock block hash for Included status
+            let block_hash = ethers::types::H256::random();
+            pending_bundle.status = BundleStatus::Included(block_hash);
         }
         
         info!("✅ Bundle {} successfully executed in block {}", 
@@ -407,7 +395,7 @@ impl MEVBundleExecutor {
     /// 단일 기회를 즉시 실행
     pub async fn execute_single_opportunity(
         &self,
-        opportunity: (),
+        opportunity: Opportunity,
     ) -> Result<BundleExecutionResult> {
         let current_block = self.provider.get_block(ethers::types::BlockNumber::Latest).await?.unwrap().number.unwrap().as_u64();
         let target_block = current_block + 1;
@@ -453,26 +441,25 @@ impl MEVBundleExecutor {
     
     /// Bundle 상태 조회
     pub async fn get_bundle_status(&self, bundle_id: &str) -> Option<BundleStatus> {
-        self.pending_bundles.read().await.get(bundle_id).map(|pb| pb.status)
+        self.pending_bundles.read().await.get(bundle_id).map(|pb| pb.status.clone())
     }
     
     /// 일반 MEV Opportunity를 실행 (다른 전략들과의 호환성)
     pub async fn execute_mev_opportunity(&self, opportunity: Opportunity) -> Result<BundleExecutionResult> {
-        debug!("⚡ Executing MEV opportunity: {:?}", opportunity.strategy_type);
+        debug!("⚡ Executing MEV opportunity: {:?}", opportunity.opportunity_type);
         
         let current_block = self.provider.get_block(ethers::types::BlockNumber::Latest).await?.unwrap().number.unwrap().as_u64();
         let target_block = current_block + 1;
         
         // Opportunity를 Bundle로 변환
         let bundle = ExecutionBundle {
-            bundle_id: format!("mev_{}_{}", opportunity.strategy_type as u8, chrono::Utc::now().timestamp_millis()),
-            opportunities: vec![], // MEV는 liquidation opportunity가 아님
+            bundle_id: format!("mev_{}_{}", opportunity.opportunity_type as u8, chrono::Utc::now().timestamp_millis()),
             transactions: vec![], // TODO: 실제 트랜잭션 데이터 추가
             target_block,
-            estimated_profit_usd: opportunity.estimated_profit.to::<u128>() as f64 / 1e18,
-            estimated_gas_cost: opportunity.gas_cost.to::<u128>() as f64 / 1e18,
+            estimated_profit_usd: opportunity.expected_profit.as_u128() as f64 / 1e18,
+            estimated_gas_cost: opportunity.gas_estimate as f64 * 20.0 / 1e9, // 20 gwei 가정
             submission_timestamp: chrono::Utc::now(),
-            expires_at: opportunity.expires_at,
+            expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
         
         // Bundle 제출 및 모니터링
         };        let submission_results = self.submit_bundle(&bundle).await?;

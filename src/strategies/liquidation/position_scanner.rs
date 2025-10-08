@@ -9,13 +9,14 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::Mutex;
 use tracing::{info, debug, warn};
-use alloy::primitives::Address;
+use ethers::types::Address;
 use std::collections::HashMap;
 
 use crate::strategies::liquidation::types::{LendingProtocolInfo, OnChainLiquidationOpportunity, UserPosition};
 use crate::strategies::liquidation::stats::OnChainLiquidationStats;
 use crate::blockchain::{BlockchainClient, ContractFactory, LendingPoolContract};
 use crate::storage::Storage;
+use crate::protocols::TheGraphClient;
 
 pub struct PositionScanner {
     blockchain_client: Arc<BlockchainClient>,
@@ -23,6 +24,7 @@ pub struct PositionScanner {
     lending_protocols: HashMap<Address, LendingProtocolInfo>,
     stats: Arc<Mutex<OnChainLiquidationStats>>,
     storage: Arc<Storage>,
+    thegraph_client: Arc<TheGraphClient>,
 }
 
 impl PositionScanner {
@@ -39,6 +41,7 @@ impl PositionScanner {
             lending_protocols,
             stats,
             storage,
+            thegraph_client: Arc::new(TheGraphClient::new()),
         }
     }
 
@@ -130,17 +133,41 @@ impl PositionScanner {
     }
 
     /// 고위험 사용자 목록 조회
-    async fn get_high_risk_users(&self, _protocol: &LendingProtocolInfo) -> Result<Vec<Address>> {
-        // 실제로는 다음 방법으로 가져와야 함:
-        // 1. 이벤트 로그에서 최근 거래한 사용자들
-        // 2. 서브그래프 API
-        // 3. 오프체인 모니터링 시스템
+    async fn get_high_risk_users(&self, protocol: &LendingProtocolInfo) -> Result<Vec<Address>> {
+        info!("🔍 Fetching high-risk users for protocol: {}", protocol.name);
 
-        // 임시로 알려진 테스트 주소들 반환
-        Ok(vec![
-            "0x742d35Cc6570000000000000000000000000001".parse()?,
-            "0x742d35Cc6570000000000000000000000000002".parse()?,
-            "0x742d35Cc6570000000000000000000000000003".parse()?,
-        ])
+        // The Graph API로 청산 가능한 사용자 조회
+        match protocol.protocol_type {
+            crate::strategies::liquidation::types::ProtocolType::Aave => {
+                match self.thegraph_client.get_aave_liquidatable_users(100).await {
+                    Ok(users) => {
+                        let addresses: Vec<Address> = users.iter()
+                            .map(|u| u.address)
+                            .collect();
+
+                        info!("✅ The Graph: Found {} Aave users", addresses.len());
+                        Ok(addresses)
+                    }
+                    Err(e) => {
+                        warn!("⚠️ The Graph API failed: {}, using fallback", e);
+
+                        // Fallback: 하드코딩된 테스트 주소
+                        Ok(vec![
+                            "0x742d35Cc6570000000000000000000000000001".parse()?,
+                            "0x742d35Cc6570000000000000000000000000002".parse()?,
+                            "0x742d35Cc6570000000000000000000000000003".parse()?,
+                        ])
+                    }
+                }
+            }
+            _ => {
+                // 다른 프로토콜은 아직 The Graph 미지원
+                warn!("⚠️ The Graph not implemented for {:?}, using fallback", protocol.protocol_type);
+                Ok(vec![
+                    "0x742d35Cc6570000000000000000000000000001".parse()?,
+                    "0x742d35Cc6570000000000000000000000000002".parse()?,
+                ])
+            }
+        }
     }
 }

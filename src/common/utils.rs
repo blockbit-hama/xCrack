@@ -216,7 +216,7 @@ pub fn is_high_value_dex_trade(transaction: &Transaction, min_value: U256) -> bo
     
     // Check if target is a known DEX router
     if let Some(to) = transaction.to {
-        let to_h160 = H160::from_slice(to.as_slice());
+        let to_h160 = H160::from_slice(to.as_bytes());
         let known_routers = [
             "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D", // Uniswap V2 Router
             "0xE592427A0AEce92De3Edee1F18E0157C05861564", // Uniswap V3 Router
@@ -322,7 +322,6 @@ pub fn calculate_liquidation_reward(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::primitives::{Address, B256};
 
     #[test]
     fn test_amm_output_calculation() {
@@ -377,12 +376,12 @@ mod tests {
     #[test]
     fn test_high_value_trade_detection() {
         let high_value_tx = Transaction {
-            hash: B256::ZERO,
-            from: Address::ZERO,
+            hash: H256::zero(),
+            from: Address::zero(),
             to: Some("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse().unwrap()), // Uniswap V2
-            value: alloy::primitives::U256::from(2000000000000000000u64), // 2 ETH
-            gas_price: alloy::primitives::U256::from(20000000000u64),
-            gas_limit: alloy::primitives::U256::from(200000u64),
+            value: U256::from(2000000000000000000u64), // 2 ETH
+            gas_price: U256::from(20000000000u64),
+            gas_limit: U256::from(200000u64),
             data: vec![],
             nonce: 1,
             timestamp: chrono::Utc::now(),
@@ -392,12 +391,12 @@ mod tests {
         let _min_value = ethers::types::U256::from(1000000000000000000u64); // 1 ETH
         // Convert transaction values to ethers::types::U256 for testing
         let high_value_tx_converted = Transaction {
-            value: alloy::primitives::U256::from(2000000000000000000u128), // 2 ETH
+            value: U256::from(2000000000000000000u128), // 2 ETH
             ..high_value_tx.clone()
         };
         // For testing, we need to check the logic manually since our Transaction uses alloy types
         // but the function expects ethers types
-        assert!(high_value_tx_converted.value > alloy::primitives::U256::from(1000000000000000000u64));
+        assert!(high_value_tx_converted.value > U256::from(1000000000000000000u64));
         
         // Test with non-DEX address
         let non_dex_tx = Transaction {
@@ -417,10 +416,10 @@ mod tests {
         
         // Test with low value
         let low_value_tx = Transaction {
-            value: alloy::primitives::U256::from(500000000000000000u64), // 0.5 ETH
+            value: U256::from(500000000000000000u64), // 0.5 ETH
             ..high_value_tx.clone()
         };
-        assert!(low_value_tx.value < alloy::primitives::U256::from(1000000000000000000u64));
+        assert!(low_value_tx.value < U256::from(1000000000000000000u64));
     }
     
     #[test]

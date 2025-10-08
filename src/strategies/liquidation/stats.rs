@@ -1,5 +1,5 @@
 use std::time::Instant;
-use alloy::primitives::U256;
+use ethers::types::U256;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -23,9 +23,9 @@ impl Default for OnChainLiquidationStats {
             transactions_analyzed: 0,
             opportunities_found: 0,
             successful_liquidations: 0,
-            total_profit: U256::ZERO,
-            avg_profit_per_liquidation: U256::ZERO,
-            avg_gas_used: U256::ZERO,
+            total_profit: U256::zero(),
+            avg_profit_per_liquidation: U256::zero(),
+            avg_gas_used: U256::zero(),
             last_scan_time: None,
         }
     }

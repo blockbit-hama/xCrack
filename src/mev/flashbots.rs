@@ -99,9 +99,9 @@ struct JsonRpcError {
     data: Option<serde_json::Value>,
 }
 
-/// 번들 상태
+/// 번들 제출 상태 (Flashbots 전용)
 #[derive(Debug, Clone)]
-pub enum BundleStatus {
+pub enum FlashbotsBundleStatus {
     Pending,
     Included(H256), // block hash
     Rejected(String), // reason
@@ -116,7 +116,7 @@ pub struct BundleTracker {
     pub submission_time: SystemTime,
     pub target_block: u64,
     pub transactions: Vec<H256>,
-    pub status: BundleStatus,
+    pub status: FlashbotsBundleStatus,
     pub gas_price: U256,
     pub expected_profit: U256,
     pub uuid: String,
@@ -230,7 +230,7 @@ impl FlashbotsClient {
             submission_time,
             target_block,
             transactions: tx_hashes,
-            status: BundleStatus::Pending,
+            status: FlashbotsBundleStatus::Pending,
             gas_price: transactions.get(0).map(|tx| tx.gas_price.unwrap_or_default()).unwrap_or_default(),
             expected_profit: options.expected_profit.unwrap_or_default(),
             uuid: bundle_uuid,
@@ -248,24 +248,24 @@ impl FlashbotsClient {
     }
 
     /// 번들 상태 모니터링
-    pub async fn monitor_bundle(&self, tracker: &mut BundleTracker) -> Result<BundleStatus> {
+    pub async fn monitor_bundle(&self, tracker: &mut BundleTracker) -> Result<FlashbotsBundleStatus> {
         debug!("👀 번들 상태 모니터링: {}", tracker.bundle_hash);
 
         // 타겟 블록이 지났는지 확인
         let current_block = self.provider.get_block_number().await?.as_u64();
         
         if current_block > tracker.target_block + 2 {
-            tracker.status = BundleStatus::Timeout;
-            return Ok(BundleStatus::Timeout);
+            tracker.status = FlashbotsBundleStatus::Timeout;
+            return Ok(FlashbotsBundleStatus::Timeout);
         }
 
         // 타겟 블록에 포함되었는지 확인
         if current_block >= tracker.target_block {
             match self.check_bundle_inclusion(tracker).await {
                 Ok(Some(block_hash)) => {
-                    tracker.status = BundleStatus::Included(block_hash);
+                    tracker.status = FlashbotsBundleStatus::Included(block_hash);
                     info!("🎉 번들이 블록에 포함됨: {}", block_hash);
-                    return Ok(BundleStatus::Included(block_hash));
+                    return Ok(FlashbotsBundleStatus::Included(block_hash));
                 }
                 Ok(None) => {
                     // 아직 포함되지 않음, 계속 대기

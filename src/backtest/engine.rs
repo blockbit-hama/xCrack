@@ -12,7 +12,7 @@ use crate::{
     },
     types::{OrderSide, Position, StrategyType},
 };
-use alloy::primitives::U256;
+use ethers::types::U256;
 
 use super::{
     data_provider::{HistoricalDataPoint, MockDataProvider},
@@ -494,7 +494,7 @@ impl BacktestEngine {
         price: f64
     ) -> Result<bool> {
         let state = self.simulation_state.read().unwrap();
-        let required_balance = opportunity.amount.to::<u128>() as f64 * price / 1e18; // Wei to ETH conversion
+        let required_balance = opportunity.amount.as_u128() as f64 * price / 1e18; // Wei to ETH conversion
         Ok(state.portfolio_balance > required_balance)
     }
 
@@ -632,7 +632,7 @@ pub struct CrossChainOpportunity {
     pub source_price: f64,
     pub dest_price: f64,
     pub profit_percent: f64,
-    pub amount: alloy::primitives::U256,
+    pub amount: U256,
     pub bridge_protocol: String,
     pub bridge_fee: f64,
     pub gas_fee: f64,

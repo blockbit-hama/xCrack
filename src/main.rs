@@ -37,7 +37,7 @@ use core::SearcherCore;
 use core::MonitoringManager;
 
 /// ETH 금액을 포맷팅하는 헬퍼 함수
-fn format_eth_amount(wei: alloy::primitives::U256) -> String {
+fn format_eth_amount(wei: U256) -> String {
     let eth = wei.as_limbs()[0] as f64 / 1e18;
     format!("{:.6} ETH", eth)
 }
@@ -86,8 +86,8 @@ async fn main() -> Result<()> {
                 .short('s')
                 .long("strategies")
                 .value_name("STRATEGIES")
-                .help("활성화할 전략들 (sandwich,liquidation,micro_arbitrage)")
-                .default_value("sandwich,liquidation,micro_arbitrage")
+                .help("활성화할 전략들 (sandwich,liquidation,cex_dex_arbitrage,complex_arbitrage)")
+                .default_value("sandwich,liquidation,cex_dex_arbitrage")
         )
         .get_matches();
 
@@ -228,17 +228,30 @@ async fn main() -> Result<()> {
     });
 
     // 메인 서쳐 실행
-    info!(" MEV 서쳐가 성공적으로 시작되었습니다!");
+    info!("🚀 MEV 서쳐가 성공적으로 시작되었습니다!");
+    info!("📡 API 서버가 실행 중입니다. Frontend에서 전략을 제어하세요.");
+    info!("🌐 Frontend: http://localhost:3000");
+    info!("🔧 API: http://localhost:8080");
     
-    // SearcherCore 시작
-    searcher_core.start().await?;
+    // SearcherCore 초기화만 수행 (전략은 API를 통해 제어)
+    searcher_core.initialize().await?;
     
-    // 안전 종료
-    info!("서쳐 종료 중...");
-    searcher_core.stop().await?;
-    
-    info!("서쳐가 안전하게 종료되었습니다.");
-    Ok(())
+    // 무한 대기 (API를 통한 전략 제어)
+    info!("⏳ 서버가 실행 중입니다. Ctrl+C로 종료하세요.");
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        
+        // 주기적 상태 체크
+        match searcher_core.get_status().await {
+            Ok(status) => {
+                debug!("서쳐 상태: 실행={}, 기회={}개, 번들={}개", 
+                    status.is_running, status.active_opportunities, status.submitted_bundles);
+            }
+            Err(e) => {
+                error!("상태 조회 실패: {}", e);
+            }
+        }
+    }
 }
 
 fn print_banner() {
@@ -274,6 +287,8 @@ fn apply_strategy_selection(config: &mut Config, strategies: &str) {
     // 모든 전략을 먼저 비활성화
     config.strategies.sandwich.enabled = false;
     config.strategies.liquidation.enabled = false;
+    config.strategies.cex_dex_arbitrage.enabled = false;
+    config.strategies.complex_arbitrage.enabled = false;
 
     // 선택된 전략들만 활성화
     for strategy in strategies.split(',') {
@@ -286,8 +301,13 @@ fn apply_strategy_selection(config: &mut Config, strategies: &str) {
                 config.strategies.liquidation.enabled = true;
                 info!("경쟁적 청산 전략 활성화");
             }
-            "micro_arbitrage" => {
-                info!("마이크로 아비트러지 전략 활성화");
+            "cex_dex_arbitrage" => {
+                config.strategies.cex_dex_arbitrage.enabled = true;
+                info!("CEX/DEX 아비트리지 전략 활성화");
+            }
+            "complex_arbitrage" => {
+                config.strategies.complex_arbitrage.enabled = true;
+                info!("복잡한 아비트리지 전략 활성화");
             }
             _ => {
                 warn!("알 수 없는 전략: {}", strategy);
@@ -359,9 +379,9 @@ fn create_sample_transactions() -> Vec<types::Transaction> {
             hash: "0x1111111111111111111111111111111111111111111111111111111111111111".parse().unwrap(),
             from: "0x742d35Cc65700000000000000000000000000001".parse().unwrap(),
             to: Some("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse().unwrap()), // Uniswap V2
-            value: alloy::primitives::U256::from_str_radix("5000000000000000000", 10).unwrap(), // 5 ETH
-            gas_price: alloy::primitives::U256::from(20_000_000_000u64), // 20 gwei
-            gas_limit: alloy::primitives::U256::from(300_000u64),
+            value: U256::from_str_radix("5000000000000000000", 10).unwrap(), // 5 ETH
+            gas_price: U256::from(20_000_000_000u64), // 20 gwei
+            gas_limit: U256::from(300_000u64),
             data: vec![0x7f, 0xf3, 0x6a, 0xb5], // swapExactETHForTokens
             nonce: 1,
             timestamp: chrono::Utc::now(),
@@ -373,9 +393,9 @@ fn create_sample_transactions() -> Vec<types::Transaction> {
             hash: "0x2222222222222222222222222222222222222222222222222222222222222222".parse().unwrap(),
             from: "0x742d35Cc65700000000000000000000000000002".parse().unwrap(),
             to: Some("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D".parse().unwrap()),
-            value: alloy::primitives::U256::from_str_radix("1000000000000000000", 10).unwrap(), // 1 ETH
-            gas_price: alloy::primitives::U256::from(15_000_000_000u64), // 15 gwei
-            gas_limit: alloy::primitives::U256::from(200_000u64),
+            value: U256::from_str_radix("1000000000000000000", 10).unwrap(), // 1 ETH
+            gas_price: U256::from(15_000_000_000u64), // 15 gwei
+            gas_limit: U256::from(200_000u64),
             data: vec![0x38, 0xed, 0x17, 0x39], // swapExactTokensForTokens
             nonce: 5,
             timestamp: chrono::Utc::now(),
@@ -387,9 +407,9 @@ fn create_sample_transactions() -> Vec<types::Transaction> {
             hash: "0x3333333333333333333333333333333333333333333333333333333333333333".parse().unwrap(),
             from: "0x742d35Cc65700000000000000000000000000003".parse().unwrap(),
             to: Some("0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9".parse().unwrap()), // Aave LendingPool
-            value: alloy::primitives::U256::ZERO,
-            gas_price: alloy::primitives::U256::from(50_000_000_000u64), // 50 gwei (경쟁적)
-            gas_limit: alloy::primitives::U256::from(400_000u64),
+            value: U256::zero(),
+            gas_price: U256::from(50_000_000_000u64), // 50 gwei (경쟁적)
+            gas_limit: U256::from(400_000u64),
             data: vec![0xe8, 0xed, 0xa9, 0xdf], // liquidationCall
             nonce: 10,
             timestamp: chrono::Utc::now(),
@@ -435,13 +455,13 @@ mod tests {
         assert_eq!(transactions.len(), 3);
         
         // 첫 번째 거래는 대형 ETH 스왑
-        assert_eq!(transactions[0].value, alloy::primitives::U256::from_str_radix("5000000000000000000", 10).unwrap());
+        assert_eq!(transactions[0].value, U256::from_str_radix("5000000000000000000", 10).unwrap());
         
         // 두 번째 거래는 중간 규모 스왑
-        assert_eq!(transactions[1].value, alloy::primitives::U256::from_str_radix("1000000000000000000", 10).unwrap());
+        assert_eq!(transactions[1].value, U256::from_str_radix("1000000000000000000", 10).unwrap());
         
         // 세 번째 거래는 청산 거래 (value = 0)
-        assert_eq!(transactions[2].value, alloy::primitives::U256::ZERO);
+        assert_eq!(transactions[2].value, U256::zero());
     }
 
     #[test]

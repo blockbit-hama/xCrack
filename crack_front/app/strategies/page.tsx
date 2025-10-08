@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Strategies, StrategyKey } from "@/lib/api";
-import { getStrategies, toggleStrategy, getStrategyStats } from "@/lib/api";
+import type { Strategies, StrategyKey } from "../../lib/api";
+import { getStrategies, toggleStrategy, getStrategyStats } from "../../lib/api";
 
 export default function StrategiesPage() {
   const [strategies, setStrategies] = useState<Strategies>({
@@ -71,9 +71,9 @@ export default function StrategiesPage() {
                   <a href={it.href} className="font-semibold no-underline hover:underline">{it.name}</a>
                   <div className="text-xs text-gray-500">{it.desc}</div>
                   <div className="mt-1.5 text-xs text-gray-600">
-                    {stats ? (
+                    {stats && typeof stats.success_rate === 'number' ? (
                       <span>
-                        수익률 {stats.success_rate.toFixed(1)}% · 총이익 {stats.total_profit}
+                        수익률 {stats.success_rate.toFixed(1)}% · 총이익 {stats.total_profit || '0'}
                       </span>
                     ) : (
                       <span>지표 없음</span>

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use anyhow::Result;
 use tracing::{info, debug};
-use alloy::primitives::{Address, U256};
+use ethers::types::{Address, U256};
 use ethers::{
     providers::{Provider, Ws, Middleware},
     contract::Contract,
@@ -182,8 +182,8 @@ impl ProtocolScanner for MakerScanner {
 impl MakerScanner {
     async fn is_liquidatable(&self, cdp_data: &CdpData) -> Result<bool> {
         // MakerDAO 청산 조건: 담보 비율 < 청산 비율
-        let collateral_ratio = (cdp_data.collateral.to::<u128>() as f64 * cdp_data.collateral_price) 
-                              / (cdp_data.debt.to::<u128>() as f64 / 1e18);
+        let collateral_ratio = (cdp_data.collateral.as_u128() as f64 * cdp_data.collateral_price) 
+                              / (cdp_data.debt.as_u128() as f64 / 1e18);
         
         let is_liquidatable = collateral_ratio < cdp_data.liquidation_ratio;
         
@@ -194,25 +194,25 @@ impl MakerScanner {
     }
     
     async fn build_liquidatable_user(&self, cdp_data: CdpData) -> Result<LiquidatableUser> {
-        let collateral_ratio = (cdp_data.collateral.to::<u128>() as f64 * cdp_data.collateral_price) 
-                              / (cdp_data.debt.to::<u128>() as f64 / 1e18);
+        let collateral_ratio = (cdp_data.collateral.as_u128() as f64 * cdp_data.collateral_price) 
+                              / (cdp_data.debt.as_u128() as f64 / 1e18);
         
         let health_factor = collateral_ratio / cdp_data.liquidation_ratio;
         
         // 담보 포지션
         let collateral_position = CollateralPosition {
-            asset: Address::ZERO, // TODO: 실제 담보 토큰 주소
+            asset: Address::zero(), // TODO: 실제 담보 토큰 주소
             amount: cdp_data.collateral,
-            usd_value: cdp_data.collateral.to::<u128>() as f64 * cdp_data.collateral_price / 1e18,
+            usd_value: cdp_data.collateral.as_u128() as f64 * cdp_data.collateral_price / 1e18,
             liquidation_threshold: cdp_data.liquidation_ratio,
             price_usd: cdp_data.collateral_price,
         };
         
         // 부채 포지션
         let debt_position = DebtPosition {
-            asset: Address::ZERO, // TODO: 실제 DAI 주소
+            asset: Address::zero(), // TODO: 실제 DAI 주소
             amount: cdp_data.debt,
-            usd_value: cdp_data.debt.to::<u128>() as f64 / 1e18,
+            usd_value: cdp_data.debt.as_u128() as f64 / 1e18,
             borrow_rate: 0.0, // TODO: 실제 대출 이자율
             price_usd: 1.0, // DAI = $1
         };
@@ -230,10 +230,10 @@ impl MakerScanner {
         };
         
         let mut max_liquidatable_debt = HashMap::new();
-        max_liquidatable_debt.insert(Address::ZERO, cdp_data.debt); // 전체 부채 청산 가능
+        max_liquidatable_debt.insert(Address::zero(), cdp_data.debt); // 전체 부채 청산 가능
         
         let mut liquidation_bonus = HashMap::new();
-        liquidation_bonus.insert(Address::ZERO, 0.13); // 13% 청산 보너스
+        liquidation_bonus.insert(Address::zero(), 0.13); // 13% 청산 보너스
         
         let priority_score = self.calculate_priority_score(health_factor, debt_position.usd_value);
         

@@ -10,11 +10,11 @@ use ethers::providers::{Provider, Ws};
 use crate::config::Config;
 use crate::types::{Transaction, Opportunity, StrategyType};
 use crate::mev::bundle::Bundle;
-use crate::common::Strategy;
+use crate::Strategy;
 use crate::strategies::RealTimeSandwichStrategy;
-// use crate::strategies::CompetitiveLiquidationStrategy;
-use crate::strategies::MicroArbitrageStrategy;
-use crate::strategies::CrossChainArbitrageStrategy;
+use crate::strategies::liquidation::strategy_manager::LiquidationStrategyManager;
+use crate::strategies::cex_dex_arbitrage::MicroArbitrageStrategy;
+// use crate::strategies::CrossChainArbitrageStrategy;  // 크로스체인 제거됨
 
 pub struct StrategyManager {
     config: Arc<Config>,
@@ -22,9 +22,9 @@ pub struct StrategyManager {
     strategies: Arc<RwLock<HashMap<StrategyType, Arc<dyn Strategy + Send + Sync>>>>,
     performance_stats: Arc<RwLock<HashMap<StrategyType, StrategyStats>>>,
     // Typed handle for MicroArbitrage to avoid downcasting issues
-    micro_arbitrage_strategy: Option<Arc<MicroArbitrageStrategy>>, 
-    // Typed handle for CrossChain to expose metrics safely
-    cross_chain_strategy: Option<Arc<CrossChainArbitrageStrategy>>, 
+    micro_arbitrage_strategy: Option<Arc<MicroArbitrageStrategy>>,
+    // // Typed handle for CrossChain to expose metrics safely (크로스체인 제거됨)
+    // cross_chain_strategy: Option<Arc<CrossChainArbitrageStrategy>>, 
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +40,7 @@ impl StrategyManager {
         let mut strategies = HashMap::new();
         let mut performance_stats = HashMap::new();
         let mut micro_arbitrage_strategy_typed: Option<Arc<MicroArbitrageStrategy>> = None;
-        let mut cross_chain_strategy_typed: Option<Arc<CrossChainArbitrageStrategy>> = None;
+        // let mut cross_chain_strategy_typed: Option<Arc<CrossChainArbitrageStrategy>> = None;  // 크로스체인 제거됨
         
         
         // 샌드위치 전략 초기화
@@ -67,8 +67,15 @@ impl StrategyManager {
         // 청산 전략 초기화
         if config.strategies.liquidation.enabled {
             info!("💸 청산 전략 초기화 중...");
-            // TODO: 청산 전략 초기화 구현
-            info!("✅ 청산 전략 초기화 완료");
+            match LiquidationStrategyManager::new(Arc::clone(&config), Arc::clone(&provider)).await {
+                Ok(liquidation_strategy) => {
+                    strategies.insert(StrategyType::Liquidation, Arc::new(liquidation_strategy) as Arc<dyn Strategy + Send + Sync>);
+                    info!("✅ 청산 전략 초기화 완료");
+                }
+                Err(e) => {
+                    error!("❌ 청산 전략 초기화 실패: {}", e);
+                }
+            }
             
             performance_stats.insert(StrategyType::Liquidation, StrategyStats {
                 transactions_analyzed: 0,
@@ -78,22 +85,22 @@ impl StrategyManager {
             });
         }
 
-        // 마이크로 아비트래지 전략 초기화
-        if config.strategies.micro_arbitrage.enabled {
-            info!("⚡ 마이크로아비트래지 전략 초기화 중...");
+        // CEX/DEX 아비트리지 전략 초기화
+        if config.strategies.cex_dex_arbitrage.enabled {
+            info!("⚡ CEX/DEX 아비트리지 전략 초기화 중...");
             match MicroArbitrageStrategy::new(Arc::clone(&config), Arc::clone(&provider)).await {
-                Ok(micro_arbitrage_strategy) => {
-                    let arc_strategy = Arc::new(micro_arbitrage_strategy);
-                    strategies.insert(StrategyType::MicroArbitrage, arc_strategy.clone() as Arc<dyn Strategy + Send + Sync>);
+                Ok(cex_dex_arbitrage_strategy) => {
+                    let arc_strategy = Arc::new(cex_dex_arbitrage_strategy);
+                    strategies.insert(StrategyType::CexDexArbitrage, arc_strategy.clone() as Arc<dyn Strategy + Send + Sync>);
                     micro_arbitrage_strategy_typed = Some(arc_strategy);
-                    info!("✅ 마이크로아비트래지 전략 초기화 완료");
+                    info!("✅ CEX/DEX 아비트리지 전략 초기화 완료");
                 }
                 Err(e) => {
-                    error!("❌ 마이크로아비트래지 전략 초기화 실패: {}", e);
+                    error!("❌ CEX/DEX 아비트리지 전략 초기화 실패: {}", e);
                 }
             }
             
-            performance_stats.insert(StrategyType::MicroArbitrage, StrategyStats {
+            performance_stats.insert(StrategyType::CexDexArbitrage, StrategyStats {
                 transactions_analyzed: 0,
                 opportunities_found: 0,
                 avg_analysis_time_ms: 0.0,
@@ -101,20 +108,20 @@ impl StrategyManager {
             });
         }
 
-        // 크로스체인 아비트래지 전략 초기화
-        if config.strategies.cross_chain_arbitrage.enabled {
-            info!("🌉 크로스체인 아비트래지 전략 초기화 중...");
-            let cross_strategy = Arc::new(CrossChainArbitrageStrategy::new(Arc::clone(&config)));
-            strategies.insert(StrategyType::CrossChainArbitrage, cross_strategy.clone() as Arc<dyn Strategy + Send + Sync>);
-            cross_chain_strategy_typed = Some(cross_strategy);
-            performance_stats.insert(StrategyType::CrossChainArbitrage, StrategyStats {
-                transactions_analyzed: 0,
-                opportunities_found: 0,
-                avg_analysis_time_ms: 0.0,
-                last_analysis_time: None,
-            });
-            info!("✅ 크로스체인 아비트래지 전략 초기화 완료");
-        }
+        // // 크로스체인 아비트래지 전략 초기화 (제거됨)
+        // if config.strategies.cross_chain_arbitrage.enabled {
+        //     info!("🌉 크로스체인 아비트래지 전략 초기화 중...");
+        //     let cross_strategy = Arc::new(CrossChainArbitrageStrategy::new(Arc::clone(&config)));
+        //     strategies.insert(StrategyType::CrossChainArbitrage, cross_strategy.clone() as Arc<dyn Strategy + Send + Sync>);
+        //     cross_chain_strategy_typed = Some(cross_strategy);
+        //     performance_stats.insert(StrategyType::CrossChainArbitrage, StrategyStats {
+        //         transactions_analyzed: 0,
+        //         opportunities_found: 0,
+        //         avg_analysis_time_ms: 0.0,
+        //         last_analysis_time: None,
+        //     });
+        //     info!("✅ 크로스체인 아비트래지 전략 초기화 완료");
+        // }
         
         info!("📊 총 {}개 전략 초기화됨", strategies.len());
         
@@ -124,7 +131,7 @@ impl StrategyManager {
             strategies: Arc::new(RwLock::new(strategies)),
             performance_stats: Arc::new(RwLock::new(performance_stats)),
             micro_arbitrage_strategy: micro_arbitrage_strategy_typed,
-            cross_chain_strategy: cross_chain_strategy_typed,
+            // cross_chain_strategy: cross_chain_strategy_typed,  // 크로스체인 제거됨
         })
     }
 
@@ -297,6 +304,64 @@ impl StrategyManager {
         Ok(())
     }
 
+    /// 개별 전략 시작
+    pub async fn start_strategy(&self, strategy_type: StrategyType) -> Result<()> {
+        info!("🚀 {} 전략 시작 중...", strategy_type);
+        
+        // 동적 설정 적용
+        let strategy_name = match strategy_type {
+            StrategyType::Liquidation => "liquidation",
+            StrategyType::CexDexArbitrage => "cex_dex_arbitrage", 
+            StrategyType::ComplexArbitrage => "complex_arbitrage",
+            StrategyType::Sandwich => "sandwich",
+        };
+        
+        if let Some(dynamic_config) = self.config.get_strategy_config(strategy_name).await {
+            info!("📝 {} 전략에 동적 설정 적용: {:?}", strategy_type, dynamic_config);
+            // TODO: 실제 전략에 동적 설정 적용 로직 구현
+        }
+        
+        let strategies = self.strategies.read().await;
+        
+        if let Some(strategy) = strategies.get(&strategy_type) {
+            if strategy.is_enabled() {
+                strategy.start().await?;
+                info!("✅ {} 전략 시작 완료", strategy_type);
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("{} 전략이 비활성화되어 있습니다", strategy_type))
+            }
+        } else {
+            Err(anyhow::anyhow!("{} 전략을 찾을 수 없습니다", strategy_type))
+        }
+    }
+
+    /// 개별 전략 중지
+    pub async fn stop_strategy(&self, strategy_type: StrategyType) -> Result<()> {
+        info!("🛑 {} 전략 중지 중...", strategy_type);
+        
+        let strategies = self.strategies.read().await;
+        
+        if let Some(strategy) = strategies.get(&strategy_type) {
+            strategy.stop().await?;
+            info!("✅ {} 전략 중지 완료", strategy_type);
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("{} 전략을 찾을 수 없습니다", strategy_type))
+        }
+    }
+
+    /// 전략 상태 조회
+    pub async fn get_strategy_status(&self, strategy_type: StrategyType) -> Result<bool> {
+        let strategies = self.strategies.read().await;
+        
+        if let Some(strategy) = strategies.get(&strategy_type) {
+            Ok(strategy.is_enabled())
+        } else {
+            Err(anyhow::anyhow!("{} 전략을 찾을 수 없습니다", strategy_type))
+        }
+    }
+
     /// 모든 전략 중지
     pub async fn stop_all_strategies(&self) -> Result<()> {
         info!("⏹️ 모든 전략 중지 중...");
@@ -344,10 +409,10 @@ impl StrategyManager {
         self.micro_arbitrage_strategy.clone()
     }
 
-    /// Get typed CrossChainArbitrageStrategy handle (if initialized)
-    pub fn get_cross_chain_strategy(&self) -> Option<Arc<CrossChainArbitrageStrategy>> {
-        self.cross_chain_strategy.clone()
-    }
+    // /// Get typed CrossChainArbitrageStrategy handle (if initialized) (크로스체인 제거됨)
+    // pub fn get_cross_chain_strategy(&self) -> Option<Arc<CrossChainArbitrageStrategy>> {
+    //     self.cross_chain_strategy.clone()
+    // }
 }
 
 impl std::fmt::Debug for StrategyManager {

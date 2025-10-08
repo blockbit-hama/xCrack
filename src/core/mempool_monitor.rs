@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::time::{Instant, Duration};
 use ethers::providers::{Provider, Ws, Middleware};
 use ethers::types::H256;
-use alloy::primitives::Address;
+use ethers::types::Address;
 
 use crate::config::Config;
 use crate::types::Transaction;
@@ -157,7 +157,7 @@ impl CoreMempoolMonitor {
         
         // 캐시에 저장
         let mut cache = self.transaction_cache.write().await;
-        let tx_hash_h256 = H256::from_slice(tx.hash.as_slice());
+        let tx_hash_h256 = H256::from_slice(tx.hash.as_bytes());
         cache.insert(tx_hash_h256, tx.clone());
         
         // 트랜잭션 전송
@@ -183,13 +183,13 @@ impl CoreMempoolMonitor {
     async fn should_process_transaction(&self, tx: &Transaction) -> Result<bool> {
         // 최소 가스 가격 필터
         let min_gas_price = self.config.performance.mempool_filter_min_gas_price.parse::<u64>().unwrap_or(10);
-        if tx.gas_price.to::<u64>() < min_gas_price * 1_000_000_000 {
+        if tx.gas_price.as_u64() < min_gas_price * 1_000_000_000 {
             return Ok(false);
         }
         
         // 최소 가치 필터
         let min_value = self.config.performance.mempool_filter_min_value.parse::<u64>().unwrap_or(0);
-        if tx.value.as_limbs()[0] < min_value as u64 * 1_000_000_000_000_000_000 {
+        if tx.value.0[0] < min_value as u64 * 1_000_000_000_000_000_000 {
             return Ok(false);
         }
         
@@ -200,7 +200,7 @@ impl CoreMempoolMonitor {
         
         // 중복 트랜잭션 확인
         let cache = self.transaction_cache.read().await;
-        let tx_hash_h256 = H256::from_slice(tx.hash.as_slice());
+        let tx_hash_h256 = H256::from_slice(tx.hash.as_bytes());
         if cache.contains_key(&tx_hash_h256) {
             return Ok(false);
         }
@@ -342,26 +342,26 @@ impl TransactionSearchCriteria {
     pub fn matches(&self, tx: &Transaction) -> bool {
         // 가치 범위 확인
         if let Some(min_value) = self.min_value {
-            if tx.value.to::<u128>() < min_value {
+            if tx.value.as_u128() < min_value {
                 return false;
             }
         }
         
         if let Some(max_value) = self.max_value {
-            if tx.value.to::<u128>() > max_value {
+            if tx.value.as_u128() > max_value {
                 return false;
             }
         }
         
         // 가스 가격 범위 확인
         if let Some(min_gas_price) = self.min_gas_price {
-            if tx.gas_price.to::<u64>() < min_gas_price {
+            if tx.gas_price.as_u64() < min_gas_price {
                 return false;
             }
         }
         
         if let Some(max_gas_price) = self.max_gas_price {
-            if tx.gas_price.to::<u64>() > max_gas_price {
+            if tx.gas_price.as_u64() > max_gas_price {
                 return false;
             }
         }
@@ -404,7 +404,6 @@ impl std::fmt::Debug for CoreMempoolMonitor {
 mod tests {
     use super::*;
     // use ethers::types::{H256, H160, U256};
-    use alloy::primitives::{Address, B256};
     use chrono::Utc;
 
     #[tokio::test]
@@ -416,12 +415,12 @@ mod tests {
         
         // 매칭되는 트랜잭션
         let matching_tx = Transaction {
-            hash: B256::ZERO,
-            from: Address::ZERO,
-            to: Some(Address::ZERO),
-            value: alloy::primitives::U256::from(2000000000000000000u128), // 2 ETH
-            gas_price: alloy::primitives::U256::from(20_000_000_000u64), // 20 gwei
-            gas_limit: alloy::primitives::U256::from(200_000u64),
+            hash: H256::zero(),
+            from: Address::zero(),
+            to: Some(Address::zero()),
+            value: U256::from(2000000000000000000u128), // 2 ETH
+            gas_price: U256::from(20_000_000_000u64), // 20 gwei
+            gas_limit: U256::from(200_000u64),
             data: vec![0x7f, 0xf3, 0x6a, 0xb5, 0x00, 0x00, 0x00, 0x00],
             nonce: 0,
             timestamp: Utc::now(),
@@ -432,12 +431,12 @@ mod tests {
         
         // 매칭되지 않는 트랜잭션 (가치가 너무 낮음)
         let non_matching_tx = Transaction {
-            hash: B256::ZERO,
-            from: Address::ZERO,
-            to: Some(Address::ZERO),
-            value: alloy::primitives::U256::from(500000000000000000u128), // 0.5 ETH
-            gas_price: alloy::primitives::U256::from(20_000_000_000u64),
-            gas_limit: alloy::primitives::U256::from(200_000u64),
+            hash: H256::zero(),
+            from: Address::zero(),
+            to: Some(Address::zero()),
+            value: U256::from(500000000000000000u128), // 0.5 ETH
+            gas_price: U256::from(20_000_000_000u64),
+            gas_limit: U256::from(200_000u64),
             data: vec![0x7f, 0xf3, 0x6a, 0xb5, 0x00, 0x00, 0x00, 0x00],
             nonce: 0,
             timestamp: Utc::now(),

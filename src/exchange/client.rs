@@ -6,7 +6,7 @@ use reqwest::{Client, header::HeaderMap};
 use serde::Deserialize;
 use tokio::sync::RwLock;
 use tracing::info;
-use alloy::primitives::U256;
+use ethers::types::U256;
 use rust_decimal::Decimal;
 use std::time::{Duration, Instant};
 
@@ -185,7 +185,7 @@ impl ExchangeClient for BinanceClient {
         params.insert("side".to_string(), "BUY".to_string());
         params.insert("type".to_string(), "LIMIT".to_string());
         params.insert("timeInForce".to_string(), "GTC".to_string());
-        params.insert("quantity".to_string(), format!("{}", amount.to::<u128>() as f64 / 1e18));
+        params.insert("quantity".to_string(), format!("{}", amount.as_u128() as f64 / 1e18));
         params.insert("price".to_string(), price.to_string());
 
         #[derive(Deserialize)]
@@ -211,7 +211,7 @@ impl ExchangeClient for BinanceClient {
         params.insert("side".to_string(), "SELL".to_string());
         params.insert("type".to_string(), "LIMIT".to_string());
         params.insert("timeInForce".to_string(), "GTC".to_string());
-        params.insert("quantity".to_string(), format!("{}", amount.to::<u128>() as f64 / 1e18));
+        params.insert("quantity".to_string(), format!("{}", amount.as_u128() as f64 / 1e18));
         params.insert("price".to_string(), price.to_string());
 
         #[derive(Deserialize)]
@@ -463,7 +463,7 @@ impl ExchangeClient for CoinbaseClient {
         }
 
         let body = serde_json::json!({
-            "size": format!("{}", amount.to::<u128>() as f64 / 1e18),
+            "size": format!("{}", amount.as_u128() as f64 / 1e18),
             "price": price.to_string(),
             "side": "buy",
             "product_id": symbol.to_uppercase().replace("USDT", "-USD"),
@@ -487,7 +487,7 @@ impl ExchangeClient for CoinbaseClient {
         }
 
         let body = serde_json::json!({
-            "size": format!("{}", amount.to::<u128>() as f64 / 1e18),
+            "size": format!("{}", amount.as_u128() as f64 / 1e18),
             "price": price.to_string(),
             "side": "sell",
             "product_id": symbol.to_uppercase().replace("USDT", "-USD"),

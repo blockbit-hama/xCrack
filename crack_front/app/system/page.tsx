@@ -1,4 +1,4 @@
-import { getSystemInfo } from '@/lib/api'
+import { getSystemInfo } from '../../lib/api'
 
 export const dynamic = 'force-dynamic'
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getStrategyParams, updateStrategyParams, type StrategyParamsResp } from '@/lib/api';
+import { getStrategyParams, updateStrategyParams, type StrategyParamsResp } from '../../lib/api';
 
 type StrategyState = Record<string, boolean>;
 

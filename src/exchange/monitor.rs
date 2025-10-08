@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 use crate::config::{Config, ExchangeConfig, ExchangeType};
 use crate::types::{PriceData, OrderBookSnapshot, OrderBookLevel};
-use alloy::primitives::U256;
+use ethers::types::U256;
 
 #[derive(Debug, Deserialize)]
 struct BinanceBookTicker {

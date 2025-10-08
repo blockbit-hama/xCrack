@@ -205,8 +205,8 @@ impl BlockchainClient {
         let mut priority_fees = Vec::new();
         
         for block in recent_blocks {
-            if let Some(transactions) = block.transactions {
-                for tx in transactions {
+            for tx_hash in &block.transactions {
+                if let Ok(Some(tx)) = self.http_provider.get_transaction(*tx_hash).await {
                     if let Some(priority_fee) = self.extract_priority_fee(&tx).await? {
                         priority_fees.push(priority_fee);
                     }
@@ -437,7 +437,9 @@ impl BlockchainClient {
     
     /// 가스 추정
     pub async fn estimate_gas(&self, tx: &TransactionRequest) -> Result<U256> {
-        let gas_estimate = self.http_provider.estimate_gas(tx, None).await?;
+        use ethers::types::transaction::eip2718::TypedTransaction;
+        let typed_tx: TypedTransaction = tx.clone().into();
+        let gas_estimate = self.http_provider.estimate_gas(&typed_tx, None).await?;
         debug!("가스 추정: {} gas", gas_estimate);
         Ok(gas_estimate)
     }

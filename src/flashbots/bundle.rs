@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use alloy::primitives::{Address, U256, TxHash};
+use ethers::types::{Address, U256, H256};
 
 use crate::types::Transaction;
 
@@ -37,7 +37,7 @@ pub struct FlashbotsBundle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BundleTransaction {
     /// 트랜잭션 해시 (서명 후)
-    pub hash: TxHash,
+    pub hash: H256,
     
     /// 발신자 주소
     pub from: Address,
@@ -156,7 +156,7 @@ pub struct BundleSimulation {
 #[derive(Debug, Clone)]
 pub struct TransactionResult {
     /// 트랜잭션 해시
-    pub hash: TxHash,
+    pub hash: H256,
     
     /// 실행 성공 여부
     pub success: bool,
@@ -187,9 +187,9 @@ impl FlashbotsBundle {
             id,
             transactions: Vec::new(),
             target_block,
-            expected_profit: U256::ZERO,
+            expected_profit: U256::zero(),
             total_gas_estimate: 0,
-            priority_tip: U256::ZERO,
+            priority_tip: U256::zero(),
             bundle_type,
             metadata: BundleMetadata {
                 created_at: chrono::Utc::now(),
@@ -390,8 +390,8 @@ impl FlashbotsBundle {
             victim_count: victims,
             back_run_count: back_runs,
             estimated_gas: self.total_gas_estimate,
-            expected_profit_eth: format!("{:.6}", self.expected_profit.to::<u128>() as f64 / 1e18),
-            priority_tip_eth: format!("{:.6}", self.priority_tip.to::<u128>() as f64 / 1e18),
+            expected_profit_eth: format!("{:.6}", self.expected_profit.as_u128() as f64 / 1e18),
+            priority_tip_eth: format!("{:.6}", self.priority_tip.as_u128() as f64 / 1e18),
         }
     }
 }
@@ -471,14 +471,14 @@ pub struct BundleStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy::primitives::Address;
+    use ethers::types::Address;
     
     #[test]
     fn test_sandwich_bundle_creation() {
         let front_run = Transaction {
-            hash: alloy::primitives::B256::ZERO,
-            from: Address::ZERO,
-            to: Some(Address::ZERO),
+            hash: H256::zero(),
+            from: Address::zero(),
+            to: Some(Address::zero()),
             value: U256::from_str_radix("1000000000000000000", 10).unwrap(), // 1 ETH
             gas_price: U256::from(20_000_000_000u64), // 20 gwei
             gas_limit: U256::from(300_000u64),
@@ -518,9 +518,9 @@ mod tests {
         
         // 트랜잭션 추가
         bundle.add_transaction(BundleTransaction {
-            hash: alloy::primitives::B256::ZERO,
-            from: Address::ZERO,
-            to: Some(Address::ZERO),
+            hash: H256::zero(),
+            from: Address::zero(),
+            to: Some(Address::zero()),
             value: U256::from(1000000000000000000u64),
             gas_price: U256::from(20_000_000_000u64),
             gas_limit: 300_000,

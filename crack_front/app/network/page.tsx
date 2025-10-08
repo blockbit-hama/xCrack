@@ -5,7 +5,7 @@ import {
   getNetworkHealth,
   runLatencyTest,
   type NetworkHealthDashboard
-} from '@/lib/api';
+} from '../../lib/api';
 
 export default function NetworkHealthPage() {
   const [health, setHealth] = useState<NetworkHealthDashboard | null>(null);
@@ -83,15 +83,15 @@ export default function NetworkHealthPage() {
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">레이턴시</h3>
-            <p className="text-2xl font-bold">{health.latency}ms</p>
+            <p className="text-2xl font-bold">{typeof health.latency === 'number' ? `${health.latency}ms` : 'N/A'}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">가동시간</h3>
-            <p className="text-2xl font-bold">{health.uptime.toFixed(2)}%</p>
+            <p className="text-2xl font-bold">{typeof health.uptime === 'number' ? `${health.uptime.toFixed(2)}%` : 'N/A'}</p>
           </div>
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
             <h3 className="text-sm font-medium text-gray-500">마지막 체크</h3>
-            <p className="text-sm">{new Date(health.last_check).toLocaleString('ko-KR')}</p>
+            <p className="text-sm">{health.last_check ? new Date(health.last_check).toLocaleString('ko-KR') : 'N/A'}</p>
           </div>
         </div>
       )}
